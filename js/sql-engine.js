@@ -35,13 +35,6 @@
     if (String(rel.fromTable).toUpperCase() === String(relatedTable).toUpperCase()) return { related: { table: rel.fromTable, column: rel.fromColumn }, base: { table: rel.toTable, column: rel.toColumn } };
     return { related: { table: rel.toTable, column: rel.toColumn }, base: { table: rel.fromTable, column: rel.fromColumn } };
   }
-  /**
-   * V10.6: columns may now carry a `.aggregate` field ('COUNT'/'SUM'/
-   * 'AVG'/'MIN'/'MAX'), producing e.g. `COUNT(*)` or `SUM(TABLE.COLUMN)`
-   * optionally wrapped with DISTINCT and/or an alias. This is fully
-   * additive: any column WITHOUT `.aggregate` resolves exactly as it did
-   * in every prior version (decode CASE, or plain `table.column [AS x]`).
-   */
   function resolveColumnDisplay(engine, decodeStore, col, dialect) {
     if (col.aggregate) {
       var target = (col.column === '*' || !col.column) ? '*' : (col.table + '.' + col.column);

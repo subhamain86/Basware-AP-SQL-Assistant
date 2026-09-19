@@ -24,6 +24,8 @@ global.assertFalse = function (value, msg) { if (value) throw new Error(msg || '
 global.assertIncludes = function (haystack, needle, msg) { if (String(haystack).indexOf(needle) === -1) throw new Error((msg ? msg + ' — ' : '') + 'expected to find "' + needle + '" in: ' + haystack); };
 global.assertThrows = function (fn, msg) { var threw = false; try { fn(); } catch (e) { threw = true; } if (!threw) throw new Error(msg || 'expected function to throw'); };
 
+if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webcrypto;
+
 var files = fs.readdirSync(__dirname).filter(function (f) { return f.endsWith('.test.js'); }).sort();
 files.forEach(function (f) { console.log('\n' + f); require(path.join(__dirname, f)); });
 

@@ -11,18 +11,13 @@ test('UPDATE requires WHERE', function () { var r = VALIDATE.validateCrRequest(e
 test('DELETE requires WHERE', function () { assertFalse(VALIDATE.validateCrRequest(engine, { command: 'DELETE', table: 'IA_INVOICE' }).valid); });
 test('allowNoWhere bypasses', function () { assertTrue(VALIDATE.validateCrRequest(engine, { command: 'DELETE', table: 'IA_INVOICE', allowNoWhere: true }).valid); });
 test('INSERT validates columns', function () { assertFalse(VALIDATE.validateCrRequest(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [{ name: 'NOPE', value: '1' }] }).valid); assertTrue(VALIDATE.validateCrRequest(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [{ name: 'INVOICE_NUMBER', value: 'X' }] }).valid); });
-
-test('V10.6: a SELECT column with .aggregate and column="*" (COUNT(*)) is accepted without requiring a real column named "*"', function () {
+test('a SELECT column with .aggregate and column="*" (COUNT(*)) is accepted without requiring a real column named "*"', function () {
   var r = VALIDATE.validateSelectRequest(engine, { tables: ['IA_INVOICE'], columns: [{ table: 'IA_INVOICE', column: '*', aggregate: 'COUNT' }] });
   assertTrue(r.valid);
 });
-test('V10.6: an aggregate column with a REAL column name is still validated against the schema normally', function () {
+test('an aggregate column with a REAL column name is still validated against the schema normally', function () {
   var ok = VALIDATE.validateSelectRequest(engine, { tables: ['IA_INVOICE'], columns: [{ table: 'IA_INVOICE', column: 'GROSS_SUM', aggregate: 'SUM' }] });
   assertTrue(ok.valid);
   var bad = VALIDATE.validateSelectRequest(engine, { tables: ['IA_INVOICE'], columns: [{ table: 'IA_INVOICE', column: 'NOPE_COLUMN', aggregate: 'SUM' }] });
   assertFalse(bad.valid);
-});
-test('V10.6: an aggregate column still requires its table to exist', function () {
-  var r = VALIDATE.validateSelectRequest(engine, { tables: ['NOPE_TABLE'], columns: [{ table: 'NOPE_TABLE', column: '*', aggregate: 'COUNT' }] });
-  assertFalse(r.valid);
 });

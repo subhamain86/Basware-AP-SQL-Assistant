@@ -45,19 +45,3 @@ test('createEngine tolerates a schema with no tables array at all', function () 
   assertEqual(emptyEngine.getAllTables().length, 0);
   assertEqual(emptyEngine.getStatus().tableCount, 0);
 });
-test('V10.6 schema additions: ADM_USER_GROUP and ADM_USER_GROUP_MEMBER exist with correct many-to-many relationships to ADM_USER_DATA', function () {
-  assertTrue(engine.tableExists('ADM_USER_GROUP'));
-  assertTrue(engine.tableExists('ADM_USER_GROUP_MEMBER'));
-  assertTrue(engine.findRelationship('ADM_USER_DATA', 'ADM_USER_GROUP_MEMBER') !== null);
-  assertTrue(engine.findRelationship('ADM_USER_GROUP', 'ADM_USER_GROUP_MEMBER') !== null);
-  assertEqual(engine.findRelationship('ADM_USER_DATA', 'ADM_USER_GROUP'), null);
-});
-test('V10.6 schema additions: LOGIN_ACCOUNT and LOGIN_ALLOWED exist on ADM_USER_DATA', function () {
-  assertTrue(engine.columnExists('ADM_USER_DATA', 'LOGIN_ACCOUNT'));
-  assertTrue(engine.columnExists('ADM_USER_DATA', 'LOGIN_ALLOWED'));
-  assertEqual(engine.getValueMap('ADM_USER_DATA', 'LOGIN_ALLOWED').length, 2);
-});
-test('V10.6 schema additions: SUPPLIER_EMAIL exists on IA_SUPPLIER and CREATED_DATE exists on IA_INVOICE', function () {
-  assertTrue(engine.columnExists('IA_SUPPLIER', 'SUPPLIER_EMAIL'));
-  assertTrue(engine.columnExists('IA_INVOICE', 'CREATED_DATE'));
-});

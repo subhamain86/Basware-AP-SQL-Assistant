@@ -15,7 +15,7 @@ test('UPDATE allowed with allowNoWhere', function () { assertEqual(CR.buildCrQue
 test('DELETE rejected without WHERE', function () { var r = CR.buildCrQuery(engine, { command: 'DELETE', table: 'IA_INVOICE' }, 'Generic'); assertEqual(r.status, 'rejected'); assertTrue(r.requiresWhereConfirmation); });
 test('DELETE exact shape with WHERE', function () { var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'eq', value: '123' })] }; var r = CR.buildCrQuery(engine, { command: 'DELETE', table: 'IA_INVOICE', filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'DELETE FROM IA_INVOICE'); assertIncludes(r.sql, 'INVOICE_ID = 123'); });
 test('SELECT preview marked isPreview', function () { var fg = { conditions: [FILTER.newCondition({ column: 'STATUS', operator: 'eq', value: '40' })] }; var r = CR.buildCrQuery(engine, { command: 'SELECT', table: 'IA_INVOICE', filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertTrue(r.isPreview); });
-test('V10.5: UPDATE with an "is one of" WHERE clause produces a real IN (...) via CR builder too', function () {
+test('UPDATE with an "is one of" WHERE clause produces a real IN (...) via CR builder too', function () {
   var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'in', value: '100, 101, 102' })] };
   var r = CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '90' }], filterGroup: fg }, 'Generic');
   assertEqual(r.status, 'ok');

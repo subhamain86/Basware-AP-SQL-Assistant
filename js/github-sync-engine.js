@@ -139,8 +139,38 @@
       if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));
       if (res.status === 403) return Promise.reject(new Error('GitHub denied this delete (403 Forbidden). The token may be missing the required Contents: Read and write permission.'));
       if (res.status === 422) return Promise.reject(new Error('GitHub rejected this delete (422) \u2014 the repository, branch, or file path may not be valid.'));
-      if (res.status !== 200) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while deleting the schema file.'));
+      if (res.status !== 200) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while deleting the shared schema file.'));
       return { deleted: true };
+    }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
+  }
+
+  /**
+   * fetchRawJsonFile(config, fetchImpl) — V10.7. Like fetchRemoteSchema,
+   * but WITHOUT the "must look like an AP-SQL Assistant schema" (i.e.
+   * must have a `.tables` array) validation. This is used for
+   * non-schema JSON files stored in the same repository via the same
+   * Contents API — specifically, the encrypted credential vault blob,
+   * whose shape (`{ type, v, salt, iv, ciphertext }`) is intentionally
+   * quite different from a schema file and would always fail
+   * fetchRemoteSchema's schema-shape check.
+   */
+  function fetchRawJsonFile(config, fetchImpl) {
+    fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
+    if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, file path, and a Personal Access Token are all required).'));
+    return fetchImpl(buildContentsUrl(config), { headers: authHeaders(config) }).then(function (res) {
+      if (res.status === 404) return { exists: false };
+      if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.'));
+      if (res.status === 403) return Promise.reject(new Error('GitHub denied access to this repository (403 Forbidden). The token may be missing the required Contents permission, or you may have hit a rate limit.'));
+      if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the file.'));
+      return res.json().then(function (body) {
+        if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific file.'));
+        var decoded;
+        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked file.')); }
+        var parsed;
+        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked file does not contain valid JSON.')); }
+        return { exists: true, content: parsed, sha: body.sha };
+      });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
 
@@ -158,6 +188,7 @@
     createConfigStore: createConfigStore, isConfigComplete: isConfigComplete, normalizeBranch: normalizeBranch,
     buildContentsUrl: buildContentsUrl, buildContentsWriteUrl: buildContentsWriteUrl,
     fetchRemoteSchema: fetchRemoteSchema, pushSchemaToGitHub: pushSchemaToGitHub, deleteRemoteFile: deleteRemoteFile,
+    fetchRawJsonFile: fetchRawJsonFile,
     describeGitHubSyncStatus: describeGitHubSyncStatus
   };
   if (typeof module === 'object' && module.exports) module.exports = API;

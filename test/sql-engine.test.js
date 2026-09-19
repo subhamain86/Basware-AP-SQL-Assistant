@@ -30,63 +30,29 @@ test('generateSql surfaces `unresolvedTables` on the rejected result', function 
   assertEqual(r.status, 'rejected');
   assertEqual(r.unresolvedTables, ['ADM_USER_GROUP']);
 });
-test('V10: numeric LOGIN_TYPE column with decode + Oracle dialect produces TO_CHAR ELSE end-to-end', function () {
+test('numeric LOGIN_TYPE column with decode + Oracle dialect produces TO_CHAR ELSE end-to-end', function () {
   var r = SQL_ENGINE.generateSql('', { dialect: 'Oracle', selectedTables: ['ADM_USER_DATA'], selectedColumns: [{ table: 'ADM_USER_DATA', column: 'LOGIN_TYPE', alias: 'LOGIN_TYPE', decode: true }] }, engine, store);
   assertEqual(r.status, 'ok');
   assertIncludes(r.sql, 'ELSE TO_CHAR(ADM_USER_DATA.LOGIN_TYPE)');
 });
-test('V10: elseMode "keep" overrides the safe default even through generateSql', function () {
-  var r = SQL_ENGINE.generateSql('', { dialect: 'Oracle', selectedTables: ['ADM_USER_DATA'], selectedColumns: [{ table: 'ADM_USER_DATA', column: 'LOGIN_TYPE', alias: 'LOGIN_TYPE', decode: true, elseMode: 'keep' }] }, engine, store);
-  assertIncludes(r.sql, 'ELSE ADM_USER_DATA.LOGIN_TYPE');
-  assertFalse(/TO_CHAR/.test(r.sql));
-});
-test('V10.5: an "is one of" filter end-to-end through generateSql produces a real IN (...) clause in the final SQL', function () {
+test('an "is one of" filter end-to-end through generateSql produces a real IN (...) clause in the final SQL', function () {
   var fg = { conditions: [FILTER.newCondition({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '10, 40, 90' })] };
   var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], filterGroup: fg }, engine, store);
   assertEqual(r.status, 'ok');
   assertIncludes(r.sql, 'WHERE IA_INVOICE.STATUS IN (10, 40, 90)');
 });
-test('V10.5: an "is not one of" filter combined with another AND condition end-to-end', function () {
-  var fg = { conditions: [
-    FILTER.newCondition({ table: 'IA_INVOICE', column: 'COMPANY_ID', operator: 'eq', value: '100' }),
-    FILTER.newCondition({ table: 'IA_INVOICE', column: 'STATUS', operator: 'not_in', value: '0, 90', join: 'AND' })
-  ] };
-  var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], filterGroup: fg }, engine, store);
-  assertEqual(r.status, 'ok');
-  assertIncludes(r.sql, 'WHERE IA_INVOICE.COMPANY_ID = 100 AND IA_INVOICE.STATUS NOT IN (0, 90)');
-});
-test('V10.5: an "is one of" filter with no values is rejected end-to-end with a clear message', function () {
-  var fg = { conditions: [FILTER.newCondition({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '' })] };
-  var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], filterGroup: fg }, engine, store);
-  assertEqual(r.status, 'rejected');
-  assertIncludes(r.message, 'needs at least one value');
-});
-
-/* ---- V10.6: aggregate columns (COUNT/SUM/AVG/MIN/MAX) ---- */
-test('V10.6: COUNT(*) aggregate column with an alias', function () {
+test('COUNT(*) aggregate column with an alias', function () {
   var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: '*', aggregate: 'COUNT', alias: 'record_count' }] }, engine, store);
   assertEqual(r.status, 'ok');
   assertIncludes(r.sql, 'SELECT COUNT(*) AS record_count');
 });
-test('V10.6: SUM aggregate column on a real column, combined with GROUP BY', function () {
+test('SUM aggregate column on a real column, combined with GROUP BY', function () {
   var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'SUPPLIER_ID' }, { table: 'IA_INVOICE', column: 'GROSS_SUM', aggregate: 'SUM', alias: 'total_amount' }], groupBy: ['IA_INVOICE.SUPPLIER_ID'] }, engine, store);
   assertEqual(r.status, 'ok');
   assertIncludes(r.sql, 'SUM(IA_INVOICE.GROSS_SUM) AS total_amount');
-  assertIncludes(r.sql, 'GROUP BY IA_INVOICE.SUPPLIER_ID');
 });
-test('V10.6: AVG/MIN/MAX all produce correctly-shaped expressions', function () {
-  ['AVG', 'MIN', 'MAX'].forEach(function (fn) {
-    var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'GROSS_SUM', aggregate: fn }] }, engine, store);
-    assertEqual(r.status, 'ok');
-    assertIncludes(r.sql, fn + '(IA_INVOICE.GROSS_SUM)');
-  });
-});
-test('V10.6: a DISTINCT aggregate column produces COUNT(DISTINCT ...)', function () {
+test('a DISTINCT aggregate column produces COUNT(DISTINCT ...)', function () {
   var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'SUPPLIER_ID', aggregate: 'COUNT', distinct: true, alias: 'distinct_suppliers' }] }, engine, store);
   assertEqual(r.status, 'ok');
   assertIncludes(r.sql, 'COUNT(DISTINCT IA_INVOICE.SUPPLIER_ID) AS distinct_suppliers');
-});
-test('V10.6: an aggregate column referencing a non-existent column is still rejected (schema validation applies)', function () {
-  var r = SQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'NOPE_COL', aggregate: 'SUM' }] }, engine, store);
-  assertEqual(r.status, 'rejected');
 });

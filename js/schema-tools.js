@@ -192,7 +192,7 @@
     var removedTables = Object.keys(currentByName).filter(function (n) { return !incomingByName[n]; });
     return { currentModuleCount: new Set(currentSchema.tables.map(function (t) { return t.module; })).size, currentTableCount: currentSchema.tables.length, currentColumnCount: currentSchema.tables.reduce(function (s, t) { return s + t.columns.length; }, 0), newVersion: bumpVersion(currentSchema.schema_version), newModuleCount: new Set(incomingTables.map(function (t) { return t.module; }).concat(currentSchema.tables.map(function (t) { return t.module; }))).size, newTableCount: Object.keys(currentByName).concat(Object.keys(incomingByName)).filter(function (v, i, a) { return a.indexOf(v) === i; }).length, newColumnCount: currentSchema.tables.reduce(function (s, t) { return s + t.columns.length; }, 0) + addedColumnCount + updatedColumnCount, addedTableCount: addedTables.length, addedColumnCount: addedColumnCount, updatedTableCount: updatedTables.length, updatedColumnCount: updatedColumnCount, removedTableCount: removedTables.length, removedColumnCount: 0, addedTables: addedTables, updatedTables: updatedTables };
   }
-  function bumpVersion(versionStr) { var m = String(versionStr || '7.1').match(/^(\d+)\.(\d+)$/); if (!m) return '7.2'; return m[1] + '.' + (parseInt(m[2], 10) + 1); }
+  function bumpVersion(versionStr) { var m = String(versionStr || '10.7').match(/^(\d+)\.(\d+)$/); if (!m) return '10.8'; return m[1] + '.' + (parseInt(m[2], 10) + 1); }
   function mergeSchemas(baseSchema, incomingTables, incomingSourceLabel) {
     var previousSchemaBackup = JSON.parse(JSON.stringify(baseSchema));
     var byNameUpper = {}; baseSchema.tables.forEach(function (t) { byNameUpper[t.name.toUpperCase()] = t; });

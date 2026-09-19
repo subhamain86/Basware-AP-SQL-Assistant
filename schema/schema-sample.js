@@ -4,7 +4,7 @@
     schema_name: 'AP-SQL Assistant Embedded Schema',
     schema_version: '7.1',
     last_updated: '2026-09-09',
-    source_documents: ['Embedded sample — replace via Schema > Update Schema', 'V10.6: added LOGIN_ACCOUNT/LOGIN_ALLOWED, ADM_USER_GROUP(_MEMBER), IA_SUPPLIER.SUPPLIER_EMAIL, IA_INVOICE.CREATED_DATE to support the richer natural-language engine.'],
+    source_documents: ['Embedded sample — replace via Schema > Update Schema'],
     module_labels: { IA: 'Invoice Automation', OM: 'Order Management', PP: 'Purchase Process', PE: 'Payment Execution', ADM: 'Administration' },
     tables: [
       { name: 'IA_INVOICE', module: 'IA', notes: 'Header-level invoice information', columns: [
@@ -72,13 +72,13 @@
       { name: 'ADM_USER_DATA', module: 'ADM', notes: 'Application users', columns: [
         { name: 'USER_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the user', decode: null },
         { name: 'FULL_NAME', type: 'VARCHAR(150)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Full name of the user', decode: null },
+        { name: 'LOGIN_ACCOUNT', type: 'VARCHAR(80)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Login account (username) used to sign in', decode: null },
         { name: 'EMAIL', type: 'VARCHAR(150)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'Email address', decode: null },
+        { name: 'COMPANY_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_COMPANY', column: 'COMPANY_ID' }, alias: '', description: 'Company this user belongs to', decode: null },
         { name: 'SUPERVISOR_USER_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_USER_DATA', column: 'USER_ID' }, alias: '', description: 'This user\'s supervisor (self-referencing hierarchy)', decode: null },
         { name: 'IS_ACTIVE', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether the user account is active', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },
-        { name: 'LOGIN_TYPE', type: 'NUMBER(5)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'How this user authenticates', decode: [{ code: '0', label: 'Forms' }, { code: '1', label: 'Windows Domain (deprecated)' }, { code: '2', label: 'Alusta Single-Sign-On' }, { code: '4', label: 'Basware Access' }, { code: '99', label: 'Inherited from home organization unit' }] },
-        { name: 'LOGIN_ACCOUNT', type: 'VARCHAR(80)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Login account (username) used to sign in', decode: null },
-        { name: 'COMPANY_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_COMPANY', column: 'COMPANY_ID' }, alias: '', description: 'Company this user belongs to', decode: null },
-        { name: 'LOGIN_ALLOWED', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether this user is permitted to log in (login allowed)', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] }
+        { name: 'LOGIN_ALLOWED', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether this user is permitted to log in (login allowed)', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },
+        { name: 'LOGIN_TYPE', type: 'NUMBER(5)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'How this user authenticates', decode: [{ code: '0', label: 'Forms' }, { code: '1', label: 'Windows Domain (deprecated)' }, { code: '2', label: 'Alusta Single-Sign-On' }, { code: '4', label: 'Basware Access' }, { code: '99', label: 'Inherited from home organization unit' }] }
       ] },
       { name: 'ADM_USER_GROUP', module: 'ADM', notes: 'Named groups users can belong to (e.g. Finance, IT, Sales)', columns: [
         { name: 'USER_GROUP_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the user group', decode: null },

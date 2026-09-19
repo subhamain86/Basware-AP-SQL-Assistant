@@ -35,7 +35,7 @@ test('a query filtered with an "is one of" IN (...) clause is treated the same a
   var result = { sql: 'SELECT IA_INVOICE.INVOICE_NUMBER\nFROM IA_INVOICE\nWHERE IA_INVOICE.STATUS IN (10, 40)', tablesUsed: ['IA_INVOICE'], columnsUsed: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], filtersApplied: ['Filter: IA_INVOICE.STATUS IN (10, 40)'], assumptions: [] };
   assertFalse(OPT.optimizeSql(engine, result).recommendations.some(function (r) { return /no WHERE condition/.test(r); }));
 });
-test('V10.6: an aggregate/GROUP BY summary query with no WHERE does not trigger the "missing WHERE" recommendation (a legitimate summary query)', function () {
+test('an aggregate/GROUP BY summary query with no WHERE does not trigger the "missing WHERE" recommendation (a legitimate summary query)', function () {
   var result = { sql: 'SELECT IA_INVOICE.SUPPLIER_ID, SUM(IA_INVOICE.GROSS_SUM) AS total\nFROM IA_INVOICE\nGROUP BY IA_INVOICE.SUPPLIER_ID', tablesUsed: ['IA_INVOICE'], columnsUsed: [{ table: 'IA_INVOICE', column: 'SUPPLIER_ID' }], filtersApplied: ['Grouped by IA_INVOICE.SUPPLIER_ID'], assumptions: [] };
   assertFalse(OPT.optimizeSql(engine, result).recommendations.some(function (r) { return /no WHERE condition/.test(r); }));
 });

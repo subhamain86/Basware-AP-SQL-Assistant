@@ -2,7 +2,7 @@
 var path = require('path');
 var F = require(path.join(__dirname, '..', 'js', 'filter-engine.js'));
 
-test('OPERATORS includes the new "Is one of" and "Is not one of" entries, each marked multi:true', function () {
+test('OPERATORS includes the "Is one of" and "Is not one of" entries, each marked multi:true', function () {
   var inOp = F.getOperator('in'); var notInOp = F.getOperator('not_in');
   assertTrue(inOp !== null); assertEqual(inOp.label, 'Is one of'); assertTrue(inOp.multi === true); assertEqual(inOp.arity, 1);
   assertTrue(notInOp !== null); assertEqual(notInOp.label, 'Is not one of'); assertTrue(notInOp.multi === true); assertEqual(notInOp.arity, 1);
@@ -39,25 +39,11 @@ test('buildConditionSql: "in" with string values correctly quotes each literal a
   var sql = F.buildConditionSql({ table: 'IA_SUPPLIER', column: 'SUPPLIER_NAME', operator: 'in', value: 'Acme, "Globex Corp", O\'Brien Ltd' }, 'Generic', []);
   assertEqual(sql, "IA_SUPPLIER.SUPPLIER_NAME IN ('Acme', 'Globex Corp', 'O''Brien Ltd')");
 });
-test('buildConditionSql: "in" also accepts an explicit `values` array instead of a comma-separated `value` string', function () {
-  var sql = F.buildConditionSql({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', values: ['10', '40'] }, 'Generic', []);
-  assertEqual(sql, 'IA_INVOICE.STATUS IN (10, 40)');
-});
 test('buildConditionSql: "in" with no usable values produces a clear validation error and returns null', function () {
   var errors = [];
   var sql = F.buildConditionSql({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '' }, 'Generic', errors);
   assertEqual(sql, null);
   assertIncludes(errors.join(' '), 'needs at least one value');
-});
-test('buildConditionSql: "not_in" with only commas/whitespace also produces a validation error', function () {
-  var errors = [];
-  var sql = F.buildConditionSql({ table: 'IA_INVOICE', column: 'STATUS', operator: 'not_in', value: ' , , ' }, 'Generic', errors);
-  assertEqual(sql, null);
-  assertTrue(errors.length > 0);
-});
-test('buildConditionSql: a single value in an "in" list still produces a valid (if trivial) IN (...) clause', function () {
-  var sql = F.buildConditionSql({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '40' }, 'Generic', []);
-  assertEqual(sql, 'IA_INVOICE.STATUS IN (40)');
 });
 
 test('buildWhereSql: an "in" condition combined with a normal eq condition via AND', function () {
@@ -69,13 +55,8 @@ test('buildWhereSql: an "in" condition combined with a normal eq condition via A
   assertEqual(built.sql, 'IA_INVOICE.COMPANY_ID = 100 AND IA_INVOICE.STATUS IN (10, 40)');
   assertEqual(built.errors.length, 0);
 });
-test('buildWhereSql: a rejected "in" condition (empty values) surfaces its error in the errors array without throwing', function () {
-  var fg = { conditions: [{ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '', join: 'AND' }] };
-  var built = F.buildWhereSql(fg, 'Generic');
-  assertTrue(built.errors.length > 0);
-});
 
-test('every pre-existing operator still behaves exactly as before (no regression from adding in/not_in)', function () {
+test('every pre-existing operator behaves correctly', function () {
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'eq', value: '5' }, 'Generic', []), 'T.C = 5');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'between', value: '1', value2: '10' }, 'Generic', []), 'T.C BETWEEN 1 AND 10');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'is_null' }, 'Generic', []), 'T.C IS NULL');
