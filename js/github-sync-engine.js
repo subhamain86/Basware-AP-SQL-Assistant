@@ -66,6 +66,20 @@
   function isConfigComplete(config) {
     return !!(config && config.owner && config.repo && config.path && config.token);
   }
+  /**
+   * isReadConfigComplete(config) — V10.7.1. A relaxed variant of
+   * isConfigComplete() used ONLY for read (GET) lookups where a token
+   * may not yet be known/typed by the user (e.g. the very first step of
+   * unlocking the credential vault, before the real token has been
+   * recovered). Only the repository location (owner/repo/path) is
+   * required; the token is optional, because GitHub's Contents API
+   * allows anonymous, unauthenticated GET requests against PUBLIC
+   * repositories (subject to a lower, IP-based rate limit). Write
+   * operations (PUT/DELETE) still always require isConfigComplete().
+   */
+  function isReadConfigComplete(config) {
+    return !!(config && config.owner && config.repo && config.path);
+  }
   function normalizeBranch(config) { return (config && config.branch) ? config.branch : 'main'; }
 
   function buildContentsUrl(config) {
@@ -79,6 +93,26 @@
   }
   function authHeaders(config) {
     return { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  }
+  /**
+   * authHeadersOptional(config) — V10.7.1 fix. Builds request headers for
+   * a READ-only lookup, including an Authorization header ONLY when a
+   * real, non-empty token is actually present in `config.token`.
+   *
+   * THIS REPLACES THE PRIOR BUG: earlier versions of the vault-unlock
+   * flow hardcoded the literal string 'unauthenticated-lookup' as the
+   * Bearer token for this exact lookup call — GitHub always rejects that
+   * literal string as invalid credentials, producing a 401 Unauthorized
+   * on every attempt, regardless of what the user actually typed into
+   * the Token field. There is no longer any hardcoded placeholder
+   * token anywhere in this file: callers either supply a real token
+   * (used as-is) or omit it entirely (anonymous GET, which GitHub
+   * permits for public repositories).
+   */
+  function authHeadersOptional(config) {
+    var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (config && config.token) headers.Authorization = 'Bearer ' + config.token;
+    return headers;
   }
 
   function fetchRemoteSchema(config, fetchImpl) {
@@ -99,6 +133,48 @@
         var tables = Array.isArray(parsed) ? parsed : parsed.tables;
         if (!Array.isArray(tables)) return Promise.reject(new Error('The linked file does not look like a valid AP-SQL Assistant schema.'));
         return { exists: true, schema: parsed, sha: body.sha };
+      });
+    }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
+  }
+
+  /**
+   * fetchRawJsonFile(config, fetchImpl) — V10.7 (fixed in V10.7.1). Like
+   * fetchRemoteSchema, but for arbitrary non-schema-shaped JSON files
+   * (specifically the encrypted credential vault, whose shape
+   * `{ type, v, salt, iv, ciphertext }` would always fail
+   * fetchRemoteSchema's "must have a .tables array" validation).
+   *
+   * FIX: this now uses isReadConfigComplete() (token optional) and
+   * authHeadersOptional() (omits the Authorization header entirely when
+   * no token is supplied) instead of unconditionally requiring — and
+   * previously, silently fabricating — a token. Concretely:
+   *   - If `config.token` is a real value the caller already has (even a
+   *     lightweight read-only token), it is sent and used normally.
+   *   - If `config.token` is empty/undefined, the request is sent with
+   *     NO Authorization header at all, which GitHub's REST API accepts
+   *     for anonymous reads of public repositories.
+   *   - Only a genuinely invalid/expired real token, or an attempt to
+   *     read a PRIVATE repository with no token, will still produce a
+   *     401/403 — and the error message now reflects that possibility
+   *     honestly instead of blaming "the token" when no real token was
+   *     ever involved.
+   */
+  function fetchRawJsonFile(config, fetchImpl) {
+    fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
+    if (!isReadConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, and file path are required).'));
+    return fetchImpl(buildContentsUrl(config), { headers: authHeadersOptional(config) }).then(function (res) {
+      if (res.status === 404) return { exists: false };
+      if (res.status === 401) return Promise.reject(new Error(config && config.token ? 'GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.' : 'GitHub requires authentication to read this file (401 Unauthorized) \u2014 the repository is likely private. Enter a valid Personal Access Token in the Token field above and try again.'));
+      if (res.status === 403) return Promise.reject(new Error(config && config.token ? 'GitHub denied access to this repository (403 Forbidden). The token may be missing the required Contents permission, or you may have hit a rate limit.' : 'GitHub denied anonymous access (403 Forbidden) \u2014 this can happen for private repositories or if the anonymous rate limit was reached. Enter a valid Personal Access Token in the Token field above and try again.'));
+      if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the file.'));
+      return res.json().then(function (body) {
+        if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific file.'));
+        var decoded;
+        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked file.')); }
+        var parsed;
+        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked file does not contain valid JSON.')); }
+        return { exists: true, content: parsed, sha: body.sha };
       });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
@@ -144,36 +220,6 @@
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
 
-  /**
-   * fetchRawJsonFile(config, fetchImpl) — V10.7. Like fetchRemoteSchema,
-   * but WITHOUT the "must look like an AP-SQL Assistant schema" (i.e.
-   * must have a `.tables` array) validation. This is used for
-   * non-schema JSON files stored in the same repository via the same
-   * Contents API — specifically, the encrypted credential vault blob,
-   * whose shape (`{ type, v, salt, iv, ciphertext }`) is intentionally
-   * quite different from a schema file and would always fail
-   * fetchRemoteSchema's schema-shape check.
-   */
-  function fetchRawJsonFile(config, fetchImpl) {
-    fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
-    if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, file path, and a Personal Access Token are all required).'));
-    return fetchImpl(buildContentsUrl(config), { headers: authHeaders(config) }).then(function (res) {
-      if (res.status === 404) return { exists: false };
-      if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.'));
-      if (res.status === 403) return Promise.reject(new Error('GitHub denied access to this repository (403 Forbidden). The token may be missing the required Contents permission, or you may have hit a rate limit.'));
-      if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the file.'));
-      return res.json().then(function (body) {
-        if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific file.'));
-        var decoded;
-        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked file.')); }
-        var parsed;
-        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked file does not contain valid JSON.')); }
-        return { exists: true, content: parsed, sha: body.sha };
-      });
-    }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
-  }
-
   function describeGitHubSyncStatus(state) {
     state = state || {};
     if (state.error) return { level: 'error', text: state.error };
@@ -185,8 +231,9 @@
   var API = {
     base64EncodeBytes: base64EncodeBytes, base64DecodeToBytes: base64DecodeToBytes,
     utf8ToBase64: utf8ToBase64, base64ToUtf8: base64ToUtf8,
-    createConfigStore: createConfigStore, isConfigComplete: isConfigComplete, normalizeBranch: normalizeBranch,
+    createConfigStore: createConfigStore, isConfigComplete: isConfigComplete, isReadConfigComplete: isReadConfigComplete, normalizeBranch: normalizeBranch,
     buildContentsUrl: buildContentsUrl, buildContentsWriteUrl: buildContentsWriteUrl,
+    authHeaders: authHeaders, authHeadersOptional: authHeadersOptional,
     fetchRemoteSchema: fetchRemoteSchema, pushSchemaToGitHub: pushSchemaToGitHub, deleteRemoteFile: deleteRemoteFile,
     fetchRawJsonFile: fetchRawJsonFile,
     describeGitHubSyncStatus: describeGitHubSyncStatus

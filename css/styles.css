@@ -280,6 +280,7 @@ pre.sql-output { background: #10131c; color: #e6ecff; border-radius: 10px; paddi
 .vault-form-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
 .vault-form-row input { flex: 1 1 220px; min-width: 180px; }
 .vault-unsupported-note { font-size: .78rem; color: var(--bs-secondary-color); padding: .5rem .7rem; border-radius: 6px; background: var(--bs-tertiary-bg); }
+.vault-hint-note { font-size: .74rem; color: var(--bs-secondary-color); margin-top: -.3rem; margin-bottom: .5rem; }
 
 /* ---------------- V10.7: Sync Schedule ---------------- */
 .sync-schedule-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

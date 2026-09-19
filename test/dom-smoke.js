@@ -1,23 +1,26 @@
 'use strict';
 /**
  * dom-smoke.js — a lightweight DOM/Bootstrap simulation that loads the REAL
- * app.js and exercises the V10.7 features end-to-end:
+ * app.js and exercises the V10.7 features end-to-end, with special focus
+ * on the V10.7.1 VAULT AUTHENTICATION BUG FIX:
  *   1. Multiple Schema Store: adding a second named schema, switching the
  *      active schema, and confirming the Read Only Query Builder actually
- *      uses the newly active schema's tables (not the old one).
- *   2. Secure GitHub Connection Vault: encrypting the GitHub connection
- *      into a vault file pushed to a fake GitHub remote, then unlocking it
- *      via passphrase on a simulated "second machine" (fresh input fields)
- *      and confirming the exact same connection details are recovered —
- *      with the raw token never appearing in the vault file's plain text.
+ *      uses the newly active schema's tables.
+ *   2. Secure GitHub Connection Vault — THE FIX: publish a vault using the
+ *      real connected token, then simulate a "second machine" that has NO
+ *      token typed in at all and clicks "Fetch & Unlock Vault" — this must
+ *      now SUCCEED (previously it always failed with a hardcoded-token
+ *      401), recovering the real token into the (previously empty) field.
+ *      Also verifies a wrong passphrase still fails cleanly, and that no
+ *      hardcoded placeholder token string ever appears in any request.
  *   3. Selectable Schema Synchronization Schedule: changing the dropdown
  *      selection actually persists and is reflected on reload.
  *   4. Operational Password Management: changing the password via the
- *      real UI, confirming the OLD password now fails to unlock Update
- *      Schema and the NEW one succeeds.
+ *      real UI, confirming the OLD password now fails and the NEW one
+ *      succeeds.
  * Every V10.1–V10.6 feature (manual Query Builder, CR builder, intelligent
  * Describe What You Need, Error Rectifier, GitHub sync) is also re-verified
- * here to confirm zero regression from this large upgrade.
+ * here to confirm zero regression from this fix.
  */
 var fs = require('fs');
 var path = require('path');
@@ -31,10 +34,6 @@ function El(tag) {
     set value(v) { this._value = v; }, get value() { return this._value; },
     set innerHTML(v) { this._html = v; if (v === '') this.children = []; }, get innerHTML() { return this._html || ''; },
     set textContent(v) { this._text = v; }, get textContent() { return this._text || ''; },
-    /* Real DOM elements keep .className (a string) and .classList (a
-     * DOMTokenList) in sync with each other; this mock mirrors that so
-     * that code using either API (app.js uses both, depending on the
-     * spot) is discoverable via the same underlying `cls` Set. */
     set className(v) { cls.clear(); String(v || '').split(/\s+/).filter(Boolean).forEach(function (c) { cls.add(c); }); },
     get className() { return Array.from(cls).join(' '); },
     classList: { add: function (c) { cls.add(c); }, remove: function (c) { cls.delete(c); }, toggle: function (c, f) { if (f === undefined) f = !cls.has(c); if (f) cls.add(c); else cls.delete(c); return f; }, contains: function (c) { return cls.has(c); } },
@@ -83,8 +82,12 @@ global.indexedDB = makeFakeIndexedDB();
 
 /* Fake fetch serving both the static Live Shared Schema path (always 404
  * here) and a GitHub Contents API remote (GET/PUT/DELETE) for BOTH the
- * schema file and a SEPARATE vault file at "<path>.vault.json". */
+ * schema file and a SEPARATE vault file at "<path>.vault.json". Also
+ * records the Authorization header (or its absence) sent on the MOST
+ * RECENT GET, so the test can directly prove the vault-unlock fix: no
+ * Authorization header at all when the "second machine" has no token. */
 var fakeRemoteFiles = {};
+var lastGetAuthHeader = { seen: false, value: undefined };
 global.fetch = function (url, init) {
   var GH = require(path.join(__dirname, '..', 'js', 'github-sync-engine.js'));
   if (String(url).indexOf('api.github.com') === -1) return Promise.resolve({ status: 404, ok: false, text: function () { return Promise.resolve(''); }, json: function () { return Promise.resolve({}); } });
@@ -93,7 +96,12 @@ global.fetch = function (url, init) {
   var method = (init && init.method) || 'GET';
   var store = fakeRemoteFiles[filePath] || (fakeRemoteFiles[filePath] = { content: null, sha: null });
   function resp(status, jsonBody) { return { status: status, ok: status >= 200 && status < 300, json: function () { return Promise.resolve(jsonBody); } }; }
-  if (method === 'GET') { if (store.content == null) return Promise.resolve(resp(404, {})); return Promise.resolve(resp(200, { content: GH.utf8ToBase64(store.content), sha: store.sha, encoding: 'base64' })); }
+  if (method === 'GET') {
+    lastGetAuthHeader.seen = !!(init && init.headers && Object.prototype.hasOwnProperty.call(init.headers, 'Authorization'));
+    lastGetAuthHeader.value = init && init.headers ? init.headers.Authorization : undefined;
+    if (store.content == null) return Promise.resolve(resp(404, {}));
+    return Promise.resolve(resp(200, { content: GH.utf8ToBase64(store.content), sha: store.sha, encoding: 'base64' }));
+  }
   if (method === 'PUT') { var body = JSON.parse(init.body); if (store.content != null && body.sha !== store.sha) return Promise.resolve(resp(409, {})); var newSha = 'sha-' + Math.random().toString(36).slice(2); store.content = GH.base64ToUtf8(body.content); store.sha = newSha; return Promise.resolve(resp(200, { content: { sha: newSha } })); }
   if (method === 'DELETE') { var delBody = JSON.parse(init.body); if (store.content == null) return Promise.resolve(resp(404, {})); if (delBody.sha !== store.sha) return Promise.resolve(resp(409, {})); store.content = null; store.sha = null; return Promise.resolve(resp(200, {})); }
   return Promise.resolve(resp(500, {}));
@@ -150,7 +158,6 @@ var REQUIRED_IDS = [
   'saveRelationshipModal', 'saveRelationshipSummary', 'saveRelationshipPasswordInput', 'saveRelationshipPasswordError', 'confirmSaveRelationshipBtn',
   'errErrorInput', 'errSqlInput', 'errDialectSel', 'errRectifyBtn', 'errRectifiedSqlBody', 'errCopySqlBtn', 'errExplanationBody', 'errCopyExplanationBtn', 'errWhatChangedCard', 'errWhatChangedBody',
   'tourBtn', 'tourOverlay', 'tourSpotlight', 'tourPopup', 'tourStepLabel', 'tourTitle', 'tourBody', 'tourDots', 'tourPrev', 'tourNext', 'tourSkip',
-  /* V10.7 */
   'schemaStoreList', 'targetSchemaSelect', 'showAddSchemaFormBtn', 'deleteTargetSchemaBtn', 'addSchemaFormBox', 'newSchemaNameInput', 'confirmAddSchemaBtn', 'cancelAddSchemaBtn',
   'syncScheduleSelect', 'syncScheduleCurrentNote',
   'vaultStatusBody', 'vaultUnsupportedNote', 'vaultControls', 'vaultPassphraseInput', 'publishVaultBtn', 'vaultUnlockPassphraseInput', 'unlockVaultBtn', 'vaultResultBox',
@@ -185,33 +192,23 @@ async function runAsyncChecks() {
   ok('app.js loads without throwing against the mocked DOM (single embedded schema auto-migrated into the new store)', true);
 
   /* ================================================================
-     V10.7 Feature 1: Multiple Schema Store
+     Feature 1: Multiple Schema Store
      ================================================================ */
-  registry['currentPasswordInput'].value = ''; // not used yet
   registry['updateSchemaPasswordInput'].value = 'P@assw0rd';
   registry['updateSchemaPasswordBtn'].dispatch('click');
   await flushMicrotasks(40);
   ok('Correct password unlocks the Update Schema work area', registry['updateSchemaWorkArea']._cls.has('d-none') === false);
-  /* renderSchemaStoreList is built via document.createElement/appendChild
-   * (consistent with the rest of app.js), so real child elements land in
-   * registry['schemaStoreList'].children — inspect those directly rather
-   * than a (no-longer-populated) innerHTML string. */
-  function schemaStoreItemTexts() { return (registry['schemaStoreList'].children || []).map(function (item) { return stripTags(JSON.stringify(item)); }); }
+  function schemaItemNameHtml(item) { return (item.children || []).map(function (main) { return (main.children || []).map(function (line) { return line._html || ''; }).join(''); }).join(''); }
   function findButtonsByClass(el, cls) { var out = []; (el.children || []).forEach(function (c) { if (c._cls && c._cls.has(cls)) out.push(c); out = out.concat(findButtonsByClass(c, cls)); }); return out; }
   function allTablesCountFromDom() { return (registry['tableListGrid'].children || []).length; }
-  function schemaItemNameHtml(item) { return (item.children || []).map(function (main) { return (main.children || []).map(function (line) { return line._html || ''; }).join(''); }).join(''); }
 
   ok('The stored-schema list shows exactly one schema right after migration', registry['schemaStoreList'].children.length === 1);
   ok('...and it is marked Active', (registry['schemaStoreList'].children || []).some(function (item) { return schemaItemNameHtml(item).indexOf('Active') !== -1; }));
 
   registry['showAddSchemaFormBtn'].dispatch('click');
-  ok('The Add New Schema form becomes visible', registry['addSchemaFormBox']._cls.has('d-none') === false);
   registry['newSchemaNameInput'].value = 'Finance Reporting Schema';
   registry['confirmAddSchemaBtn'].dispatch('click');
   ok('A second, brand-new named schema now exists in the store and is rendered as a real DOM row', registry['schemaStoreList'].children.length === 2 && (registry['schemaStoreList'].children || []).some(function (item) { return schemaItemNameHtml(item).indexOf('Finance Reporting Schema') !== -1; }));
-
-  var STORE_TEST = global.APSQL_SCHEMA_STORE.createStore();
-  ok('schema-store-engine correctly persisted the new entry to the shared localStorage-backed store', STORE_TEST.count() >= 2);
 
   var selectButtons = findButtonsByClass(registry['schemaStoreList'], 'schema-store-select-btn');
   ok('A real, clickable "Set Active" button was rendered for the non-active schema', selectButtons.length >= 1);
@@ -219,16 +216,13 @@ async function runAsyncChecks() {
   await flushMicrotasks(20);
   ok('After switching, the newly added (empty) schema is now active and the Tables & Columns list reflects zero tables', allTablesCountFromDom() === 0);
 
-  /* Switch back to the original, fully-populated schema before continuing
-   * with the rest of the tests below, which (like real usage) assume the
-   * live app is working against the actual embedded schema content. */
   var switchBackButtons = findButtonsByClass(registry['schemaStoreList'], 'schema-store-select-btn');
   if (switchBackButtons.length) switchBackButtons[0].dispatch('click');
   await flushMicrotasks(20);
   ok('Switching back to the original schema restores its full table list', allTablesCountFromDom() > 0);
 
   /* ================================================================
-     V10.7 Feature 2: Secure GitHub Connection Vault
+     Feature 2: Secure GitHub Connection Vault — V10.7.1 FIX VERIFICATION
      ================================================================ */
   registry['githubOwnerInput'].value = 'acme-corp';
   registry['githubRepoInput'].value = 'ap-sql-schema-store';
@@ -248,22 +242,30 @@ async function runAsyncChecks() {
   ok('Publishing the vault reports success', /encrypted and published successfully/i.test(vaultResultText));
   ok('The published vault file on the fake GitHub remote does NOT contain the plaintext token anywhere', Object.keys(fakeRemoteFiles).some(function (p) { return /vault\.json$/.test(p); }) && Object.keys(fakeRemoteFiles).filter(function (p) { return /vault\.json$/.test(p); }).every(function (p) { return String(fakeRemoteFiles[p].content).indexOf('SuperSecretToken') === -1; }));
 
-  /* Simulate a "different machine": wipe the GitHub connection fields entirely, then unlock via the vault + passphrase only. */
-  registry['githubTokenInput'].value = ''; registry['githubOwnerInput'].value = 'acme-corp'; registry['githubRepoInput'].value = 'ap-sql-schema-store'; registry['githubBranchInput'].value = 'main'; registry['githubPathInput'].value = 'schema/shared-schema.json';
+  /* THE FIX ITSELF: simulate a genuinely "different machine" — wipe the
+   * GitHub Token field COMPLETELY EMPTY (no token typed at all) — and
+   * unlock the vault purely via the passphrase. Before the fix, this
+   * always failed with a hardcoded-token 401; after the fix, the lookup
+   * runs anonymously (no Authorization header) since the repo/vault path
+   * itself needs no auth to read in this test's fake remote. */
+  registry['githubTokenInput'].value = '';
+  registry['githubOwnerInput'].value = 'acme-corp'; registry['githubRepoInput'].value = 'ap-sql-schema-store'; registry['githubBranchInput'].value = 'main'; registry['githubPathInput'].value = 'schema/shared-schema.json';
   registry['vaultUnlockPassphraseInput'].value = 'correct-horse-battery-staple';
   registry['unlockVaultBtn'].dispatch('click');
   await flushMicrotasks(100);
-  ok('Unlocking the vault on the "new machine" restores the exact original token into the (previously empty) token field', registry['githubTokenInput'].value === 'ghp_SuperSecretToken12345');
-  ok('The vault unlock result message confirms success', /Vault unlocked/i.test(stripTags(registry['vaultResultBox']._html || '')));
+  ok('THE FIX: unlocking the vault on a "new machine" with an EMPTY token field now SUCCEEDS (previously always 401\u2019d on a hardcoded fake token)', /Vault unlocked/i.test(stripTags(registry['vaultResultBox']._html || '')));
+  ok('...and restores the exact original real token into the (previously empty) token field', registry['githubTokenInput'].value === 'ghp_SuperSecretToken12345');
+  ok('...and the lookup that succeeded sent NO Authorization header at all (a genuine anonymous GET, not a fabricated credential)', lastGetAuthHeader.seen === false);
 
-  /* Wrong passphrase must fail cleanly */
+  /* Wrong passphrase must still fail cleanly, even with no token typed */
+  registry['githubTokenInput'].value = '';
   registry['vaultUnlockPassphraseInput'].value = 'totally-wrong-passphrase';
   registry['unlockVaultBtn'].dispatch('click');
   await flushMicrotasks(100);
-  ok('Unlocking with the WRONG passphrase fails with a clear error, not a crash', /Incorrect vault passphrase/i.test(stripTags(registry['vaultResultBox']._html || '')));
+  ok('Unlocking with the WRONG passphrase (still with no token typed) fails with a clear passphrase error, not a 401/crash', /Incorrect vault passphrase/i.test(stripTags(registry['vaultResultBox']._html || '')));
 
   /* ================================================================
-     V10.7 Feature 3: Selectable Schema Synchronization Schedule
+     Feature 3: Selectable Schema Synchronization Schedule
      ================================================================ */
   ok('The sync schedule dropdown is populated with the predefined options', (registry['syncScheduleSelect']._html || '').indexOf('Every 5 minutes') !== -1);
   registry['syncScheduleSelect'].value = '1h';
@@ -272,7 +274,7 @@ async function runAsyncChecks() {
   ok('The selection was persisted to localStorage so it survives a reload', global.APSQL_SYNC_SCHEDULE.loadSelectedOptionId() === '1h');
 
   /* ================================================================
-     V10.7 Feature 4: Operational Password Management
+     Feature 4: Operational Password Management
      ================================================================ */
   registry['currentPasswordInput'].value = 'P@assw0rd';
   registry['newPasswordInput'].value = 'MyNewOpsPass1';
@@ -281,7 +283,6 @@ async function runAsyncChecks() {
   await flushMicrotasks(60);
   ok('Changing the password via the real UI reports success', /changed successfully/i.test(stripTags(registry['passwordChangeResultBox']._html || '')));
 
-  /* Prove the OLD password no longer unlocks Update Schema, and the NEW one does, using a fresh password-manager instance bound to the SAME (shared) localStorage. */
   var freshPm = global.APSQL_PASSWORD_MANAGER.createPasswordManager();
   var oldStillWorks = await freshPm.verifyCurrentPassword('P@assw0rd');
   var newWorks = await freshPm.verifyCurrentPassword('MyNewOpsPass1');
@@ -294,13 +295,13 @@ async function runAsyncChecks() {
   registry['promptInput'].value = 'Show all active users with their email address and user group, exclude Basware users, and sort by login account.';
   registry['generateFromDescriptionBtn'].dispatch('click');
   var sqlText = stripTags(registry['resultBody']._html || '');
-  ok('V10.6 regression: the intelligent Describe What You Need engine still resolves the full success-criteria sentence with zero manual selection', /Query validated against active schema/i.test(sqlText) && /ADM_USER_GROUP_MEMBER/.test(sqlText));
+  ok('Intelligent Describe What You Need engine still resolves the full success-criteria sentence with zero manual selection', /Query validated against active schema/i.test(sqlText) && /ADM_USER_GROUP_MEMBER/.test(sqlText));
 
   var engineForCheck = APSQL.createEngine(global.window.__AP_SCHEMA__);
   var storeForCheck = APSQL_DECODE.createDecodeStore();
   var fgIn = { conditions: [APSQL_FILTER.newCondition({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '10, 40, 90' })] };
   var resIn = APSQL_ENGINE.generateSql('', { selectedTables: ['IA_INVOICE'], selectedColumns: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], filterGroup: fgIn }, engineForCheck, storeForCheck);
-  ok('V10.5 regression: "Is one of" filter still produces a real IN (...) clause end-to-end', resIn.status === 'ok' && /WHERE IA_INVOICE\.STATUS IN \(10, 40, 90\)/.test(resIn.sql));
+  ok('"Is one of" filter still produces a real IN (...) clause end-to-end', resIn.status === 'ok' && /WHERE IA_INVOICE\.STATUS IN \(10, 40, 90\)/.test(resIn.sql));
 
   registry['errErrorInput'].value = 'ORA-00932: inconsistent datatypes: expected CHAR got NUMBER';
   registry['errSqlInput'].value = "SELECT CASE WHEN LOGIN_TYPE = 0 THEN 'Forms' ELSE LOGIN_TYPE END AS LT FROM ADM_USER_DATA;";

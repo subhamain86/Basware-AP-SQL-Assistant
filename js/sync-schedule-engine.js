@@ -41,8 +41,6 @@
     return true;
   }
 
-  /** computeNextRun(optionId, fromDate) — returns an ISO string for the next
-   * scheduled run, or null if the schedule is 'manual' (no automatic runs). */
   function computeNextRun(optionId, fromDate) {
     var opt = getOption(optionId);
     if (!opt || opt.minutes == null) return null;
@@ -50,8 +48,6 @@
     return new Date(base.getTime() + opt.minutes * 60000).toISOString();
   }
 
-  /** toIntervalMs(optionId) — converts a schedule option into a millisecond
-   * interval suitable for setInterval; returns null for 'manual'. */
   function toIntervalMs(optionId) {
     var opt = getOption(optionId);
     if (!opt || opt.minutes == null) return null;

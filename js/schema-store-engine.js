@@ -1,19 +1,11 @@
 /**
  * schema-store-engine.js — AP-SQL Assistant V10.7
  * ---------------------------------------------------------------------------
- * Manages MULTIPLE named, independently-stored schemas (requirement: "add
- * support for storing multiple database schemas... users should be able to
- * add, manage, select, and use different schemas"). Each entry tracks its
- * own metadata (name, version, source, last/next sync time, sync status)
- * so the Used Schema and Update Schema sections can display and act on
- * them independently, and so a sync failure on one schema never affects
- * any other (each entry's status is tracked in complete isolation).
- *
- * Persistence: a single localStorage key holds the whole collection (an
- * array of entries) plus the currently active entry id. This keeps the
- * store fully synchronous and simple to reason about; entries themselves
- * can still be synced individually to/from GitHub via each entry's own
- * `githubConfig` (which may be empty, meaning "manual only").
+ * Manages MULTIPLE named, independently-stored schemas. Each entry tracks
+ * its own metadata (name, version, source, last/next sync time, sync
+ * status) so the Used Schema and Update Schema sections can display and
+ * act on them independently, and so a sync failure on one schema never
+ * affects any other (each entry's status is tracked in complete isolation).
  * ---------------------------------------------------------------------------
  */
 (function (root) {
@@ -24,10 +16,6 @@
   function genId() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   function nowIso() { return new Date().toISOString(); }
 
-  /**
-   * createEntry(opts) — builds a new, well-formed store entry. `source`
-   * should be one of: 'embedded' | 'upload' | 'github' | 'shared'.
-   */
   function createEntry(opts) {
     opts = opts || {};
     return {
@@ -38,28 +26,19 @@
       createdAt: opts.createdAt || nowIso(),
       lastSyncAt: opts.lastSyncAt || null,
       nextSyncAt: opts.nextSyncAt || null,
-      lastSyncStatus: opts.lastSyncStatus || 'idle', // 'idle' | 'ok' | 'error' | 'pending'
+      lastSyncStatus: opts.lastSyncStatus || 'idle',
       lastSyncError: opts.lastSyncError || null,
-      githubConfig: opts.githubConfig || null // { owner, repo, branch, path } — token resolved separately via the vault
+      githubConfig: opts.githubConfig || null
     };
   }
 
-  /**
-   * createStore(storageImpl) — a small, synchronous, in-memory-plus-
-   * localStorage-backed collection manager. All mutating methods persist
-   * immediately; all read methods operate on the in-memory copy for speed
-   * (important for "efficiently search... without loading unnecessary
-   * schema information into every query-generation operation" — the SQL
-   * engine only ever touches the single active entry's schema object, not
-   * the whole store).
-   */
   function createStore(storageImpl) {
     storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
     var state = { entries: [], activeId: null };
 
     function persist() {
       if (!storageImpl) return;
-      try { storageImpl.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* quota or unavailable — silently skip, in-memory state still correct */ }
+      try { storageImpl.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* quota or unavailable — silently skip */ }
     }
     function load() {
       if (!storageImpl) return false;
@@ -109,12 +88,6 @@
     }
     function renameEntry(id, newName) { return updateEntry(id, { name: newName }); }
 
-    /**
-     * recordSyncResult(id, result) — updates ONLY the given entry's own
-     * sync bookkeeping fields. Because every entry's status lives in its
-     * own object, a failure recorded here for one schema can never leak
-     * into or block another entry's independent status.
-     */
     function recordSyncResult(id, result) {
       return updateEntry(id, {
         lastSyncAt: result.ok ? nowIso() : (getEntry(id) || {}).lastSyncAt || null,

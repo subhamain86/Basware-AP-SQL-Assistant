@@ -627,8 +627,9 @@ Examples:
           <div id="vaultControls">
             <div class="vault-form-row">
               <input class="form-control form-control-sm" type="password" id="vaultPassphraseInput" placeholder="Vault passphrase">
-              <button class="btn btn-outline-purple btn-sm btn-outline-secondary" id="publishVaultBtn" type="button"><i class="bi bi-cloud-arrow-up-fill me-1"></i>Encrypt &amp; Publish Vault</button>
+              <button class="btn btn-outline-secondary btn-sm" id="publishVaultBtn" type="button"><i class="bi bi-cloud-arrow-up-fill me-1"></i>Encrypt &amp; Publish Vault</button>
             </div>
+            <p class="vault-hint-note"><i class="bi bi-info-circle me-1"></i>Fill in the Owner / Repo / Branch / File Path fields above before unlocking &mdash; a Personal Access Token is <strong>only needed here if the repository is private</strong>; public repositories can be read anonymously.</p>
             <div class="vault-form-row">
               <input class="form-control form-control-sm" type="password" id="vaultUnlockPassphraseInput" placeholder="Vault passphrase to unlock">
               <button class="btn btn-outline-primary btn-sm" id="unlockVaultBtn" type="button"><i class="bi bi-unlock-fill me-1"></i>Fetch &amp; Unlock Vault (this machine)</button>

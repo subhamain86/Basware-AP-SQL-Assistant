@@ -291,7 +291,14 @@
   });
 
   /* ================================================================
-     V10.7: SECURE GITHUB CONNECTION VAULT
+     V10.7 (fixed in V10.7.1): SECURE GITHUB CONNECTION VAULT
+     ---------------------------------------------------------------
+     BUG FIX: the vault-unlock lookup no longer sends any hardcoded
+     placeholder token. It now sends whatever real token the user has
+     already typed into the GitHub Token field (if any), or omits the
+     Authorization header entirely (anonymous GET, which GitHub allows
+     for public repositories) when the field is empty. See
+     github-sync-engine.js's fetchRawJsonFile()/authHeadersOptional().
      ================================================================ */
   function renderVaultStatus(transientNote, level) {
     var box = $('vaultStatusBody'); if (!box) return;
@@ -318,6 +325,12 @@
     APSQL_VAULT.buildVaultBlob(githubConfig, passphrase).then(function (blobText) {
       var vaultPath = githubConfig.path.replace(/(\.[^./]+)?$/, '') + '.vault.json';
       var vaultGithubConfig = Object.assign({}, githubConfig, { path: vaultPath });
+      /* NOTE: the vault's PUBLISH step always uses the real, complete
+       * githubConfig (which necessarily includes a valid write-capable
+       * token, since Connect & Sync Now already succeeded with it) — the
+       * bug being fixed here only ever affected the separate UNLOCK
+       * (read-only lookup) step below, which historically ran before any
+       * real token was available. */
       return APSQL_GITHUB_SYNC.fetchRawJsonFile(vaultGithubConfig).then(function (existing) {
         return APSQL_GITHUB_SYNC.pushSchemaToGitHub(vaultGithubConfig, JSON.parse(blobText), existing.exists ? existing.sha : null);
       }).then(function () {
@@ -338,10 +351,23 @@
     var owner = ($('githubOwnerInput').value || '').trim();
     var repo = ($('githubRepoInput').value || '').trim();
     var branch = ($('githubBranchInput').value || 'main').trim() || 'main';
+    /* FIX (was the root cause of the reported 401 error): use whatever
+     * real token the user has already typed into the Token field, if
+     * any — trimmed to '' (not a fabricated placeholder string) when
+     * empty. An empty token here means "attempt this lookup
+     * anonymously", which github-sync-engine.js's fetchRawJsonFile()
+     * correctly implements as omitting the Authorization header
+     * entirely (GitHub permits anonymous reads of public repositories).
+     * Previously this was hardcoded to the literal string
+     * 'unauthenticated-lookup', which GitHub always rejected as an
+     * invalid credential with a 401, regardless of what — if anything —
+     * the user had typed into the Token field. */
+    var typedToken = ($('githubTokenInput').value || '').trim();
     if (!owner || !repo) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Please fill in at least the repository owner and name above, so the vault file can be located.</div>'; return; }
     if (!passphrase) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Please enter the vault passphrase to unlock.</div>'; return; }
     resultBox.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><i class="bi bi-hourglass-split me-1"></i>Fetching and unlocking the vault\u2026</div>';
-    var lookupConfig = { owner: owner, repo: repo, branch: branch, path: vaultPath, token: 'unauthenticated-lookup' };
+    var lookupConfig = { owner: owner, repo: repo, branch: branch, path: vaultPath };
+    if (typedToken) lookupConfig.token = typedToken;
     APSQL_GITHUB_SYNC.fetchRawJsonFile(lookupConfig).then(function (result) {
       if (!result.exists) throw new Error('No vault file was found at ' + vaultPath + '. Ask an administrator to publish one first.');
       return APSQL_VAULT.decryptConfig(result.content, passphrase);
@@ -386,12 +412,6 @@
      V10.7: Stored-schema management UI (Used Schema + Update Schema)
      ================================================================ */
   function syncStatusBadgeClass(status) { return 'status-' + (status || 'idle'); }
-  /* Built via document.createElement/appendChild (not innerHTML strings),
-   * consistent with every other dynamic interactive list in this file
-   * (renderJoinPreview, buildColumnRow, renderSortRows, etc.) — this
-   * keeps each row's "Set Active" button a real, directly-wired element
-   * rather than requiring a fragile innerHTML-then-querySelectorAll
-   * re-attachment pass. */
   function renderSchemaStoreList() {
     var box = $('schemaStoreList'); if (!box) return;
     box.innerHTML = '';
@@ -1111,7 +1131,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap ? new window.bootstrap.Modal(aboutModalEl) : null;
   $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '10.7.0'], ['Purpose', 'Multiple schemas can be stored, switched between, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is selectable; and the operational password can be changed \u2014 all while retaining the intelligent Describe What You Need engine, the structured Query Builder, the CR Builder, and the Error Rectifier.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '10.7.1'], ['Purpose', 'Multiple schemas can be stored, switched between, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is selectable; and the operational password can be changed \u2014 all while retaining the intelligent Describe What You Need engine, the structured Query Builder, the CR Builder, and the Error Rectifier.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
 

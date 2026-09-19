@@ -96,7 +96,7 @@ test('the changed password never appears in plain text anywhere in storage — o
     var stored = storage.getItem(PWM.STORAGE_KEY);
     assertTrue(!!stored);
     assertFalse(stored.indexOf('PlainTextCheck1') !== -1);
-    assertEqual(stored.length, 64); // a SHA-256 hex digest is exactly 64 characters
+    assertEqual(stored.length, 64);
   });
 });
 

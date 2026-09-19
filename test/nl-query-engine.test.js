@@ -127,7 +127,7 @@ test('mergeFilterConditions appends non-duplicate NL filters and skips exact dup
 });
 
 /* ---------------------------------------------------------------------
-   V10.6 "intelligent" section — core success-criteria scenarios.
+   "intelligent" section — core success-criteria scenarios.
    --------------------------------------------------------------------- */
 test('Requirement scenario: "Show all users whose login is allowed" identifies table+column+filter with zero manual selection', function () {
   var r = NLQ.interpretRequirement('Show all users whose login is allowed.', engine, {});
