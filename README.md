@@ -59,9 +59,19 @@ A schema can be **Stored + Active + Default**, **Stored + Active**, or **Stored 
 1. Open `ap-sql-assistant/index.html` in a modern Chromium-based browser (Chrome or Edge recommended for the shared-schema file linking feature).
 2. Follow the **Guided Walkthrough**, or go straight to **Quick Start**.
 3. Go to **Used Schema** to tick which stored schemas should be **Active** right now.
-4. Go to **Update Schema** (password-protected) to set the **Default Schema** and fine-tune the full **Active Schemas** list.
+4. Go to **Update Schema** (password-protected — default password is **`admin123`**, see below) to set the **Default Schema** and fine-tune the full **Active Schemas** list.
 5. Use **Describe What You Need**, the **Read-Only Query Builder**, or the **Query Builder for CR** to generate SQL — only your Active schema(s) are used.
 6. Adjust how often schemas sync using the clearly labeled dropdown in the **top navbar**.
+
+### Default Update Schema Password
+
+The **Update Schema** page is protected by an operational password stored client-side as a SHA-256 hash (never in plain text). Out of the box, this password is:
+
+```
+admin123
+```
+
+**Change this immediately after first unlocking the app**, via **Update Schema → Operational Password**. Once changed, the new password is what unlocks the section going forward (the default `admin123` stops working as soon as a custom password is set) — there is no way to recover a forgotten custom password other than clearing this browser's local storage for the app (which resets it back to `admin123` and does **not** delete any stored schemas).
 
 ---
 

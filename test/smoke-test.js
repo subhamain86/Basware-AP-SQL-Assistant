@@ -12,6 +12,7 @@ var NLQ = load('js/nl-query-engine.js');
 var SCHEMA_TOOLS = load('js/schema-tools.js');
 var GITHUB_SYNC = load('js/github-sync-engine.js');
 var SCHEMA_STORE = load('js/schema-store-engine.js');
+var PASSWORD_MANAGER = load('js/password-manager-engine.js');
 var pass = 0, fail = 0;
 function check(name, cond) { if (cond) { pass++; console.log('  ok  -', name); } else { fail++; console.log('FAIL  -', name); } }
 console.log('AP-SQL Assistant V11.1 — engine smoke test\n============================================');
@@ -58,6 +59,24 @@ check('setDefaultId switches Default without removing the previous default from 
 store.setActiveIds([e2.id]);
 check('setActiveIds always keeps the Default schema active even if omitted', store.isActive(e2.id) && store.isActive(e1.id) === false || store.getSchemaState(e1.id) === 'inactive');
 
-console.log('\n============================================');
-console.log(pass + ' passed, ' + fail + ' failed');
-if (fail > 0) process.exit(1);
+// ---- Regression guard: the documented default Update Schema password MUST actually unlock. ----
+// (This exact bug — a hardcoded hash with no known matching password — previously locked every user out.)
+var fakePwStorage = { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} };
+var pwManager = PASSWORD_MANAGER.createPasswordManager(fakePwStorage);
+Promise.all([
+  pwManager.verifyCurrentPassword('admin123'),
+  pwManager.verifyCurrentPassword('wrong-password-xyz')
+]).then(function (results) {
+  check('documented default password "admin123" successfully unlocks Update Schema', results[0] === true);
+  check('an incorrect password is correctly rejected', results[1] === false);
+
+  console.log('\n============================================');
+  console.log(pass + ' passed, ' + fail + ' failed');
+  if (fail > 0) process.exit(1);
+}).catch(function (err) {
+  console.log('FAIL  - password verification threw an error:', err && err.message);
+  fail++;
+  console.log('\n============================================');
+  console.log(pass + ' passed, ' + fail + ' failed');
+  process.exit(1);
+});
