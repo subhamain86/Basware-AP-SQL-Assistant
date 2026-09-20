@@ -1,7 +1,6 @@
 (function (root) {
   'use strict';
   var DATATYPE = (typeof module === 'object' && module.exports) ? require('./datatype-engine.js') : root.APSQL_DATATYPE;
-
   function createDecodeStore() {
     var manual = {};
     function key(table, column) { return String(table).toUpperCase() + '.' + String(column).toUpperCase(); }
@@ -23,18 +22,13 @@
   function buildDecodeCaseSql(table, column, decodeValues, aliasName, opts) {
     opts = opts || {};
     var col = table ? (table + '.' + column) : column;
-    var lines = ['CASE'];
-    decodeValues.forEach(function (pair) {
-      var isNumeric = /^-?\d+(\.\d+)?$/.test(String(pair.code).trim());
-      var literal = isNumeric ? String(pair.code).trim() : ("'" + String(pair.code).replace(/'/g, "''") + "'");
-      lines.push('    WHEN ' + col + ' = ' + literal + " THEN '" + String(pair.label).replace(/'/g, "''") + "'");
+    var whens = (decodeValues || []).map(function (pair) {
+      var codeLiteral = /^-?\d+(\.\d+)?$/.test(String(pair.code)) ? String(pair.code) : ("'" + String(pair.code).replace(/'/g, "''") + "'");
+      return 'WHEN ' + col + ' = ' + codeLiteral + " THEN '" + String(pair.label).replace(/'/g, "''") + "'";
     });
     var elseExpr = col;
-    if (opts.elseMode !== 'keep' && opts.dataType && DATATYPE) {
-      elseExpr = DATATYPE.getCompatibleElseExpression(col, opts.dataType, opts.dialect || 'Generic');
-    }
-    lines.push('    ELSE ' + elseExpr); lines.push('END AS ' + (aliasName || column));
-    return lines.join('\n');
+    if (opts.elseMode !== 'keep' && opts.dataType && DATATYPE) { elseExpr = DATATYPE.getCompatibleElseExpression(col, opts.dataType, opts.dialect); }
+    return 'CASE\n    ' + whens.join('\n    ') + '\n    ELSE ' + elseExpr + '\nEND AS ' + aliasName;
   }
   var API = { createDecodeStore: createDecodeStore, resolveDecode: resolveDecode, buildDecodeCaseSql: buildDecodeCaseSql };
   if (typeof module === 'object' && module.exports) module.exports = API;

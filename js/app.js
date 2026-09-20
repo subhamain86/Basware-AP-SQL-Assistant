@@ -1,15 +1,7 @@
 (function () {
   'use strict';
-
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
-
-  /* ================================================================
-     V10.7: MULTIPLE SCHEMA STORE — replaces the single "currentSchema"
-     global with a managed collection of named entries. Migrates any
-     pre-V10.7 single-schema localStorage value into the new store on
-     first load, so nothing existing breaks.
-     ================================================================ */
   var LEGACY_SCHEMA_STORAGE_KEY = 'ap_sql_active_schema_v1';
   var schemaStore = APSQL_SCHEMA_STORE.createStore();
   (function migrateOrSeed() {
@@ -17,38 +9,20 @@
     var legacySchema = null;
     try {
       var raw = localStorage.getItem(LEGACY_SCHEMA_STORAGE_KEY);
-      if (raw) {
-        var parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.tables) && window.APSQL_SCHEMA_TOOLS.validateSchema(parsed.tables).valid) legacySchema = parsed;
-      }
-    } catch (e) { /* ignore corrupted legacy value */ }
-    if (legacySchema) {
-      schemaStore.importLegacySingleSchema(legacySchema, legacySchema.schema_name || 'Migrated Schema');
-    } else {
-      schemaStore.addEntry({ name: window.__AP_SCHEMA__.schema_name || 'Default Schema', schema: window.__AP_SCHEMA__, source: 'embedded' });
-    }
+      if (raw) { var parsed = JSON.parse(raw); if (parsed && Array.isArray(parsed.tables) && window.APSQL_SCHEMA_TOOLS.validateSchema(parsed.tables).valid) legacySchema = parsed; }
+    } catch (e) {}
+    if (legacySchema) schemaStore.importLegacySingleSchema(legacySchema, legacySchema.schema_name || 'Migrated Schema');
+    else schemaStore.addEntry({ name: window.__AP_SCHEMA__.schema_name || 'Default Schema', schema: window.__AP_SCHEMA__, source: 'embedded' });
   })();
-
   var relationshipStore = APSQL_RELATIONSHIPS.createRelationshipStore();
   var engine;
   function currentSchema() { return schemaStore.getActiveSchema() || { tables: [] }; }
-  function setActiveSchemaObject(schemaObj) {
-    var entry = schemaStore.getActiveEntry();
-    if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj });
-  }
+  function setActiveSchemaObject(schemaObj) { var entry = schemaStore.getActiveEntry(); if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj }); }
   function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); }
   rebuildEngine();
   var decodeStore = APSQL_DECODE.createDecodeStore();
-
-  /* ================================================================
-     LIVE SHARED SCHEMA — zero-config auto-load (applies to the ACTIVE
-     schema entry)
-     ================================================================ */
-  var sharedSchemaChecked = false;
-  var sharedSchemaFound = false;
-  var sharedSchemaError = null;
+  var sharedSchemaChecked = false, sharedSchemaFound = false, sharedSchemaError = null;
   var SHARED_SCHEMA_PATH = APSQL_SHARED_SCHEMA.DEFAULT_SHARED_SCHEMA_PATH;
-
   function renderSharedSchemaStrip(elId) {
     var el = $(elId); if (!el) return;
     var state = { checked: sharedSchemaChecked, found: sharedSchemaFound, error: sharedSchemaError, path: SHARED_SCHEMA_PATH };
@@ -58,17 +32,12 @@
     el.innerHTML = icon + '<span class="shared-schema-text">' + esc(status.text) + '</span>';
   }
   function renderAllSharedSchemaStrips() {
-    renderSharedSchemaStrip('sharedSchemaStripQuickstart');
-    renderSharedSchemaStrip('sharedSchemaStripBuilder');
-    renderSharedSchemaStrip('sharedSchemaStripCr');
-    renderSharedSchemaStrip('sharedSchemaStripUsedSchema');
+    renderSharedSchemaStrip('sharedSchemaStripQuickstart'); renderSharedSchemaStrip('sharedSchemaStripBuilder'); renderSharedSchemaStrip('sharedSchemaStripCr'); renderSharedSchemaStrip('sharedSchemaStripUsedSchema');
     var adminEl = $('sharedSchemaStatusBodyAdmin');
     if (adminEl) {
       var state = { checked: sharedSchemaChecked, found: sharedSchemaFound, error: sharedSchemaError, path: SHARED_SCHEMA_PATH };
       var status = APSQL_SHARED_SCHEMA.describeSharedSchemaStatus(state);
-      adminEl.innerHTML = '<div class="shared-schema-strip level-' + status.level + '">' +
-        (status.level === 'live' ? '<span class="shared-schema-pulse"></span>' : '<i class="bi ' + (status.level === 'checking' ? 'bi-hourglass-split' : status.level === 'error' ? 'bi-exclamation-triangle-fill' : 'bi-hdd-fill') + '"></i>') +
-        '<span class="shared-schema-text">' + esc(status.text) + '</span></div>';
+      adminEl.innerHTML = '<div class="shared-schema-strip level-' + status.level + '">' + (status.level === 'live' ? '<span class="shared-schema-pulse"></span>' : '<i class="bi ' + (status.level === 'checking' ? 'bi-hourglass-split' : status.level === 'error' ? 'bi-exclamation-triangle-fill' : 'bi-hdd-fill') + '"></i>') + '<span class="shared-schema-text">' + esc(status.text) + '</span></div>';
     }
     var pathDisplay = $('sharedSchemaPathDisplay'); if (pathDisplay) pathDisplay.textContent = SHARED_SCHEMA_PATH;
   }
@@ -79,38 +48,21 @@
       var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
       var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
       if (!validation.valid) { sharedSchemaFound = false; sharedSchemaError = 'The published shared schema failed validation, so it was ignored.'; renderAllSharedSchemaStrips(); return; }
-      sharedSchemaFound = true;
-      setActiveSchemaObject(result.schema); rebuildEngine();
-      refreshAllViewsAfterSchemaChange();
-      renderSchemaPersistenceStatus();
-      renderAllSharedSchemaStrips();
-    }).catch(function (err) {
-      sharedSchemaChecked = true; sharedSchemaFound = false;
-      sharedSchemaError = isManualCheck ? err.message : null;
-      renderAllSharedSchemaStrips();
-    });
+      sharedSchemaFound = true; setActiveSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderAllSharedSchemaStrips();
+    }).catch(function (err) { sharedSchemaChecked = true; sharedSchemaFound = false; sharedSchemaError = isManualCheck ? err.message : null; renderAllSharedSchemaStrips(); });
   }
-  renderAllSharedSchemaStrips();
-  checkSharedSchema(false);
-
-  /* ================================================================
-     CROSS-DEVICE SCHEMA SYNC — OPTION A: File System Access API
-     (operates on the currently active/targeted schema entry)
-     ================================================================ */
+  renderAllSharedSchemaStrips(); checkSharedSchema(false);
   var syncSupported = APSQL_SYNC.isFileSystemAccessSupported(window);
   var syncHandleStore = syncSupported ? APSQL_SYNC.createHandleStore() : null;
   var linkedHandle = null, linkedFileName = null, lastKnownFileModified = null;
   var syncNeedsReconnect = false, syncError = null, syncLastCheckedAt = null;
   var pendingSaveRelationshipDraft = null;
-
   function currentSyncState() { return { supported: syncSupported, linked: !!linkedHandle, fileName: linkedFileName, needsReconnect: syncNeedsReconnect, error: syncError }; }
   function renderSyncStatus(transientNote) {
     var statusBody = $('schemaSyncStatusBody'); var actionsBody = $('schemaSyncActionsBody'); var lastCheckEl = $('schemaSyncLastCheck');
     if (!statusBody || !actionsBody) return;
     var status = APSQL_SYNC.describeSyncStatus(currentSyncState());
-    statusBody.innerHTML = '<div class="schema-sync-status-line level-' + status.level + '">' +
-      (status.level === 'linked' ? '<span class="schema-sync-pulse"></span>' : '<i class="bi ' + (status.level === 'unsupported' ? 'bi-info-circle' : status.level === 'error' ? 'bi-exclamation-triangle-fill' : status.level === 'reconnect' ? 'bi-plug-fill' : 'bi-cloud-slash') + '"></i>') +
-      '<span>' + esc(transientNote || status.text) + '</span></div>';
+    statusBody.innerHTML = '<div class="schema-sync-status-line level-' + status.level + '">' + (status.level === 'linked' ? '<span class="schema-sync-pulse"></span>' : '<i class="bi ' + (status.level === 'unsupported' ? 'bi-info-circle' : status.level === 'error' ? 'bi-exclamation-triangle-fill' : status.level === 'reconnect' ? 'bi-plug-fill' : 'bi-cloud-slash') + '"></i>') + '<span>' + esc(transientNote || status.text) + '</span></div>';
     actionsBody.innerHTML = '';
     if (!syncSupported) { lastCheckEl.textContent = ''; return; }
     function addBtn(label, iconClass, cls, handler) { var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-sm ' + cls; btn.innerHTML = '<i class="bi ' + iconClass + ' me-1"></i>' + label; btn.addEventListener('click', handler); actionsBody.appendChild(btn); }
@@ -130,9 +82,7 @@
         var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
         var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
         if (!validation.valid) { renderSyncStatus(); return; }
-        setActiveSchemaObject(result.schema); rebuildEngine();
-        lastKnownFileModified = result.lastModified;
-        refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+        setActiveSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
         syncError = null;
         renderSyncStatus(isManualCheck ? 'Checked the shared file just now.' : 'Schema synced from the shared file (it was updated elsewhere).');
       });
@@ -163,9 +113,7 @@
             var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
             var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
             if (!validation.valid) throw new Error('That file does not contain a valid AP-SQL Assistant schema.');
-            linkedHandle = handle; linkedFileName = handle.name; syncNeedsReconnect = false;
-            setActiveSchemaObject(result.schema); rebuildEngine();
-            lastKnownFileModified = result.lastModified;
+            linkedHandle = handle; linkedFileName = handle.name; syncNeedsReconnect = false; setActiveSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified;
             return syncHandleStore.saveHandle(handle);
           });
         });
@@ -182,13 +130,8 @@
       return APSQL_SYNC.verifyPermissionSilent(handle, 'read').then(function (granted) { if (!granted) { syncNeedsReconnect = true; renderSyncStatus(); return; } return checkLinkedFileForUpdates(false).then(function () { renderSyncStatus(); }); });
     }).catch(function () { renderSyncStatus(); });
   } else { renderSyncStatus(); }
-
-  /* ================================================================
-     CROSS-DEVICE SCHEMA SYNC — OPTION B: GitHub (administrator-facing)
-     ================================================================ */
   var githubConfigStore = APSQL_GITHUB_SYNC.createConfigStore();
   var githubConfig = null, githubLastSha = null, githubError = null, githubConflict = false, githubLastCheckedAt = null;
-
   function renderGithubSyncStatus(transientNote) {
     var statusBody = $('githubSyncStatusBody'); var actionsBody = $('githubSyncActionsBody'); var lastCheckEl = $('githubSyncLastCheck'); var configForm = $('githubSyncConfigForm'); var tokenWarningBox = $('githubTokenWarningBox');
     if (!statusBody || !actionsBody) return;
@@ -212,9 +155,7 @@
         var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
         var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
         if (!validation.valid) throw new Error('That file does not contain a valid AP-SQL Assistant schema.');
-        githubConfig = config; githubLastSha = result.sha;
-        setActiveSchemaObject(result.schema); rebuildEngine();
-        refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+        githubConfig = config; githubLastSha = result.sha; setActiveSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
         return null;
       }
       githubConfig = config;
@@ -232,10 +173,7 @@
       var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
       var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
       if (!validation.valid) { renderGithubSyncStatus(); return; }
-      setActiveSchemaObject(result.schema); rebuildEngine();
-      githubLastSha = result.sha;
-      refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
-      githubError = null; githubConflict = false;
+      setActiveSchemaObject(result.schema); rebuildEngine(); githubLastSha = result.sha; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); githubError = null; githubConflict = false;
       renderGithubSyncStatus(isManualCheck ? 'Checked GitHub just now.' : 'Schema synced from GitHub (it was updated elsewhere).');
     }).catch(function (err) { if (isManualCheck) { githubError = err.message; renderGithubSyncStatus(); } });
   }
@@ -252,63 +190,25 @@
     var saved = githubConfigStore.loadConfig();
     if (!saved) { renderGithubSyncStatus(); return; }
     $('githubOwnerInput').value = saved.owner || ''; $('githubRepoInput').value = saved.repo || ''; $('githubBranchInput').value = saved.branch || 'main'; $('githubPathInput').value = saved.path || SHARED_SCHEMA_PATH; $('githubTokenInput').value = saved.token || '';
-    githubConfig = saved;
-    checkGithubForUpdates(false).then(function () { renderGithubSyncStatus(); });
+    githubConfig = saved; checkGithubForUpdates(false).then(function () { renderGithubSyncStatus(); });
   })();
   (function defaultGithubPathToSharedPath() { var pathInput = $('githubPathInput'); if (pathInput && !pathInput.value) pathInput.value = SHARED_SCHEMA_PATH; })();
-
-  /* ================================================================
-     V10.7: SELECTABLE SCHEMA SYNCHRONIZATION SCHEDULE
-     ================================================================ */
   var syncScheduleSelectedId = APSQL_SYNC_SCHEDULE.loadSelectedOptionId();
   var syncIntervalHandle = null;
-  function runAllAutomaticSyncChecks() {
-    if (typeof document.hidden !== 'undefined' && document.hidden) return;
-    checkSharedSchema(false);
-    checkLinkedFileForUpdates(false);
-    checkGithubForUpdates(false);
-  }
-  function applySyncScheduleInterval() {
-    if (syncIntervalHandle) { clearInterval(syncIntervalHandle); syncIntervalHandle = null; }
-    var ms = APSQL_SYNC_SCHEDULE.toIntervalMs(syncScheduleSelectedId);
-    if (ms != null) syncIntervalHandle = setInterval(runAllAutomaticSyncChecks, ms);
-  }
+  function runAllAutomaticSyncChecks() { if (typeof document.hidden !== 'undefined' && document.hidden) return; checkSharedSchema(false); checkLinkedFileForUpdates(false); checkGithubForUpdates(false); }
+  function applySyncScheduleInterval() { if (syncIntervalHandle) { clearInterval(syncIntervalHandle); syncIntervalHandle = null; } var ms = APSQL_SYNC_SCHEDULE.toIntervalMs(syncScheduleSelectedId); if (ms != null) syncIntervalHandle = setInterval(runAllAutomaticSyncChecks, ms); }
   applySyncScheduleInterval();
   if (typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', function () { if (!document.hidden) runAllAutomaticSyncChecks(); });
-  function renderSyncScheduleSelect() {
-    var sel = $('syncScheduleSelect'); if (!sel) return;
-    sel.innerHTML = APSQL_SYNC_SCHEDULE.OPTIONS.map(function (o) { return '<option value="' + o.id + '">' + esc(o.label) + '</option>'; }).join('');
-    sel.value = syncScheduleSelectedId;
-    var note = $('syncScheduleCurrentNote');
-    if (note) note.textContent = 'Currently synchronizing: ' + APSQL_SYNC_SCHEDULE.getOption(syncScheduleSelectedId).label + '.';
-  }
+  function renderSyncScheduleSelect() { var sel = $('syncScheduleSelect'); if (!sel) return; sel.innerHTML = APSQL_SYNC_SCHEDULE.OPTIONS.map(function (o) { return '<option value="' + o.id + '">' + esc(o.label) + '</option>'; }).join(''); sel.value = syncScheduleSelectedId; var note = $('syncScheduleCurrentNote'); if (note) note.textContent = 'Currently synchronizing: ' + APSQL_SYNC_SCHEDULE.getOption(syncScheduleSelectedId).label + '.'; }
   renderSyncScheduleSelect();
-  $('syncScheduleSelect').addEventListener('change', function () {
-    syncScheduleSelectedId = $('syncScheduleSelect').value;
-    APSQL_SYNC_SCHEDULE.saveSelectedOptionId(null, syncScheduleSelectedId);
-    applySyncScheduleInterval();
-    renderSyncScheduleSelect();
-  });
-
-  /* ================================================================
-     V10.7 (fixed in V10.7.1): SECURE GITHUB CONNECTION VAULT
-     ---------------------------------------------------------------
-     BUG FIX: the vault-unlock lookup no longer sends any hardcoded
-     placeholder token. It now sends whatever real token the user has
-     already typed into the GitHub Token field (if any), or omits the
-     Authorization header entirely (anonymous GET, which GitHub allows
-     for public repositories) when the field is empty. See
-     github-sync-engine.js's fetchRawJsonFile()/authHeadersOptional().
-     ================================================================ */
+  $('syncScheduleSelect').addEventListener('change', function () { syncScheduleSelectedId = $('syncScheduleSelect').value; APSQL_SYNC_SCHEDULE.saveSelectedOptionId(null, syncScheduleSelectedId); applySyncScheduleInterval(); renderSyncScheduleSelect(); });
   function renderVaultStatus(transientNote, level) {
-    var box = $('vaultStatusBody'); if (!box) return;
-    var lvl = level || 'unset';
+    var box = $('vaultStatusBody'); if (!box) return; var lvl = level || 'unset';
     var text = transientNote || (APSQL_VAULT.isSupported() ? 'No vault has been published in this session yet. Fill in the GitHub connection above, enter a passphrase, and click "Encrypt & Publish Vault".' : 'This browser does not support the Web Crypto API required for the secure credential vault.');
     box.innerHTML = '<div class="vault-status-line level-' + lvl + '"><i class="bi ' + (lvl === 'published' ? 'bi-shield-check' : lvl === 'error' ? 'bi-exclamation-triangle-fill' : 'bi-shield-lock') + '"></i><span>' + esc(text) + '</span></div>';
   }
   function refreshVaultControlAvailability() {
-    var unsupportedNote = $('vaultUnsupportedNote'); var controls = $('vaultControls');
-    if (!unsupportedNote || !controls) return;
+    var unsupportedNote = $('vaultUnsupportedNote'); var controls = $('vaultControls'); if (!unsupportedNote || !controls) return;
     var supported = APSQL_VAULT.isSupported();
     unsupportedNote.classList.toggle('d-none', supported);
     if (!supported) unsupportedNote.textContent = 'This browser does not support the Web Crypto API (SubtleCrypto) required to encrypt or decrypt the credential vault. Try a modern version of Chrome, Edge, Firefox, or Safari.';
@@ -317,57 +217,30 @@
   }
   renderVaultStatus(); refreshVaultControlAvailability();
   $('publishVaultBtn').addEventListener('click', function () {
-    var passphrase = $('vaultPassphraseInput').value;
-    var resultBox = $('vaultResultBox');
+    var passphrase = $('vaultPassphraseInput').value; var resultBox = $('vaultResultBox');
     if (!githubConfig) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Connect GitHub-Hosted Schema Sync above first, so there is a connection to encrypt.</div>'; return; }
     if (!passphrase) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Please enter a vault passphrase.</div>'; return; }
     resultBox.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><i class="bi bi-hourglass-split me-1"></i>Encrypting and publishing the vault\u2026</div>';
     APSQL_VAULT.buildVaultBlob(githubConfig, passphrase).then(function (blobText) {
       var vaultPath = githubConfig.path.replace(/(\.[^./]+)?$/, '') + '.vault.json';
       var vaultGithubConfig = Object.assign({}, githubConfig, { path: vaultPath });
-      /* NOTE: the vault's PUBLISH step always uses the real, complete
-       * githubConfig (which necessarily includes a valid write-capable
-       * token, since Connect & Sync Now already succeeded with it) — the
-       * bug being fixed here only ever affected the separate UNLOCK
-       * (read-only lookup) step below, which historically ran before any
-       * real token was available. */
-      return APSQL_GITHUB_SYNC.fetchRawJsonFile(vaultGithubConfig).then(function (existing) {
-        return APSQL_GITHUB_SYNC.pushSchemaToGitHub(vaultGithubConfig, JSON.parse(blobText), existing.exists ? existing.sha : null);
-      }).then(function () {
+      return APSQL_GITHUB_SYNC.fetchRawJsonFile(vaultGithubConfig).then(function (existing) { return APSQL_GITHUB_SYNC.pushSchemaToGitHub(vaultGithubConfig, JSON.parse(blobText), existing.exists ? existing.sha : null); }).then(function () {
         renderVaultStatus('Vault published to ' + vaultGithubConfig.path + '. Share the passphrase with authorized users out-of-band \u2014 it is never stored in the vault itself.', 'published');
         resultBox.innerHTML = '<div class="alert alert-success py-2 mb-0 small"><i class="bi bi-check-circle-fill me-1"></i>Vault encrypted and published successfully. The token was never sent or stored in plain text.</div>';
         $('vaultPassphraseInput').value = '';
       });
-    }).catch(function (err) {
-      renderVaultStatus('Could not publish the vault: ' + err.message, 'error');
-      resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(err.message) + '</div>';
-    });
+    }).catch(function (err) { renderVaultStatus('Could not publish the vault: ' + err.message, 'error'); resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(err.message) + '</div>'; });
   });
   $('unlockVaultBtn').addEventListener('click', function () {
-    var passphrase = $('vaultUnlockPassphraseInput').value;
-    var resultBox = $('vaultResultBox');
+    var passphrase = $('vaultUnlockPassphraseInput').value; var resultBox = $('vaultResultBox');
     var pathInput = ($('githubPathInput').value || SHARED_SCHEMA_PATH).trim();
     var vaultPath = pathInput.replace(/(\.[^./]+)?$/, '') + '.vault.json';
-    var owner = ($('githubOwnerInput').value || '').trim();
-    var repo = ($('githubRepoInput').value || '').trim();
-    var branch = ($('githubBranchInput').value || 'main').trim() || 'main';
-    /* FIX (was the root cause of the reported 401 error): use whatever
-     * real token the user has already typed into the Token field, if
-     * any — trimmed to '' (not a fabricated placeholder string) when
-     * empty. An empty token here means "attempt this lookup
-     * anonymously", which github-sync-engine.js's fetchRawJsonFile()
-     * correctly implements as omitting the Authorization header
-     * entirely (GitHub permits anonymous reads of public repositories).
-     * Previously this was hardcoded to the literal string
-     * 'unauthenticated-lookup', which GitHub always rejected as an
-     * invalid credential with a 401, regardless of what — if anything —
-     * the user had typed into the Token field. */
+    var owner = ($('githubOwnerInput').value || '').trim(); var repo = ($('githubRepoInput').value || '').trim(); var branch = ($('githubBranchInput').value || 'main').trim() || 'main';
     var typedToken = ($('githubTokenInput').value || '').trim();
     if (!owner || !repo) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Please fill in at least the repository owner and name above, so the vault file can be located.</div>'; return; }
     if (!passphrase) { resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">Please enter the vault passphrase to unlock.</div>'; return; }
     resultBox.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><i class="bi bi-hourglass-split me-1"></i>Fetching and unlocking the vault\u2026</div>';
-    var lookupConfig = { owner: owner, repo: repo, branch: branch, path: vaultPath };
-    if (typedToken) lookupConfig.token = typedToken;
+    var lookupConfig = { owner: owner, repo: repo, branch: branch, path: vaultPath }; if (typedToken) lookupConfig.token = typedToken;
     APSQL_GITHUB_SYNC.fetchRawJsonFile(lookupConfig).then(function (result) {
       if (!result.exists) throw new Error('No vault file was found at ' + vaultPath + '. Ask an administrator to publish one first.');
       return APSQL_VAULT.decryptConfig(result.content, passphrase);
@@ -375,144 +248,98 @@
       $('githubOwnerInput').value = decryptedConfig.owner || ''; $('githubRepoInput').value = decryptedConfig.repo || ''; $('githubBranchInput').value = decryptedConfig.branch || 'main'; $('githubPathInput').value = decryptedConfig.path || ''; $('githubTokenInput').value = decryptedConfig.token || '';
       resultBox.innerHTML = '<div class="alert alert-success py-2 mb-0 small"><i class="bi bi-check-circle-fill me-1"></i>Vault unlocked. The GitHub connection fields above have been filled in \u2014 click "Connect &amp; Sync Now" to activate this connection on this machine.</div>';
       $('vaultUnlockPassphraseInput').value = '';
-    }).catch(function (err) {
-      resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(err.message) + '</div>';
-    });
+    }).catch(function (err) { resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(err.message) + '</div>'; });
   });
-
-  /* ================================================================
-     V10.7: OPERATIONAL PASSWORD MANAGEMENT
-     ================================================================ */
   var passwordManager = APSQL_PASSWORD_MANAGER.createPasswordManager();
-  function renderPasswordCustomNote() {
-    var note = $('passwordCustomStatusNote'); if (!note) return;
-    note.textContent = passwordManager.isCustomPasswordSet() ? '(A custom password is currently set in this browser.)' : '(Currently using the default password for this browser.)';
-  }
+  function renderPasswordCustomNote() { var note = $('passwordCustomStatusNote'); if (!note) return; note.textContent = passwordManager.isCustomPasswordSet() ? '(A custom password is currently set in this browser.)' : '(Currently using the default password for this browser.)'; }
   renderPasswordCustomNote();
   $('changePasswordBtn').addEventListener('click', function () {
-    var current = $('currentPasswordInput').value, next = $('newPasswordInput').value, confirmNext = $('confirmNewPasswordInput').value;
-    var resultBox = $('passwordChangeResultBox');
+    var current = $('currentPasswordInput').value, next = $('newPasswordInput').value, confirmNext = $('confirmNewPasswordInput').value; var resultBox = $('passwordChangeResultBox');
     passwordManager.changePassword(current, next, confirmNext).then(function (result) {
       if (!result.ok) { resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small">' + esc(result.error) + '</div>'; return; }
       resultBox.innerHTML = '<div class="alert alert-success py-2 mb-0 small"><i class="bi bi-check-circle-fill me-1"></i>The operational password has been changed successfully in this browser.</div>';
-      $('currentPasswordInput').value = ''; $('newPasswordInput').value = ''; $('confirmNewPasswordInput').value = '';
-      renderPasswordCustomNote();
+      $('currentPasswordInput').value = ''; $('newPasswordInput').value = ''; $('confirmNewPasswordInput').value = ''; renderPasswordCustomNote();
     });
   });
-
   function persistCurrentSchema() { schemaStore.persist(); syncWriteCurrentSchemaIfLinked(); pushToGithubIfConfigured(); }
-  function renderSchemaPersistenceStatus() {
-    var el = $('schemaPersistenceStatus'); if (!el) return;
-    var entry = schemaStore.getActiveEntry();
-    el.innerHTML = '<i class="bi bi-hdd-fill"></i><span>Currently working with <strong>' + esc(entry ? entry.name : 'an unnamed schema') + '</strong> (' + schemaStore.count() + ' schema' + (schemaStore.count() === 1 ? '' : 's') + ' stored in this browser). Applying an update or deleting content is saved automatically from now on.</span>';
-  }
+  function renderSchemaPersistenceStatus() { var el = $('schemaPersistenceStatus'); if (!el) return; var entry = schemaStore.getActiveEntry(); el.innerHTML = '<i class="bi bi-hdd-fill"></i><span>Currently working with <strong>' + esc(entry ? entry.name : 'an unnamed schema') + '</strong> (' + schemaStore.count() + ' schema' + (schemaStore.count() === 1 ? '' : 's') + ' stored in this browser). Applying an update or deleting content is saved automatically from now on.</span>'; }
   renderSchemaPersistenceStatus();
-
-  /* ================================================================
-     V10.7: Stored-schema management UI (Used Schema + Update Schema)
-     ================================================================ */
   function syncStatusBadgeClass(status) { return 'status-' + (status || 'idle'); }
   function renderSchemaStoreList() {
-    var box = $('schemaStoreList'); if (!box) return;
-    box.innerHTML = '';
+    var box = $('schemaStoreList'); if (!box) return; box.innerHTML = '';
     var entries = schemaStore.listEntries();
     if (!entries.length) { var empty = document.createElement('div'); empty.className = 'schema-store-empty'; empty.textContent = 'No schemas stored yet. Add one under Update Schema.'; box.appendChild(empty); return; }
     var activeId = schemaStore.getActiveId();
     entries.forEach(function (e) {
-      var st = APSQL.createEngine(e.schema).getStatus();
-      var isActive = e.id === activeId;
+      var st = APSQL.createEngine(e.schema).getStatus(); var isActive = e.id === activeId;
       var item = document.createElement('div'); item.className = 'schema-store-item' + (isActive ? ' active' : ''); item.setAttribute('data-entry-id', e.id);
       var main = document.createElement('div'); main.className = 'schema-store-item-main';
-      var nameLine = document.createElement('div'); nameLine.className = 'schema-store-item-name';
-      nameLine.innerHTML = '<i class="bi bi-database"></i> ' + esc(e.name) + (isActive ? ' <span class="badge text-bg-primary schema-store-active-badge">Active</span>' : '');
-      var metaLine = document.createElement('div'); metaLine.className = 'schema-store-item-meta';
-      metaLine.innerHTML = '<span>Version: ' + esc(st.schemaVersion || '\u2014') + '</span><span>Source: ' + esc(e.source) + '</span><span>Tables: ' + st.tableCount + '</span><span>Last sync: ' + (e.lastSyncAt ? new Date(e.lastSyncAt).toLocaleString() : 'never') + '</span><span class="schema-store-sync-badge ' + syncStatusBadgeClass(e.lastSyncStatus) + '">Sync status: ' + esc(e.lastSyncStatus) + (e.lastSyncError ? ' (' + esc(e.lastSyncError) + ')' : '') + '</span>';
+      var nameLine = document.createElement('div'); nameLine.className = 'schema-store-item-name'; nameLine.innerHTML = '<i class="bi bi-database"></i> ' + esc(e.name) + (isActive ? ' <span class="badge text-bg-primary schema-store-active-badge">Active</span>' : '');
+      var metaLine = document.createElement('div'); metaLine.className = 'schema-store-item-meta'; metaLine.innerHTML = '<span>Version: ' + esc(st.schemaVersion || '\u2014') + '</span><span>Source: ' + esc(e.source) + '</span><span>Tables: ' + st.tableCount + '</span><span>Last sync: ' + (e.lastSyncAt ? new Date(e.lastSyncAt).toLocaleString() : 'never') + '</span><span class="schema-store-sync-badge ' + syncStatusBadgeClass(e.lastSyncStatus) + '">Sync status: ' + esc(e.lastSyncStatus) + (e.lastSyncError ? ' (' + esc(e.lastSyncError) + ')' : '') + '</span>';
       main.appendChild(nameLine); main.appendChild(metaLine);
       var actions = document.createElement('div'); actions.className = 'schema-store-item-actions';
       if (!isActive) {
         var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm schema-store-select-btn'; selectBtn.setAttribute('data-entry-id', e.id);
         selectBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Set Active';
-        selectBtn.addEventListener('click', function () {
-          schemaStore.setActiveId(e.id);
-          rebuildEngine();
-          refreshAllViewsAfterSchemaChange();
-          renderSchemaPersistenceStatus();
-          renderSchemaStoreList();
-        });
+        selectBtn.addEventListener('click', function () { schemaStore.setActiveId(e.id); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); });
         actions.appendChild(selectBtn);
       }
-      item.appendChild(main); item.appendChild(actions);
-      box.appendChild(item);
+      item.appendChild(main); item.appendChild(actions); box.appendChild(item);
     });
   }
   var targetSchemaId = null;
   function renderTargetSchemaSelect() {
-    var sel = $('targetSchemaSelect'); if (!sel) return;
-    var entries = schemaStore.listEntries();
+    var sel = $('targetSchemaSelect'); if (!sel) return; var entries = schemaStore.listEntries();
     if (!targetSchemaId || !entries.some(function (e) { return e.id === targetSchemaId; })) targetSchemaId = schemaStore.getActiveId();
     sel.innerHTML = entries.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + (e.id === schemaStore.getActiveId() ? ' (active)' : '') + '</option>'; }).join('');
     sel.value = targetSchemaId;
   }
   $('targetSchemaSelect').addEventListener('change', function () { targetSchemaId = $('targetSchemaSelect').value; });
   function targetSchemaEntry() { return schemaStore.getEntry(targetSchemaId) || schemaStore.getActiveEntry(); }
-
   $('showAddSchemaFormBtn').addEventListener('click', function () { $('addSchemaFormBox').classList.remove('d-none'); $('newSchemaNameInput').value = ''; $('newSchemaNameInput').focus(); });
   $('cancelAddSchemaBtn').addEventListener('click', function () { $('addSchemaFormBox').classList.add('d-none'); });
   $('confirmAddSchemaBtn').addEventListener('click', function () {
-    var name = ($('newSchemaNameInput').value || '').trim();
-    if (!name) { $('newSchemaNameInput').focus(); return; }
+    var name = ($('newSchemaNameInput').value || '').trim(); if (!name) { $('newSchemaNameInput').focus(); return; }
     var entry = schemaStore.addEntry({ name: name, schema: { schema_name: name, schema_version: '0.0', tables: [] }, source: 'upload' });
-    targetSchemaId = entry.id;
-    $('addSchemaFormBox').classList.add('d-none');
-    renderTargetSchemaSelect(); renderSchemaStoreList();
+    targetSchemaId = entry.id; $('addSchemaFormBox').classList.add('d-none'); renderTargetSchemaSelect(); renderSchemaStoreList();
   });
   $('deleteTargetSchemaBtn').addEventListener('click', function () {
     if (schemaStore.count() <= 1) { alert('At least one schema must remain stored. Add another schema before removing this one.'); return; }
-    $('deleteStoredSchemaPasswordInput').value = ''; $('deleteStoredSchemaPasswordError').classList.add('d-none');
-    if (deleteStoredSchemaModal) deleteStoredSchemaModal.show();
+    $('deleteStoredSchemaPasswordInput').value = ''; $('deleteStoredSchemaPasswordError').classList.add('d-none'); if (deleteStoredSchemaModal) deleteStoredSchemaModal.show();
   });
   var deleteStoredSchemaModalEl = $('deleteStoredSchemaModal'); var deleteStoredSchemaModal = window.bootstrap ? new window.bootstrap.Modal(deleteStoredSchemaModalEl) : null;
   $('confirmDeleteStoredSchemaBtn').addEventListener('click', function () {
     var pw = $('deleteStoredSchemaPasswordInput').value;
     passwordManager.verifyCurrentPassword(pw).then(function (ok) {
       if (!ok) { $('deleteStoredSchemaPasswordError').classList.remove('d-none'); return; }
-      schemaStore.removeEntry(targetSchemaId);
-      targetSchemaId = schemaStore.getActiveId();
-      rebuildEngine();
+      schemaStore.removeEntry(targetSchemaId); targetSchemaId = schemaStore.getActiveId(); rebuildEngine();
       refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); renderTargetSchemaSelect();
       if (deleteStoredSchemaModal) deleteStoredSchemaModal.hide();
     });
   });
-
   function moduleLabels() { return engine.getModuleLabels(); }
   function allTables() { return engine.getAllTables().slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }); }
-
   function syncNavbarOffset() { var navbar = $('mainNavbar'); if (!navbar) return; document.documentElement.style.setProperty('--navbar-h', navbar.offsetHeight + 'px'); }
   syncNavbarOffset(); window.addEventListener('resize', syncNavbarOffset); window.addEventListener('load', syncNavbarOffset);
-
   var THEME_KEY = 'ap_sql_theme';
   function systemPrefersDark() { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; }
   function applyTheme(choice) { document.documentElement.setAttribute('data-bs-theme', choice === 'auto' ? (systemPrefersDark() ? 'dark' : 'light') : choice); }
   function setTheme(choice) { try { localStorage.setItem(THEME_KEY, choice); } catch (e) {} applyTheme(choice); }
   (function initTheme() { var saved = 'auto'; try { saved = localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) {} applyTheme(saved); if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { var current = 'auto'; try { current = localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) {} if (current === 'auto') applyTheme('auto'); }); })();
   document.querySelectorAll('[data-theme]').forEach(function (btn) { btn.addEventListener('click', function () { setTheme(btn.getAttribute('data-theme')); }); });
-
   var offcanvasEl = $('mainMenu'); var offcanvasInstance = window.bootstrap ? new window.bootstrap.Offcanvas(offcanvasEl) : null;
   function closeMenu() { if (offcanvasInstance) offcanvasInstance.hide(); }
   var currentView = 'quickstart';
   function showView(view) {
     document.querySelectorAll('.offcanvas-body > button.nav-link, .menu-submenu .nav-link').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === view); });
     document.querySelectorAll('.app-view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
-    window.scrollTo(0, 0);
-    currentView = view;
+    window.scrollTo(0, 0); currentView = view;
     if (view === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); }
   }
   document.querySelectorAll('[data-view]').forEach(function (b) { b.addEventListener('click', function () { showView(b.getAttribute('data-view')); closeMenu(); }); });
   function makeCollapsible(toggleId, submenuId) { var toggle = $(toggleId), submenu = $(submenuId); toggle.addEventListener('click', function () { toggle.classList.toggle('open'); submenu.classList.toggle('open'); }); }
   makeCollapsible('queryBuilderMenuToggle', 'queryBuilderSubmenu'); makeCollapsible('schemaMenuToggle', 'schemaSubmenu'); makeCollapsible('themeMenuToggle', 'themeSubmenu');
-
   document.querySelectorAll('#manualTabs .nav-link').forEach(function (t) { t.addEventListener('click', function () { var name = t.getAttribute('data-tab'); document.querySelectorAll('#manualTabs .nav-link').forEach(function (x) { x.classList.toggle('active', x === t); }); document.querySelectorAll('.tab-pane-manual').forEach(function (p) { var show = p.id === 'pane-' + name; p.classList.toggle('d-none', !show); p.classList.toggle('active', show); }); if (name === 'requirements') renderRequirementsSummary(); }); });
-
   var QS_BADGE_COLORS = ['badge-teal', 'badge-indigo', 'badge-orange', 'badge-purple', 'badge-pink', 'badge-blue'];
   var QUICK_EXAMPLES = [
     { ic: '&#128100;', title: 'Users whose login is allowed', desc: 'A simple single-table filter — resolved automatically.', text: 'Show all users whose login is allowed.' },
@@ -527,20 +354,14 @@
     grid.innerHTML = QUICK_EXAMPLES.map(function (q, i) { return '<div class="col"><div class="card qs-example-card h-100" data-i="' + i + '"><div class="card-body"><div class="qs-icon-badge ' + QS_BADGE_COLORS[i % QS_BADGE_COLORS.length] + ' mb-2">' + q.ic + '</div><h3 class="h6">' + esc(q.title) + '</h3><p class="text-body-secondary small mb-0">' + esc(q.desc) + '</p></div></div></div>'; }).join('');
     grid.querySelectorAll('.qs-example-card').forEach(function (card) {
       card.addEventListener('click', function () {
-        var q = QUICK_EXAMPLES[+card.getAttribute('data-i')];
-        showView('builder');
+        var q = QUICK_EXAMPLES[+card.getAttribute('data-i')]; showView('builder');
         if (q.hierarchy) { resetQueryState(false); $('optHierarchy').value = q.hierarchy; selectedTables = [q.hierarchy]; columnState = {}; refreshTablesColumnsUI(); runGenerate(); }
         else { resetQueryState(false); $('promptInput').value = q.text; runGenerate(); }
       });
     });
     refreshModuleChips();
   })();
-  function refreshModuleChips() {
-    var counts = {}; allTables().forEach(function (t) { counts[t.module] = (counts[t.module] || 0) + 1; });
-    var labels = moduleLabels();
-    $('qsModuleChips').innerHTML = Object.keys(counts).sort().map(function (m) { return '<span class="badge text-bg-light border module-chip">' + esc(labels[m] || m) + ' &middot; ' + counts[m] + '</span>'; }).join('');
-  }
-
+  function refreshModuleChips() { var counts = {}; allTables().forEach(function (t) { counts[t.module] = (counts[t.module] || 0) + 1; }); var labels = moduleLabels(); $('qsModuleChips').innerHTML = Object.keys(counts).sort().map(function (m) { return '<span class="badge text-bg-light border module-chip">' + esc(labels[m] || m) + ' &middot; ' + counts[m] + '</span>'; }).join(''); }
   var selectedTables = []; var columnState = {};
   function refreshModuleDropdown() { var sel = $('moduleFilterSel'); var labels = moduleLabels(); var counts = {}; allTables().forEach(function (t) { counts[t.module] = (counts[t.module] || 0) + 1; }); sel.innerHTML = '<option value="">Select Module &#9662;</option>' + Object.keys(counts).sort().map(function (m) { return '<option value="' + m + '">' + esc(labels[m] || m) + ' (' + counts[m] + ')</option>'; }).join(''); }
   function renderTableList() {
@@ -549,8 +370,7 @@
     allTables().forEach(function (t) {
       if (moduleFilter && t.module !== moduleFilter) return;
       if (searchFilter && (t.name + ' ' + (t.notes || '')).toLowerCase().indexOf(searchFilter) === -1) return;
-      var col = document.createElement('div'); col.className = 'col';
-      var checked = selectedTables.indexOf(t.name) !== -1;
+      var col = document.createElement('div'); col.className = 'col'; var checked = selectedTables.indexOf(t.name) !== -1;
       col.innerHTML = '<div class="form-check"><input class="form-check-input" type="checkbox" id="tbl_' + t.name + '" ' + (checked ? 'checked' : '') + '><label class="form-check-label small" for="tbl_' + t.name + '"><code>' + t.name + '</code> <span class="text-body-secondary">(' + t.module + ')</span></label></div>';
       col.querySelector('input').addEventListener('change', function (e) { toggleTable(t.name, e.target.checked); });
       grid.appendChild(col);
@@ -565,12 +385,10 @@
   function refreshSelectedTableDropdown() { var sel = $('selectedTableDropdown'); var current = sel.value; sel.innerHTML = '<option value="">Selected Table &#9662;</option>' + selectedTables.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join(''); if (selectedTables.indexOf(current) !== -1) sel.value = current; else if (selectedTables.length) sel.value = selectedTables[0]; }
   $('selectedTableDropdown').addEventListener('change', renderColumnList);
   function ensureColState(tname) { if (!columnState[tname]) columnState[tname] = {}; return columnState[tname]; }
-
   function buildDecodeInlineEditor(tname, col, decodeCb, panelParent) {
     var wrap = document.createElement('span'); wrap.className = 'd-inline-flex align-items-center gap-1';
     var badge = document.createElement('span'); badge.className = 'badge text-bg-light border decode-source-badge d-none';
-    var toggleBtn = document.createElement('button'); toggleBtn.type = 'button'; toggleBtn.className = 'btn btn-link btn-sm p-0 small';
-    var panel = null;
+    var toggleBtn = document.createElement('button'); toggleBtn.type = 'button'; toggleBtn.className = 'btn btn-link btn-sm p-0 small'; var panel = null;
     function syncLabel() {
       var resolved = APSQL_DECODE.resolveDecode(engine, decodeStore, tname, col.name);
       if (resolved.source === 'schema') { badge.textContent = 'Schema Defined'; badge.classList.remove('d-none'); toggleBtn.classList.add('d-none'); decodeCb.disabled = !decodeCb._rowChecked; }
@@ -578,15 +396,12 @@
       else { badge.classList.add('d-none'); toggleBtn.textContent = '+ Add Decode'; toggleBtn.classList.remove('d-none'); decodeCb.disabled = true; }
     }
     toggleBtn.addEventListener('click', function (ev) { ev.stopPropagation(); if (!panel) { panel = openManualDecodeEditor(tname, col.name, syncLabel); (panelParent || wrap).appendChild(panel); } else panel.classList.toggle('d-none'); });
-    wrap.appendChild(badge); wrap.appendChild(toggleBtn); syncLabel(); wrap._syncLabel = syncLabel;
-    return wrap;
+    wrap.appendChild(badge); wrap.appendChild(toggleBtn); syncLabel(); wrap._syncLabel = syncLabel; return wrap;
   }
   function openManualDecodeEditor(tname, colName, onValuesChanged) {
-    var existing = decodeStore.getManualDecode(tname, colName) || [];
-    var container = document.createElement('div'); container.className = 'decode-editor-box mt-2';
+    var existing = decodeStore.getManualDecode(tname, colName) || []; var container = document.createElement('div'); container.className = 'decode-editor-box mt-2';
     function render() {
-      container.innerHTML = '<div class="fw-semibold small mb-2">Manual decode for ' + esc(colName) + '</div>';
-      var list = document.createElement('div');
+      container.innerHTML = '<div class="fw-semibold small mb-2">Manual decode for ' + esc(colName) + '</div>'; var list = document.createElement('div');
       existing.forEach(function (pair, idx) {
         var row = document.createElement('div'); row.className = 'decode-value-row';
         row.innerHTML = '<input class="form-control form-control-sm dv-code" placeholder="Stored Value" value="' + esc(pair.code) + '"><input class="form-control form-control-sm dv-label" placeholder="Display Value" value="' + esc(pair.label) + '"><button class="btn btn-outline-danger btn-sm" type="button">&times;</button>';
@@ -597,37 +412,29 @@
       });
       container.appendChild(list);
       var addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'btn btn-outline-primary btn-sm mt-1'; addBtn.textContent = '+ Add Value';
-      addBtn.addEventListener('click', function () { existing.push({ code: '', label: '' }); decodeStore.setManualDecode(tname, colName, existing); render(); if (onValuesChanged) onValuesChanged(); });
-      container.appendChild(addBtn);
+      addBtn.addEventListener('click', function () { existing.push({ code: '', label: '' }); decodeStore.setManualDecode(tname, colName, existing); render(); if (onValuesChanged) onValuesChanged(); }); container.appendChild(addBtn);
       var clearBtn = document.createElement('button'); clearBtn.type = 'button'; clearBtn.className = 'btn btn-outline-secondary btn-sm mt-1 ms-2'; clearBtn.textContent = 'Clear manually added values';
-      clearBtn.addEventListener('click', function () { existing = []; decodeStore.clearManualDecode(tname, colName); render(); if (onValuesChanged) onValuesChanged(); });
-      container.appendChild(clearBtn);
+      clearBtn.addEventListener('click', function () { existing = []; decodeStore.clearManualDecode(tname, colName); render(); if (onValuesChanged) onValuesChanged(); }); container.appendChild(clearBtn);
     }
-    render(); container.classList.add('d-none');
-    return container;
+    render(); container.classList.add('d-none'); return container;
   }
   function buildDataTypeElseModePanel(tname, colName, state) {
-    var box = document.createElement('div'); box.className = 'decode-datatype-box';
-    var schemaCol = engine.getColumn(tname, colName); var dataType = schemaCol ? schemaCol.type : null;
+    var box = document.createElement('div'); box.className = 'decode-datatype-box'; var schemaCol = engine.getColumn(tname, colName); var dataType = schemaCol ? schemaCol.type : null;
     if (!dataType) { box.innerHTML = '<span class="decode-datatype-unavailable"><i class="bi bi-info-circle me-1"></i>Data type not available in the active schema for this column — the original value will be used in the ELSE branch, as before.</span>'; return box; }
     var needsConv = window.APSQL_DATATYPE ? window.APSQL_DATATYPE.needsConversion(dataType) : false;
     var header = document.createElement('div'); header.innerHTML = '<span class="decode-datatype-label">Data Type:</span> <code>' + esc(dataType) + '</code>'; box.appendChild(header);
     if (!needsConv) { var note = document.createElement('div'); note.className = 'small text-body-secondary mt-1'; note.textContent = 'This column is already text-compatible, so no ELSE conversion is needed.'; box.appendChild(note); return box; }
-    var row = document.createElement('div'); row.className = 'decode-else-mode-row';
-    var uid = tname + '_' + colName; var convertId = 'elseConvert_' + uid, keepId = 'elseKeep_' + uid;
+    var row = document.createElement('div'); row.className = 'decode-else-mode-row'; var uid = tname + '_' + colName; var convertId = 'elseConvert_' + uid, keepId = 'elseKeep_' + uid;
     row.innerHTML = '<div class="form-check"><input class="form-check-input" type="radio" name="elseMode_' + uid + '" id="' + convertId + '" ' + (state.elseMode !== 'keep' ? 'checked' : '') + '><label class="form-check-label small" for="' + convertId + '">Convert to compatible text</label></div><div class="form-check"><input class="form-check-input" type="radio" name="elseMode_' + uid + '" id="' + keepId + '" ' + (state.elseMode === 'keep' ? 'checked' : '') + '><label class="form-check-label small" for="' + keepId + '">Keep original value</label></div>';
-    row.querySelector('#' + convertId).addEventListener('change', function () { state.elseMode = 'convert'; });
-    row.querySelector('#' + keepId).addEventListener('change', function () { state.elseMode = 'keep'; });
+    row.querySelector('#' + convertId).addEventListener('change', function () { state.elseMode = 'convert'; }); row.querySelector('#' + keepId).addEventListener('change', function () { state.elseMode = 'keep'; });
     box.appendChild(row); return box;
   }
   function buildColumnRow(tname, col) {
-    var state = ensureColState(tname);
-    if (!state[col.name]) state[col.name] = { checked: false, alias: col.alias || '', decode: false, elseMode: 'convert' };
+    var state = ensureColState(tname); if (!state[col.name]) state[col.name] = { checked: false, alias: col.alias || '', decode: false, elseMode: 'convert' };
     var s = state[col.name]; if (s.elseMode === undefined) s.elseMode = 'convert';
     var row = document.createElement('div'); row.id = 'colrow_' + tname + '_' + col.name; row.className = 'column-row-grid' + (s.checked ? ' on' : '');
     var cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'form-check-input col-check'; cb.checked = s.checked;
-    var nameWrap = document.createElement('div'); nameWrap.className = 'col-name';
-    var badgeText = col.primary_key ? 'PK' : (col.foreign_key ? 'FK' : (col.type || '').split('(')[0]);
+    var nameWrap = document.createElement('div'); nameWrap.className = 'col-name'; var badgeText = col.primary_key ? 'PK' : (col.foreign_key ? 'FK' : (col.type || '').split('(')[0]);
     nameWrap.innerHTML = '<code>' + col.name + '</code> <span class="text-body-secondary small">' + esc(badgeText) + '</span>' + (col.description ? '<div class="text-body-secondary" style="font-size:.72rem;">' + esc(col.description) + '</div>' : '');
     var aliasInput = document.createElement('input'); aliasInput.type = 'text'; aliasInput.className = 'form-control form-control-sm col-alias'; aliasInput.placeholder = 'rename (optional)'; aliasInput.value = s.alias; aliasInput.disabled = !s.checked;
     var decodeWrap = document.createElement('div'); decodeWrap.className = 'd-flex flex-column gap-1 col-decode-check col-decode' + (!s.checked ? ' disabled' : '');
@@ -641,16 +448,13 @@
     cb.addEventListener('change', function () { s.checked = cb.checked; if (!cb.checked) { s.decode = false; decodeCb.checked = false; } refreshAccess(); refreshFilterColumnOptions(); });
     aliasInput.addEventListener('input', function () { s.alias = aliasInput.value.trim(); });
     decodeCb.addEventListener('change', function () { s.decode = decodeCb.checked; refreshDataTypePanel(); });
-    row.appendChild(cb); row.appendChild(nameWrap); row.appendChild(aliasInput); row.appendChild(decodeWrap);
-    refreshAccess(); return row;
+    row.appendChild(cb); row.appendChild(nameWrap); row.appendChild(aliasInput); row.appendChild(decodeWrap); refreshAccess(); return row;
   }
   function renderColumnList() {
-    var body = $('columnListBody'); body.innerHTML = '';
-    var tname = $('selectedTableDropdown').value;
+    var body = $('columnListBody'); body.innerHTML = ''; var tname = $('selectedTableDropdown').value;
     if (selectedTables.length === 0) { $('columnListEmpty').textContent = 'Select one or more tables above, then pick a table to view its columns.'; return; }
     if (!tname) { $('columnListEmpty').textContent = 'Pick a selected table above to view and choose its columns.'; return; }
-    $('columnListEmpty').textContent = '';
-    var table = engine.getTable(tname); if (!table) return;
+    $('columnListEmpty').textContent = ''; var table = engine.getTable(tname); if (!table) return;
     var term = ($('columnSearchInput').value || '').toLowerCase().trim();
     var cols = table.columns.filter(function (c) { return !term || (c.name + ' ' + (c.alias || '') + ' ' + (c.description || '')).toLowerCase().indexOf(term) !== -1; });
     var heading = document.createElement('div'); heading.className = 'col-group-heading'; heading.textContent = tname; body.appendChild(heading);
@@ -661,11 +465,9 @@
   $('columnUnselectAllBtn').addEventListener('click', function () { var tname = $('selectedTableDropdown').value; if (!tname) return; var state = ensureColState(tname); Object.keys(state).forEach(function (k) { state[k].checked = false; state[k].decode = false; }); renderColumnList(); refreshFilterColumnOptions(); });
   function refreshTablesColumnsUI() { refreshModuleDropdown(); renderTableList(); refreshTableSelCount(); refreshSelectedTableDropdown(); renderColumnList(); refreshFilterColumnOptions(); renderJoinPreview(); renderSortRows(); renderExistsRows(); renderScalarRows(); }
   function refreshHierarchyOptions() { var sel = $('optHierarchy'); var current = sel.value; var opts = ['<option value="">&mdash; none &mdash;</option>']; allTables().forEach(function (t) { if (engine.getSelfReferencingEdges(t.name).length > 0) opts.push('<option value="' + t.name + '">' + t.name + '</option>'); }); sel.innerHTML = opts.join(''); if (allTables().some(function (t) { return t.name === current; })) sel.value = current; }
-
   function columnOptionsForTables(tableNames) { var opts = []; (tableNames && tableNames.length ? tableNames : allTables().map(function (t) { return t.name; })).forEach(function (tname) { var t = engine.getTable(tname); if (!t) return; t.columns.forEach(function (c) { opts.push({ table: tname, column: c.name }); }); }); return opts; }
   function renderFilterGroup(containerEl, filterGroup, availableTables, onChange) {
-    containerEl.innerHTML = '';
-    var colOptions = columnOptionsForTables(availableTables);
+    containerEl.innerHTML = ''; var colOptions = columnOptionsForTables(availableTables);
     filterGroup.conditions.forEach(function (cond, idx) {
       var row = document.createElement('div'); row.className = 'filter-condition-row' + (idx === 0 ? ' first-condition' : '');
       var joinSel = document.createElement('select'); joinSel.className = 'form-select form-select-sm join-select'; joinSel.innerHTML = '<option value="AND">AND</option><option value="OR">OR</option>'; joinSel.value = cond.join || 'AND';
@@ -681,9 +483,7 @@
       var multiHint = document.createElement('div'); multiHint.className = 'multi-value-hint d-none'; multiHint.textContent = 'Separate multiple values with commas, e.g. 10, 20, 40';
       function refreshArity() { var op = APSQL_FILTER.getOperator(opSel.value); valInput.style.display = op.arity >= 1 ? '' : 'none'; val2Input.style.display = op.arity === 2 ? '' : 'none'; var isMulti = !!op.multi; valInput.classList.toggle('multi-value', isMulti); valInput.placeholder = isMulti ? 'value1, value2, value3, ...' : 'Value'; multiHint.classList.toggle('d-none', !isMulti); }
       opSel.addEventListener('change', function () { cond.operator = opSel.value; refreshArity(); onChange(); });
-      valInput.addEventListener('input', function () { cond.value = valInput.value; });
-      val2Input.addEventListener('input', function () { cond.value2 = val2Input.value; });
-      refreshArity();
+      valInput.addEventListener('input', function () { cond.value = valInput.value; }); val2Input.addEventListener('input', function () { cond.value2 = val2Input.value; }); refreshArity();
       var toolbar = document.createElement('div'); toolbar.className = 'd-flex gap-1 filter-remove-btn';
       var dupBtn = document.createElement('button'); dupBtn.type = 'button'; dupBtn.className = 'btn btn-outline-secondary btn-sm'; dupBtn.title = 'Duplicate'; dupBtn.textContent = '\u29C9';
       dupBtn.addEventListener('click', function () { var copy = APSQL_FILTER.duplicateCondition(cond); filterGroup.conditions.splice(idx + 1, 0, copy); onChange(); renderFilterGroup(containerEl, filterGroup, availableTables, onChange); });
@@ -699,25 +499,18 @@
   function refreshFilterColumnOptions() { renderFilterGroup($('readOnlyFilterGroup'), readOnlyFilterGroup, selectedTables, function () {}); }
   $('readOnlyAddFilterBtn').addEventListener('click', function () { var firstTable = selectedTables[0]; var firstCol = firstTable ? engine.getTable(firstTable).columns[0].name : ''; readOnlyFilterGroup.conditions.push(APSQL_FILTER.newCondition({ table: firstTable, column: firstCol })); refreshFilterColumnOptions(); });
   $('readOnlyClearFiltersBtn').addEventListener('click', function () { readOnlyFilterGroup.conditions = []; refreshFilterColumnOptions(); });
-
   function updateJoinCardVisibility() { var card = $('joinOptionCard'); if (!card) return; if (selectedTables.length < 2) { card.classList.add('d-none'); $('optJoinInner').checked = true; syncJoinChoiceHighlight(); } else card.classList.remove('d-none'); }
   function syncJoinChoiceHighlight() { $('optJoinInnerLabel').classList.toggle('selected', $('optJoinInner').checked); $('optJoinLeftLabel').classList.toggle('selected', $('optJoinLeft').checked); }
   document.querySelectorAll('input[name="joinType"]').forEach(function (r) { r.addEventListener('change', syncJoinChoiceHighlight); });
-  $('joinResetBtn').addEventListener('click', function () { $('optJoinInner').checked = true; syncJoinChoiceHighlight(); });
-  syncJoinChoiceHighlight();
-
+  $('joinResetBtn').addEventListener('click', function () { $('optJoinInner').checked = true; syncJoinChoiceHighlight(); }); syncJoinChoiceHighlight();
   var relationshipDrafts = {};
   function ensureRelationshipDraft(tableName, candidatePartners) { if (!relationshipDrafts[tableName]) { var partner = candidatePartners[0] || ''; var partnerTbl = engine.getTable(partner); var thisTbl = engine.getTable(tableName); relationshipDrafts[tableName] = { partnerTable: partner, thisColumn: thisTbl && thisTbl.columns[0] ? thisTbl.columns[0].name : '', partnerColumn: partnerTbl && partnerTbl.columns[0] ? partnerTbl.columns[0].name : '' }; } return relationshipDrafts[tableName]; }
   function renderJoinPreview() {
-    updateJoinCardVisibility();
-    var previewBox = $('joinPreviewBox'); var defineBox = $('defineRelationshipContainer');
-    if (!previewBox || !defineBox) return;
+    updateJoinCardVisibility(); var previewBox = $('joinPreviewBox'); var defineBox = $('defineRelationshipContainer'); if (!previewBox || !defineBox) return;
     if (selectedTables.length < 2) { previewBox.innerHTML = '<p class="multi-row-empty">Select two or more tables on the Tables &amp; Columns tab to see how they\u2019ll be connected.</p>'; defineBox.innerHTML = ''; return; }
     var plan = APSQL_ENGINE.buildJoinPlan(engine, selectedTables);
     var lines = plan.joins.map(function (j) { return '<li><code>' + j.on.fromTable + '</code> \u2192 <code>' + j.on.toTable + '</code> using <code>' + j.on.fromColumn + ' = ' + j.on.toColumn + '</code></li>'; });
-    if (!lines.length) lines.push('<li class="text-body-secondary">No connections established yet.</li>');
-    previewBox.innerHTML = '<ul class="mb-0 small">' + lines.join('') + '</ul>';
-    defineBox.innerHTML = '';
+    if (!lines.length) lines.push('<li class="text-body-secondary">No connections established yet.</li>'); previewBox.innerHTML = '<ul class="mb-0 small">' + lines.join('') + '</ul>'; defineBox.innerHTML = '';
     plan.unresolved.forEach(function (tname) { var candidatePartners = selectedTables.filter(function (t) { return t !== tname; }); var draft = ensureRelationshipDraft(tname, candidatePartners); defineBox.appendChild(buildDefineRelationshipPanel(tname, candidatePartners, draft)); });
   }
   function buildDefineRelationshipPanel(tableName, candidatePartners, draft) {
@@ -726,26 +519,21 @@
     var explain = document.createElement('p'); explain.className = 'small text-body-secondary mb-2'; explain.textContent = 'Pick which table it connects to, and which column on each side matches.'; box.appendChild(explain);
     var row = document.createElement('div'); row.className = 'define-relationship-row';
     var partnerSel = document.createElement('select'); partnerSel.className = 'form-select form-select-sm'; partnerSel.innerHTML = candidatePartners.map(function (p) { return '<option value="' + p + '">' + p + '</option>'; }).join(''); partnerSel.value = draft.partnerTable;
-    var thisColSel = document.createElement('select'); thisColSel.className = 'form-select form-select-sm';
-    var partnerColSel = document.createElement('select'); partnerColSel.className = 'form-select form-select-sm';
+    var thisColSel = document.createElement('select'); thisColSel.className = 'form-select form-select-sm'; var partnerColSel = document.createElement('select'); partnerColSel.className = 'form-select form-select-sm';
     function refreshColumnSelects() {
-      var thisTbl = engine.getTable(tableName);
-      thisColSel.innerHTML = (thisTbl ? thisTbl.columns : []).map(function (c) { return '<option value="' + c.name + '">' + c.name + '</option>'; }).join('');
+      var thisTbl = engine.getTable(tableName); thisColSel.innerHTML = (thisTbl ? thisTbl.columns : []).map(function (c) { return '<option value="' + c.name + '">' + c.name + '</option>'; }).join('');
       if (thisTbl && thisTbl.columns.some(function (c) { return c.name === draft.thisColumn; })) thisColSel.value = draft.thisColumn;
-      var partnerTbl = engine.getTable(partnerSel.value);
-      partnerColSel.innerHTML = (partnerTbl ? partnerTbl.columns : []).map(function (c) { return '<option value="' + c.name + '">' + c.name + '</option>'; }).join('');
+      var partnerTbl = engine.getTable(partnerSel.value); partnerColSel.innerHTML = (partnerTbl ? partnerTbl.columns : []).map(function (c) { return '<option value="' + c.name + '">' + c.name + '</option>'; }).join('');
       if (partnerTbl && partnerTbl.columns.some(function (c) { return c.name === draft.partnerColumn; })) partnerColSel.value = draft.partnerColumn; else if (partnerTbl && partnerTbl.columns[0]) draft.partnerColumn = partnerTbl.columns[0].name;
     }
     refreshColumnSelects();
     partnerSel.addEventListener('change', function () { draft.partnerTable = partnerSel.value; refreshColumnSelects(); });
-    thisColSel.addEventListener('change', function () { draft.thisColumn = thisColSel.value; });
-    partnerColSel.addEventListener('change', function () { draft.partnerColumn = partnerColSel.value; });
+    thisColSel.addEventListener('change', function () { draft.thisColumn = thisColSel.value; }); partnerColSel.addEventListener('change', function () { draft.partnerColumn = partnerColSel.value; });
     var connectLabel = document.createElement('span'); connectLabel.className = 'small text-body-secondary'; connectLabel.textContent = 'connects to';
     var colLabel1 = document.createElement('span'); colLabel1.className = 'small text-body-secondary'; colLabel1.textContent = tableName + '.';
     var colLabel2 = document.createElement('span'); colLabel2.className = 'small text-body-secondary'; colLabel2.textContent = 'on column';
     row.appendChild(connectLabel); row.appendChild(partnerSel); row.appendChild(colLabel2); row.appendChild(colLabel1); row.appendChild(thisColSel);
-    var eqLabel = document.createElement('span'); eqLabel.className = 'small text-body-secondary'; eqLabel.textContent = '='; row.appendChild(eqLabel); row.appendChild(partnerColSel);
-    box.appendChild(row);
+    var eqLabel = document.createElement('span'); eqLabel.className = 'small text-body-secondary'; eqLabel.textContent = '='; row.appendChild(eqLabel); row.appendChild(partnerColSel); box.appendChild(row);
     var activeBadge = document.createElement('span'); activeBadge.className = 'badge text-bg-success relationship-active-badge d-none'; activeBadge.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>Active for this session';
     if (relationshipStore.hasManualRelationship(tableName, draft.partnerTable)) activeBadge.classList.remove('d-none');
     var actions = document.createElement('div'); actions.className = 'define-relationship-actions mt-2';
@@ -755,7 +543,6 @@
     saveBtn.addEventListener('click', function () { pendingSaveRelationshipDraft = { fromTable: tableName, fromColumn: thisColSel.value, toTable: partnerSel.value, toColumn: partnerColSel.value }; $('saveRelationshipSummary').innerHTML = '<code>' + tableName + '.' + thisColSel.value + '</code> &rarr; <code>' + partnerSel.value + '.' + partnerColSel.value + '</code>'; $('saveRelationshipPasswordInput').value = ''; $('saveRelationshipPasswordError').classList.add('d-none'); if (saveRelationshipModal) saveRelationshipModal.show(); });
     actions.appendChild(useBtn); actions.appendChild(saveBtn); actions.appendChild(activeBadge); box.appendChild(actions); return box;
   }
-
   var sortRows = [];
   function renderSortRows() {
     var container = $('sortRowsContainer'); if (!container) return; container.innerHTML = '';
@@ -778,11 +565,9 @@
   }
   $('addSortRowBtn').addEventListener('click', function () { if (!selectedTables.length) return; var t = selectedTables[0]; var tbl = engine.getTable(t); sortRows.push({ table: t, column: tbl ? tbl.columns[0].name : '', direction: 'ASC' }); renderSortRows(); });
   $('clearSortBtn').addEventListener('click', function () { sortRows = []; renderSortRows(); });
-
   var existsRows = [];
   function renderExistsRows() {
-    var container = $('existsRowsContainer'); if (!container) return; container.innerHTML = '';
-    var tbls = allTables();
+    var container = $('existsRowsContainer'); if (!container) return; container.innerHTML = ''; var tbls = allTables();
     if (!existsRows.length) { container.innerHTML = '<p class="multi-row-empty">No related-table checks added yet.</p>'; return; }
     existsRows.forEach(function (row, idx) {
       var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row';
@@ -792,8 +577,7 @@
       var negWrap = document.createElement('div'); negWrap.className = 'form-check d-flex align-items-center gap-1';
       var negCb = document.createElement('input'); negCb.type = 'checkbox'; negCb.className = 'form-check-input mt-0'; negCb.checked = !!row.negate;
       negCb.addEventListener('change', function () { row.negate = negCb.checked; });
-      var negLabel = document.createElement('label'); negLabel.className = 'form-check-label multi-row-remove-label'; negLabel.textContent = 'Opposite (no match)';
-      negWrap.appendChild(negCb); negWrap.appendChild(negLabel);
+      var negLabel = document.createElement('label'); negLabel.className = 'form-check-label multi-row-remove-label'; negLabel.textContent = 'Opposite (no match)'; negWrap.appendChild(negCb); negWrap.appendChild(negLabel);
       var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm filter-remove-btn'; rmBtn.textContent = '\u00d7';
       rmBtn.addEventListener('click', function () { existsRows.splice(idx, 1); renderExistsRows(); });
       rowEl.appendChild(tblSel); rowEl.appendChild(negWrap); rowEl.appendChild(rmBtn); container.appendChild(rowEl);
@@ -801,11 +585,9 @@
   }
   $('addExistsRowBtn').addEventListener('click', function () { var tbls = allTables(); if (!tbls.length) return; existsRows.push({ relatedTable: tbls[0].name, negate: false }); renderExistsRows(); });
   $('clearExistsBtn').addEventListener('click', function () { existsRows = []; renderExistsRows(); });
-
   var scalarRows = [];
   function renderScalarRows() {
-    var container = $('scalarRowsContainer'); if (!container) return; container.innerHTML = '';
-    var tbls = allTables();
+    var container = $('scalarRowsContainer'); if (!container) return; container.innerHTML = ''; var tbls = allTables();
     if (!scalarRows.length) { container.innerHTML = '<p class="multi-row-empty">No related counts added yet.</p>'; return; }
     scalarRows.forEach(function (row, idx) {
       var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row';
@@ -820,12 +602,10 @@
   }
   $('addScalarRowBtn').addEventListener('click', function () { var tbls = allTables(); if (!tbls.length) return; scalarRows.push({ relatedTable: tbls[0].name }); renderScalarRows(); });
   $('clearScalarBtn').addEventListener('click', function () { scalarRows = []; renderScalarRows(); });
-
   $('optLimitClearBtn').addEventListener('click', function () { $('optLimit').value = ''; });
   $('optViewClearBtn').addEventListener('click', function () { $('optView').value = ''; });
   $('optHavingClearBtn').addEventListener('click', function () { $('optHaving').value = ''; });
   $('optHierarchyClearBtn').addEventListener('click', function () { $('optHierarchy').value = ''; });
-
   var KW = /\b(SELECT|FROM|WHERE|JOIN|LEFT|INNER|ON|AND|OR|GROUP BY|ORDER BY|HAVING|DISTINCT|AS|TOP|FETCH FIRST|ROWS ONLY|BETWEEN|IN|LIMIT|CASE|WHEN|THEN|ELSE|END|WITH|RECURSIVE|EXISTS|NOT|LIKE|IS NULL|IS NOT NULL|COUNT|SUM|AVG|MIN|MAX)\b/g;
   function highlight(sql) { var e = esc(sql); e = e.replace(/'([^']*)'/g, "<span class='sql-str'>'$1'</span>"); e = e.replace(KW, "<span class='sql-kw'>$1</span>"); return e; }
   function renderSuggestedFixes(message) { var suggestions = APSQL_SUGGEST.buildSuggestions(message); return '<div class="alert alert-info py-2 mb-0 suggested-fixes-box"><strong><i class="bi bi-lightbulb-fill me-1"></i>Suggested fixes:</strong><ul class="mt-1">' + suggestions.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>'; }
@@ -836,7 +616,6 @@
     if (!parts.length) parts.push('<div class="text-body-secondary">No further optimizations detected \u2014 this query already looks efficient.</div>');
     box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small">' + parts.join('') + '</div>';
   }
-
   var lastResult = null;
   function renderResult(res) {
     lastResult = res; var body = $('resultBody');
@@ -845,8 +624,7 @@
       var alertClass = res.status === 'rejected' ? 'alert-danger' : 'alert-warning';
       body.innerHTML = '<div class="alert ' + alertClass + ' mb-2"><strong>' + titleText + '</strong><br>' + esc(res.message) + '</div>' + renderSuggestedFixes(res.message);
       $('copyBtn').classList.add('d-none'); $('optimizeBtn').classList.add('d-none'); $('optimizeReportBox').innerHTML = '';
-      $('explainBtn').classList.add('d-none'); $('explanationReportBox').innerHTML = ''; $('explanationReportBox').classList.add('d-none');
-      return;
+      $('explainBtn').classList.add('d-none'); $('explanationReportBox').innerHTML = ''; $('explanationReportBox').classList.add('d-none'); return;
     }
     var tables = (res.tablesUsed || []).map(function (t) { return '<span class="badge text-bg-light border me-1">' + t + '</span>'; }).join('');
     var cols = (res.columnsUsed || []).map(function (c) { return '<span class="badge text-bg-light border me-1">' + c.table + '.' + c.column + (c.alias ? ' as ' + c.alias : '') + '</span>'; }).join('');
@@ -857,20 +635,16 @@
   }
   $('copyBtn').addEventListener('click', function () { if (lastResult && lastResult.status === 'ok') { navigator.clipboard && navigator.clipboard.writeText(lastResult.sql); var old = $('copyBtn').innerHTML; $('copyBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('copyBtn').innerHTML = old; }, 1300); } });
   $('optimizeBtn').addEventListener('click', function () { if (!lastResult || lastResult.status !== 'ok') return; var opt = APSQL_OPTIMIZE.optimizeSql(engine, lastResult); if (opt.hasChanges) { lastResult = Object.assign({}, lastResult, { sql: opt.optimizedSql }); renderResult(lastResult); } renderOptimizeReport('optimizeReportBox', opt); });
-
   var lastInterpretation = null;
   $('explainBtn').addEventListener('click', function () {
-    var box = $('explanationReportBox'); var isHidden = box.classList.contains('d-none');
-    if (!isHidden) { box.classList.add('d-none'); return; }
+    var box = $('explanationReportBox'); var isHidden = box.classList.contains('d-none'); if (!isHidden) { box.classList.add('d-none'); return; }
     var lines = lastInterpretation ? APSQL_NLQUERY.explainInterpretation(lastInterpretation) : [];
     if (!lines.length) box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small">This query was built manually (or nothing to explain yet). Describe your requirement above and click Build Query to see a plain-language explanation here.</div>';
     else box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><strong><i class="bi bi-lightbulb-fill me-1"></i>This query:</strong><ul class="mt-1 mb-0">' + lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul></div>';
     box.classList.remove('d-none');
   });
-
   function renderConfidenceChecklist(interpretation) {
-    var box = $('confidenceChecklistBox');
-    if (!interpretation || (!interpretation.tables.length && !interpretation.warnings.length)) { box.innerHTML = ''; return; }
+    var box = $('confidenceChecklistBox'); if (!interpretation || (!interpretation.tables.length && !interpretation.warnings.length)) { box.innerHTML = ''; return; }
     var c = interpretation.confidence || {};
     var items = [{ ok: c.tableIdentified, label: 'Table identified' }, { ok: c.columnsIdentified, label: 'Columns identified' }, { ok: c.relationshipsIdentified, label: 'Relationships identified' }, { ok: !c.hasAmbiguities, label: c.hasAmbiguities ? 'Some terms need clarification' : 'Filters identified' }];
     var html = '<ul>' + items.map(function (it) { return '<li class="' + (it.ok ? 'ok' : 'warn') + '"><i class="bi ' + (it.ok ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill') + '"></i>' + esc(it.label) + '</li>'; }).join('') + '</ul>';
@@ -878,8 +652,7 @@
     box.innerHTML = html;
   }
   function renderAmbiguityBox(interpretation) {
-    var box = $('ambiguityBox');
-    if (!interpretation || !interpretation.ambiguities || !interpretation.ambiguities.length) { box.classList.add('d-none'); box.innerHTML = ''; return; }
+    var box = $('ambiguityBox'); if (!interpretation || !interpretation.ambiguities || !interpretation.ambiguities.length) { box.classList.add('d-none'); box.innerHTML = ''; return; }
     var html = '<div class="fw-semibold small mb-2"><i class="bi bi-question-circle-fill me-1"></i>A few terms in your description could mean more than one thing. Please choose the intended condition:</div>';
     interpretation.ambiguities.forEach(function (amb, ai) {
       html += '<div class="ambiguity-term-title">&#8220;' + esc(amb.term) + '&#8221; could refer to:</div><div class="ambiguity-option-row" data-amb="' + ai + '">';
@@ -889,15 +662,13 @@
     box.innerHTML = html; box.classList.remove('d-none');
     box.querySelectorAll('.ambiguity-option-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var ai = +btn.getAttribute('data-amb'), oi = +btn.getAttribute('data-opt');
-        var amb = interpretation.ambiguities[ai]; var opt = amb.options[oi];
+        var ai = +btn.getAttribute('data-amb'), oi = +btn.getAttribute('data-opt'); var amb = interpretation.ambiguities[ai]; var opt = amb.options[oi];
         readOnlyFilterGroup.conditions.push(APSQL_FILTER.newCondition({ table: opt.table, column: opt.column, operator: 'eq', value: '1' }));
         if (selectedTables.indexOf(opt.table) === -1) selectedTables.push(opt.table);
         box.classList.add('d-none'); box.innerHTML = ''; refreshTablesColumnsUI(); runGenerate();
       });
     });
   }
-
   function describeAdvancedOptions() {
     var lines = [];
     if ($('optJoinLeft').checked) lines.push('Also show records without a match in other tables');
@@ -932,7 +703,6 @@
     box.innerHTML = parts.join('');
   }
   function collectSelectedColumns() { var out = []; Object.keys(columnState).forEach(function (tname) { Object.keys(columnState[tname]).forEach(function (cname) { var s = columnState[tname][cname]; if (s.checked) { var entry = { table: tname, column: cname }; if (s.alias) entry.alias = s.alias; if (s.decode) { entry.decode = true; entry.elseMode = s.elseMode || 'convert'; } out.push(entry); } }); }); return out; }
-
   var nlAggregates = []; var nlGroupBy = []; var nlHaving = null;
   function buildOptions() {
     var opts = { dialect: $('dialectSel').value };
@@ -955,11 +725,9 @@
   function applyDescriptionToSelection() {
     var text = $('promptInput').value.trim();
     if (!text) { $('descriptionInterpretationBox').innerHTML = ''; $('confidenceChecklistBox').innerHTML = ''; $('ambiguityBox').classList.add('d-none'); lastInterpretation = null; return; }
-    var interpretation = APSQL_NLQUERY.interpretRequirement(text, engine, {});
-    lastInterpretation = interpretation;
+    var interpretation = APSQL_NLQUERY.interpretRequirement(text, engine, {}); lastInterpretation = interpretation;
     selectedTables = APSQL_NLQUERY.mergeTableLists(selectedTables, interpretation.tables);
-    var manualColsFlat = collectSelectedColumns();
-    var mergedCols = APSQL_NLQUERY.mergeColumnLists(manualColsFlat, interpretation.columns);
+    var manualColsFlat = collectSelectedColumns(); var mergedCols = APSQL_NLQUERY.mergeColumnLists(manualColsFlat, interpretation.columns);
     mergedCols.forEach(function (c) { var state = ensureColState(c.table); if (!state[c.column]) state[c.column] = { checked: true, alias: c.alias || '', decode: !!c.decode, elseMode: 'convert' }; else { state[c.column].checked = true; if (c.decode) state[c.column].decode = true; } });
     interpretation.columns.forEach(function (c) { if (!c.decode) return; var state = ensureColState(c.table); if (state[c.column]) state[c.column].decode = true; });
     readOnlyFilterGroup.conditions = APSQL_NLQUERY.mergeFilterConditions(readOnlyFilterGroup.conditions, interpretation.filterConditions).map(function (c) { return c.id ? c : APSQL_FILTER.newCondition(c); });
@@ -970,15 +738,11 @@
     nlAggregates = APSQL_NLQUERY.mergeAggregates(nlAggregates, interpretation.aggregates);
     nlGroupBy = APSQL_NLQUERY.mergeGroupBy(nlGroupBy, interpretation.groupBy);
     if (interpretation.having && !nlHaving) nlHaving = interpretation.having;
-    refreshTablesColumnsUI();
-    renderDescriptionInterpretationBox(interpretation);
-    renderConfidenceChecklist(interpretation);
-    renderAmbiguityBox(interpretation);
+    refreshTablesColumnsUI(); renderDescriptionInterpretationBox(interpretation); renderConfidenceChecklist(interpretation); renderAmbiguityBox(interpretation);
   }
   function renderDescriptionInterpretationBox(interpretation) {
     var box = $('descriptionInterpretationBox'); if (!box) return;
-    var hasMatched = interpretation.matched && interpretation.matched.length;
-    var hasWarnings = interpretation.warnings && interpretation.warnings.length;
+    var hasMatched = interpretation.matched && interpretation.matched.length; var hasWarnings = interpretation.warnings && interpretation.warnings.length;
     if (!hasMatched && !hasWarnings) { box.innerHTML = ''; return; }
     var parts = [];
     if (hasMatched) parts.push('<strong><i class="bi bi-chat-left-text-fill me-1"></i>I understood your request as:</strong><ul class="mt-1 mb-0">' + interpretation.matched.map(function (m) { return '<li>' + esc(m) + '</li>'; }).join('') + '</ul>');
@@ -986,19 +750,13 @@
     box.innerHTML = '<div class="alert alert-info py-2 mb-0 small">' + parts.join('') + '</div>';
   }
   function runGenerate() {
-    applyDescriptionToSelection();
-    var promptText = $('promptInput').value.trim();
-    var opts = buildOptions();
-    var res = APSQL_ENGINE.generateSql(promptText, opts, engine, decodeStore);
-    renderResult(res);
+    applyDescriptionToSelection(); var promptText = $('promptInput').value.trim(); var opts = buildOptions();
+    var res = APSQL_ENGINE.generateSql(promptText, opts, engine, decodeStore); renderResult(res);
     if (lastInterpretation && lastInterpretation.confidence) lastInterpretation.confidence.sqlValidated = (res.status === 'ok');
-    showView('builder');
-    $('resultBody').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showView('builder'); $('resultBody').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
-  $('generateBtn').addEventListener('click', runGenerate);
-  $('generateFromDescriptionBtn').addEventListener('click', runGenerate);
+  $('generateBtn').addEventListener('click', runGenerate); $('generateFromDescriptionBtn').addEventListener('click', runGenerate);
   $('promptInput').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runGenerate(); });
-
   function resetQueryState(alsoClearPrompt) {
     if (alsoClearPrompt !== false) $('promptInput').value = '';
     selectedTables = []; columnState = {}; readOnlyFilterGroup.conditions = []; sortRows = []; existsRows = []; scalarRows = [];
@@ -1015,7 +773,6 @@
   }
   $('resetQueryBtn').addEventListener('click', function () { resetQueryState(true); });
   refreshTablesColumnsUI(); refreshHierarchyOptions();
-
   var crCommand = 'INSERT'; var crTable = ''; var crInsertColumns = {}; var crUpdateColumns = {}; var crFilterGroup = { conditions: [] }; var crLastResult = null;
   function crRefreshTableOptions() { var sel = $('crTableSelect'); var current = sel.value; sel.innerHTML = allTables().map(function (t) { return '<option value="' + t.name + '">' + t.name + '</option>'; }).join(''); if (allTables().some(function (t) { return t.name === current; })) sel.value = current; else sel.value = allTables()[0] ? allTables()[0].name : ''; crTable = sel.value; }
   $('crTableSelect').addEventListener('change', function () { crTable = $('crTableSelect').value; crInsertColumns = {}; crUpdateColumns = {}; crFilterGroup = { conditions: [] }; crRenderAll(); });
@@ -1044,8 +801,7 @@
     });
   }
   function crRenderRequirementsSummary() {
-    var box = $('crRequirementsSummaryBody'); var parts = [];
-    var descText = $('crDescriptionInput').value.trim();
+    var box = $('crRequirementsSummaryBody'); var parts = []; var descText = $('crDescriptionInput').value.trim();
     parts.push('<h3 class="h6">Describe What You Need</h3>');
     parts.push(descText ? '<p><em>' + esc(descText) + '</em></p>' : '<p class="text-body-secondary">No description provided.</p>');
     parts.push('<div class="mt-2"><strong>Query Type:</strong> ' + esc(crCommand) + '</div>');
@@ -1067,16 +823,14 @@
   $('crCopyBtn').addEventListener('click', function () { if (crLastResult && crLastResult.status === 'ok') { navigator.clipboard && navigator.clipboard.writeText(crLastResult.sql); var old = $('crCopyBtn').innerHTML; $('crCopyBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('crCopyBtn').innerHTML = old; }, 1300); } });
   $('crOptimizeBtn').addEventListener('click', function () { if (!crLastResult || crLastResult.status !== 'ok') return; var opt = APSQL_OPTIMIZE.optimizeSql(engine, crLastResult); if (opt.hasChanges) { crLastResult = Object.assign({}, crLastResult, { sql: opt.optimizedSql }); crRenderResult(crLastResult); } renderOptimizeReport('crOptimizeReportBox', opt); });
   function crApplyDescriptionToSelection() {
-    var text = $('crDescriptionInput').value.trim();
-    if (!text) { $('crDescriptionInterpretationBox').innerHTML = ''; return; }
+    var text = $('crDescriptionInput').value.trim(); if (!text) { $('crDescriptionInterpretationBox').innerHTML = ''; return; }
     var interpretation = APSQL_NLQUERY.interpretCrRequirement(text, engine, {});
     if (interpretation.command) { crCommand = interpretation.command; document.querySelectorAll('.cr-command-option').forEach(function (o) { o.classList.toggle('active', o.getAttribute('data-command') === crCommand); }); }
     if (interpretation.table && engine.getTable(interpretation.table) && interpretation.table !== crTable) { crTable = interpretation.table; $('crTableSelect').value = crTable; crInsertColumns = {}; crUpdateColumns = {}; crFilterGroup = { conditions: [] }; }
     if (crCommand === 'INSERT' && interpretation.insertColumns && interpretation.insertColumns.length) interpretation.insertColumns.forEach(function (c) { if (!engine.columnExists(crTable, c.name)) return; if (!crInsertColumns[c.name]) crInsertColumns[c.name] = { checked: false, value: '' }; crInsertColumns[c.name].checked = true; if (!crInsertColumns[c.name].value) crInsertColumns[c.name].value = c.value; });
     if (crCommand === 'UPDATE' && interpretation.updateColumns && interpretation.updateColumns.length) interpretation.updateColumns.forEach(function (c) { if (!engine.columnExists(crTable, c.column)) return; if (!crUpdateColumns[c.column]) crUpdateColumns[c.column] = { checked: false, value: '' }; crUpdateColumns[c.column].checked = true; if (!crUpdateColumns[c.column].value) crUpdateColumns[c.column].value = c.value; });
     if ((crCommand === 'UPDATE' || crCommand === 'DELETE') && interpretation.filterConditions && interpretation.filterConditions.length) crFilterGroup.conditions = APSQL_NLQUERY.mergeFilterConditions(crFilterGroup.conditions, interpretation.filterConditions).map(function (c) { return c.id ? c : APSQL_FILTER.newCondition(c); });
-    crRenderAll();
-    renderCrDescriptionInterpretationBox(interpretation);
+    crRenderAll(); renderCrDescriptionInterpretationBox(interpretation);
   }
   function renderCrDescriptionInterpretationBox(interpretation) {
     var box = $('crDescriptionInterpretationBox'); if (!box) return;
@@ -1093,13 +847,11 @@
     if (crCommand === 'INSERT') request.columns = Object.keys(crInsertColumns).filter(function (n) { return crInsertColumns[n].checked; }).map(function (n) { return { name: n, value: crInsertColumns[n].value }; });
     else if (crCommand === 'UPDATE') { request.updates = Object.keys(crUpdateColumns).filter(function (n) { return crUpdateColumns[n].checked; }).map(function (n) { return { column: n, value: crUpdateColumns[n].value }; }); request.filterGroup = crFilterGroup; }
     else if (crCommand === 'DELETE' || crCommand === 'SELECT') request.filterGroup = crFilterGroup;
-    var res = APSQL_CR.buildCrQuery(engine, request, $('crDialectSel').value);
-    crRenderResult(res);
+    var res = APSQL_CR.buildCrQuery(engine, request, $('crDialectSel').value); crRenderResult(res);
   }
   $('crBuildBtn').addEventListener('click', runCrBuild); $('crGenerateFromDescriptionBtn').addEventListener('click', runCrBuild);
   crRefreshTableOptions(); crRenderAll();
   document.querySelectorAll('#crManualTabs .nav-link').forEach(function (t) { t.addEventListener('click', function () { var name = t.getAttribute('data-cr-tab'); document.querySelectorAll('#crManualTabs .nav-link').forEach(function (x) { x.classList.toggle('active', x === t); }); document.querySelectorAll('.tab-pane-cr').forEach(function (p) { var show = p.id === 'cr-pane-' + name; p.classList.toggle('d-none', !show); p.classList.toggle('active', show); }); if (name === 'requirements') crRenderRequirementsSummary(); }); });
-
   var schemaSearchTerm = '';
   function highlightMatch(text, term) { if (!term) return esc(text); var escText = esc(text); var escTerm = esc(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); if (!escTerm) return escText; return escText.replace(new RegExp('(' + escTerm + ')', 'ig'), '<mark>$1</mark>'); }
   function tableMatchesSearch(t, term) { if (!term) return true; if ((t.name + ' ' + (t.notes || '')).toLowerCase().indexOf(term) !== -1) return true; return t.columns.some(function (c) { return columnMatchesSearch(c, term); }); }
@@ -1127,14 +879,12 @@
   }
   $('schemaSearchInput').addEventListener('input', function (e) { schemaSearchTerm = e.target.value; renderUsedSchema(); });
   $('schemaSearchClearBtn').addEventListener('click', function () { $('schemaSearchInput').value = ''; schemaSearchTerm = ''; renderUsedSchema(); });
-
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap ? new window.bootstrap.Modal(aboutModalEl) : null;
   $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '10.7.1'], ['Purpose', 'Multiple schemas can be stored, switched between, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is selectable; and the operational password can be changed \u2014 all while retaining the intelligent Describe What You Need engine, the structured Query Builder, the CR Builder, and the Error Rectifier.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '10.8.0'], ['Purpose', 'Multiple schemas can be stored, switched between, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is selectable; and the operational password can be changed \u2014 all while retaining the intelligent Describe What You Need engine, the structured Query Builder, the CR Builder, and the Error Rectifier. V10.8 adds a redesigned, page-specific Guided Walkthrough with fully responsive positioning.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
-
   var WORKFLOW_STEPS = ['Upload Document', 'Read Document', 'Detect Format', 'Detect Modules', 'Detect Tables', 'Detect Columns', 'Extract Metadata', 'Normalize Schema', 'Validate Schema', 'Show Preview', 'User Reviews Changes', 'Generate JSON', 'Validate JSON', 'Apply Schema Update'];
   function renderWorkflowSteps(activeIdx) { $('workflowStepList').innerHTML = WORKFLOW_STEPS.map(function (s, i) { var cls = i < activeIdx ? 'text-bg-success' : (i === activeIdx ? 'text-bg-primary' : 'text-bg-light border'); return '<span class="badge ' + cls + '">' + (i + 1) + '. ' + s + '</span>'; }).join(''); }
   renderWorkflowSteps(0);
@@ -1180,9 +930,7 @@
       $('updateSchemaPreviewCard').classList.remove('d-none'); $('updateSchemaPreviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }).catch(function (err) { resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0">' + esc(err.message) + '</div>'; renderWorkflowSteps(1); });
   });
-
   function refreshAllViewsAfterSchemaChange() { refreshTablesColumnsUI(); refreshHierarchyOptions(); refreshModuleChips(); crRefreshTableOptions(); crRenderAll(); if (currentView === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); } }
-
   function performApplySchemaUpdate() {
     if (!pendingIncomingTables) return;
     var targetEntry = targetSchemaEntry();
@@ -1199,7 +947,6 @@
   $('activateSchemaBtn').addEventListener('click', function () { if (!pendingIncomingTables) return; $('reauthApplyPasswordInput').value = ''; $('reauthApplyPasswordError').classList.add('d-none'); if (reauthApplyModal) reauthApplyModal.show(); });
   $('confirmReauthApplyBtn').addEventListener('click', function () { var pw = $('reauthApplyPasswordInput').value; passwordManager.verifyCurrentPassword(pw).then(function (ok) { if (!ok) { $('reauthApplyPasswordError').classList.remove('d-none'); return; } if (reauthApplyModal) reauthApplyModal.hide(); performApplySchemaUpdate(); }); });
   $('cancelPreviewBtn').addEventListener('click', function () { $('updateSchemaPreviewCard').classList.add('d-none'); pendingIncomingTables = null; renderWorkflowSteps(1); $('updateSchemaResult').innerHTML = '<div class="alert alert-secondary py-2 mb-0">Update cancelled. No schema was changed.</div>'; });
-
   var deleteSchemaModalEl = $('deleteSchemaModal'); var deleteSchemaModal = window.bootstrap ? new window.bootstrap.Modal(deleteSchemaModalEl) : null;
   $('deleteSchemaBtn').addEventListener('click', function () { $('deleteSchemaPasswordInput').value = ''; $('deleteSchemaPasswordError').classList.add('d-none'); if (deleteSchemaModal) deleteSchemaModal.show(); });
   $('confirmDeleteSchemaBtn').addEventListener('click', function () {
@@ -1218,27 +965,22 @@
       $('updateSchemaResult').innerHTML = '<div class="alert alert-warning py-2"><strong>\u201c' + esc(targetEntry.name) + '\u201d has been emptied.</strong> A backup was automatically downloaded. Other stored schemas were not affected.</div>';
     });
   });
-
   var saveRelationshipModalEl = $('saveRelationshipModal'); var saveRelationshipModal = window.bootstrap ? new window.bootstrap.Modal(saveRelationshipModalEl) : null;
   $('confirmSaveRelationshipBtn').addEventListener('click', function () {
     if (!pendingSaveRelationshipDraft) return;
     var pw = $('saveRelationshipPasswordInput').value;
     passwordManager.verifyCurrentPassword(pw).then(function (ok) {
       if (!ok) { $('saveRelationshipPasswordError').classList.remove('d-none'); return; }
-      var d = pendingSaveRelationshipDraft;
-      var updatedSchema;
+      var d = pendingSaveRelationshipDraft; var updatedSchema;
       try { updatedSchema = window.APSQL_SCHEMA_TOOLS.saveRelationshipToSchema(currentSchema(), d.fromTable, d.fromColumn, d.toTable, d.toColumn); }
       catch (err) { $('saveRelationshipPasswordError').classList.remove('d-none'); $('saveRelationshipPasswordError').textContent = err.message; return; }
       setActiveSchemaObject(updatedSchema);
       relationshipStore.clearManualRelationship(d.fromTable, d.toTable); delete relationshipDrafts[d.fromTable];
-      rebuildEngine();
-      persistCurrentSchema(); renderSchemaPersistenceStatus();
-      refreshAllViewsAfterSchemaChange(); renderJoinPreview();
+      rebuildEngine(); persistCurrentSchema(); renderSchemaPersistenceStatus(); refreshAllViewsAfterSchemaChange(); renderJoinPreview();
       if (saveRelationshipModal) saveRelationshipModal.hide();
       pendingSaveRelationshipDraft = null;
     });
   });
-
   var errLastResult = null;
   function renderErrorRectifierResult(result) {
     errLastResult = result;
@@ -1259,45 +1001,360 @@
   });
   $('errCopySqlBtn').addEventListener('click', function () { if (!errLastResult) return; navigator.clipboard && navigator.clipboard.writeText(errLastResult.correctedSql); var old = $('errCopySqlBtn').innerHTML; $('errCopySqlBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopySqlBtn').innerHTML = old; }, 1300); });
   $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'Error Identified: ' + errLastResult.errorIdentified + '\n\nCorrection Applied: ' + errLastResult.correctionApplied; navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
-
+  /* ================================================================
+     V10.8: GUIDED WALKTHROUGH & RESPONSIVE UI REDESIGN
+     ================================================================ */
+  function tourStep(sel, place, title, what, why, doThis, then) {
+    var parts = [];
+    if (what) parts.push('<p class="tour-line tour-what"><strong>What it does:</strong> ' + what + '</p>');
+    if (why) parts.push('<p class="tour-line tour-why"><strong>Why it helps:</strong> ' + why + '</p>');
+    if (doThis) parts.push('<p class="tour-line tour-do"><strong>What to do:</strong> ' + doThis + '</p>');
+    if (then) parts.push('<p class="tour-line tour-then"><strong>What happens next:</strong> ' + then + '</p>');
+    return { sel: sel, place: place, title: title, body: parts.join('') };
+  }
   var TOURS = {
-    quickstart: [{ sel: '[data-tour="hamburger"]', place: 'bottom', title: 'What this application does', body: '<p>Store multiple schemas, describe requirements in plain language, and build queries safely.</p>' }],
-    builder: [{ sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query.</p>' }],
-    crbuilder: [{ sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: '<p>Choose INSERT, UPDATE, or DELETE.</p>' }],
-    usedschema: [{ sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: '<p>Switch between stored schemas above.</p>' }],
-    updateschema: [{ sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Multiple schemas', body: '<p>Add, update, or delete individual schemas without affecting others.</p>' }],
-    errorrectifier: [{ sel: '[data-tour="err-safety"]', place: 'bottom', title: 'What Error Rectifier does', body: '<p>Helps you fix SQL after a database error.</p>' }],
-    about: []
+    quickstart: [
+      tourStep('[data-tour="hamburger"]', 'bottom', 'Welcome to AP-SQL Assistant',
+        'This is the main menu. It groups every feature into three areas: Query Builder, Schema, and Theme, plus a shortcut to About.',
+        'You can reach any part of the app from here in one click, without needing to remember where things are.',
+        'Click the menu icon to open it, take a look, then close it and click Next to continue.',
+        'You will see the same menu available on every page as you move through this walkthrough.'),
+      tourStep('#qsModuleChips', 'bottom', 'Areas covered by your schema',
+        'These chips list every module that the currently active schema knows about.',
+        'It gives you an instant sense of what data you can query before you start typing a request.',
+        'Nothing to click here — just glance over the list.',
+        'Once you pick tables or describe a request, the app only ever uses tables from these areas.'),
+      tourStep('#qsExampleGrid', 'top', 'Try a ready-made example',
+        'Each card is a real, working example request.',
+        'It is the fastest way to see the whole tool in action before writing your own request.',
+        'Click any card.',
+        'You will jump straight to the Query Builder with that request already typed in and the SQL generated for you.'),
+      tourStep('[data-view="builder"]', 'bottom', 'Read Only Query Builder',
+        'This opens the builder for SELECT-style, read-only reporting queries.',
+        'It is where most day-to-day questions are answered.',
+        'Click "Open Read Only Query Builder" whenever you are ready.',
+        'The next part of this walkthrough (restarted from that page) explains that screen in detail.'),
+      tourStep('[data-view="crbuilder"]', 'bottom', 'Query Builder for CR',
+        'This opens the builder for Change Request SQL — INSERT, UPDATE, and DELETE statements.',
+        'It keeps the same safety net (schema validation, mandatory WHERE clause) so change requests stay safe.',
+        'Click "Open Query Builder for CR" when you need to draft a data change.',
+        'Remember: this only ever produces SQL text for review — it never runs anything against a real database.'),
+      tourStep('[data-view="errorrectifier"]', 'bottom', 'Error Rectifier',
+        'Paste a database error together with the SQL that caused it, and this tool proposes a corrected query.',
+        'It saves time troubleshooting common issues like datatype mismatches or wrong join columns.',
+        'Click "Open Error Rectifier" any time you hit a database error.',
+        'You will get a corrected query, a plain-language explanation, and a "what changed" view.'),
+      tourStep('#themeMenuToggle', 'bottom', 'Theme (Light / Dark / System Default)',
+        'Switch the whole application between light mode, dark mode, or match your system setting.',
+        'A comfortable theme reduces eye strain during long sessions.',
+        'Open the Theme menu and pick an option.',
+        'The change applies instantly and is remembered next time you open the app in this browser.'),
+      tourStep('#aboutMenuBtn', 'bottom', 'About AP-SQL Assistant',
+        'Opens a summary of the application version, active schema version, and the security model.',
+        'It is the fastest place to confirm exactly which version and schema you are working with.',
+        'Click "About" in the menu at any time.',
+        'A dialog opens with these details; close it to return to whatever you were doing.'),
+      tourStep('#tourBtn', 'bottom', 'Restart this walkthrough anytime',
+        'This "Guided Walkthrough" button is always visible in the navigation bar, on every page.',
+        'Whichever screen you are on, this button starts a walkthrough written specifically for that screen.',
+        'Click it again whenever you want a refresher.',
+        'That is the end of the Home tour — enjoy exploring AP-SQL Assistant!')
+    ],
+    builder: [
+      tourStep('[data-tour="prompt"]', 'bottom', 'Describe What You Need',
+        'Type your request here in plain, everyday language — no SQL knowledge required.',
+        'The engine automatically figures out tables, columns, joins, filters, sorting, and totals from your sentence.',
+        'Type something like "show approved invoices over 500 sorted by due date" and click Build Query below.',
+        'Your request is turned into validated SQL, shown with a short interpretation of what was understood.'),
+      tourStep('#generateFromDescriptionBtn', 'bottom', 'Build Query',
+        'This button turns your description (and/or any manual selections) into SQL.',
+        'It is the single action that runs the whole engine.',
+        'Click it once you are happy with your description and/or manual selections.',
+        'The SQL appears instantly on the right (or below, on smaller screens).'),
+      tourStep('#resultBody', 'left', 'Generated SQL',
+        'This panel shows the finished, validated SQL, ready to copy.',
+        'Seeing the exact SQL, tables, columns and filters lets you double-check the query before using it.',
+        'Review the SQL, tables, columns, filters and assumptions listed here.',
+        'Use Copy Result to copy the SQL, or Optimize / Explain This Query for more detail.'),
+      tourStep('#optimizeBtn', 'bottom', 'Optimize and Explain',
+        'Optimize looks for small safe improvements. Explain This Query describes the query in plain English.',
+        'These two buttons help you sanity-check a query and explain it to someone else.',
+        'Click either button once a query has been built.',
+        'A short report appears with any changes applied and/or a plain-language explanation.'),
+      tourStep('#manualTabs', 'bottom', 'Manual controls (optional)',
+        'These tabs let you fine-tune or fully build a query by hand instead of describing it.',
+        'Some requests are easier to get exactly right with precise manual control.',
+        'Switch tabs to pick tables/columns directly, set sorting/limits, or review a summary.',
+        'Whatever you set here is combined with anything typed into Describe What You Need.'),
+      tourStep('#tableListGrid', 'right', 'Pick Tables',
+        'This grid lists every table in the active schema, grouped and searchable by module.',
+        'Manually picking tables gives you full control when a description alone is not precise enough.',
+        'Tick the tables you need, or use "Select All (filtered)" after narrowing down.',
+        'The columns and filters available below update automatically to match your selected tables.'),
+      tourStep('#readOnlyFilterGroup', 'top', 'Filters',
+        'Each row here is one WHERE condition.',
+        'Filters control exactly which records come back.',
+        'Click "Add Filter", choose a column, an operator, and a value. Add more rows with AND/OR.',
+        'These conditions are combined into the WHERE clause of your generated SQL.'),
+      tourStep('#joinOptionCard', 'top', 'How tables are connected',
+        'This card appears once you have two or more tables selected, showing how they will be joined.',
+        'Knowing the join type helps you avoid accidentally losing or duplicating rows.',
+        'If a connection could not be found automatically, use the panel below to define matching columns.',
+        'Once resolved, you can optionally save that relationship permanently to the schema.'),
+      tourStep('#confidenceChecklistBox', 'top', 'Confidence checklist',
+        'After building from a description, this checklist shows how confidently things were identified.',
+        'It gives you an honest signal about what is worth double-checking.',
+        'Look for any warning icons — they point to something worth reviewing.',
+        'If something is ambiguous, quick-pick buttons appear so you can clarify it in one click.')
+    ],
+    crbuilder: [
+      tourStep('#crCommandSelector', 'bottom', 'Choose the query type',
+        'Pick whether you are drafting an INSERT (add), UPDATE (change), or DELETE (remove) statement.',
+        'Each type has different required inputs — UPDATE/DELETE always need a WHERE condition to stay safe.',
+        'Click the query type you need.',
+        'The panels below change to match — value fields for INSERT, or filters for UPDATE/DELETE.'),
+      tourStep('#crDescriptionInput', 'bottom', 'Describe the change (optional)',
+        'You can describe a change request in plain language here.',
+        'It is often faster than manually picking every column and value.',
+        'Type something like "update the invoice status to 40 where invoice id is 123" and click Build Query.',
+        'The query type, table, values, and WHERE condition are filled in automatically.'),
+      tourStep('#crTableSelect', 'bottom', 'Pick the table',
+        'Choose which table this Change Request applies to.',
+        'Every other option on this page is scoped to this one table.',
+        'Select a table from the dropdown.',
+        'The columns panel below refreshes to show that table\'s columns.'),
+      tourStep('#crFilterGroup', 'top', 'WHERE Conditions',
+        'For UPDATE and DELETE, this defines exactly which rows are affected.',
+        'This is a critical safety net against accidental full-table changes.',
+        'Add at least one filter condition identifying the record(s) to change.',
+        'If you are certain no WHERE condition is needed, tick the explicit confirmation checkbox instead.'),
+      tourStep('#crResultBody', 'left', 'Generated Change Request SQL',
+        'The finished INSERT/UPDATE/DELETE statement appears here, clearly labelled with its query type.',
+        'This is text only — AP-SQL Assistant never executes it.',
+        'Review the SQL and any warnings shown, then use Copy Result.',
+        'Run the copied SQL through your organization\'s normal review and execution process.')
+    ],
+    usedschema: [
+      tourStep('#usedSchemaSummary', 'bottom', 'Active schema summary',
+        'This strip shows the name, version, and counts of the schema currently in use.',
+        'It confirms exactly which schema version every query is being validated against.',
+        'Nothing to click — just review the summary.',
+        'If this looks out of date, check Update Schema to switch or refresh it.'),
+      tourStep('#schemaStoreList', 'bottom', 'Stored schemas',
+        'AP-SQL Assistant can hold several named schemas side by side in this browser.',
+        'This lets different teams or projects keep separate schemas without overwriting each other.',
+        'Find the one marked "Active", or click "Set Active" on any other entry to switch to it.',
+        'Every builder immediately starts using whichever schema you just activated.'),
+      tourStep('#schemaSearchInput', 'bottom', 'Search tables and columns',
+        'Type any part of a table/column name, alias, or description to filter the tree below.',
+        'It is much faster than scrolling through every module.',
+        'Start typing — matching text is highlighted directly in the results.',
+        'Clear the search box to see the full schema tree again.'),
+      tourStep('#schemaTree', 'top', 'Browse the schema',
+        'This tree is organized by module, then table, then column.',
+        'Browsing here is the best way to discover which columns are available before writing a query.',
+        'Click a module to see its tables, then a table to see its columns and keys.',
+        'Once you know the names you need, head to a Query Builder to use them.')
+    ],
+    updateschema: [
+      tourStep('#updateSchemaPasswordStep', 'bottom', 'Administrator access',
+        'This section is password-protected because it can change the schema every query is validated against.',
+        'It keeps schema changes intentional and traceable, without connecting to a live production database.',
+        'Enter the operational password and click Unlock.',
+        'The full set of schema management tools below becomes available for this browser session.'),
+      tourStep('#targetSchemaSelect', 'bottom', 'Manage stored schemas',
+        'This dropdown picks which stored schema every action below will affect.',
+        'Keeping schemas separate means updating or deleting one never touches any other.',
+        'Choose a schema here, or use "Add New Schema" / "Delete This Schema".',
+        'The rest of this page acts only on whichever schema is selected here.'),
+      tourStep('#syncScheduleSelect', 'bottom', 'Synchronization schedule',
+        'Choose how often this browser automatically checks for schema updates.',
+        'This applies uniformly to the Live Shared Schema, linked file, and GitHub sync at once.',
+        'Pick an option from the dropdown.',
+        'Your choice is saved and takes effect immediately for all automatic checks.'),
+      tourStep('#sharedSchemaCard', 'bottom', 'Live Shared Schema (zero setup)',
+        'On every page load, the app checks a well-known file path for a published schema.',
+        'This is the easiest way to make sure every teammate automatically sees the same schema.',
+        'Click "Check Now" to test it, or leave it to check on schedule.',
+        'If a valid schema is found there, it becomes active for everyone who opens the app.'),
+      tourStep('#schemaSyncCard', 'bottom', 'Cross-device sync — Option A',
+        'Link the schema to a single shared file in SharePoint, OneDrive, or a network drive.',
+        'Good when your organization already has a shared file location.',
+        'Use "Create New Shared File" or "Link Existing Shared File".',
+        'Every schema change is written to that file, checked automatically for outside changes.'),
+      tourStep('#githubSyncCard', 'bottom', 'GitHub-Hosted Schema Sync — Option B',
+        'Connect a GitHub repository and token so the schema is stored and shared through GitHub.',
+        'Works in any browser, ideal if the app is hosted on GitHub Pages.',
+        'Fill in owner, repo, branch, path, and a token, then click "Connect & Sync Now".',
+        'Update/Delete actions further down act directly on this shared GitHub location.'),
+      tourStep('#vaultControls', 'top', 'Secure GitHub Connection Vault',
+        'Encrypts the GitHub connection with a passphrase and publishes it to the repository.',
+        'Removes the need to share a raw access token with every teammate.',
+        'Enter a passphrase and Publish; on another machine, enter it and Unlock.',
+        'Share only the passphrase out-of-band — it is never stored inside the vault itself.'),
+      tourStep('#updateSchemaFileInput', 'bottom', 'Smart Schema Import Engine',
+        'Upload a .json or .csv file describing new or updated tables and columns.',
+        'This is how new schema information gets in, with automatic validation first.',
+        'Choose a file and click "Process File".',
+        'If valid, a Preview Changes card appears summarizing what will be added or updated.'),
+      tourStep('#updateSchemaPreviewCard', 'top', 'Preview changes before applying',
+        'Shows a clear before/after comparison of versions, tables, and columns.',
+        'Reviewing before applying avoids surprises.',
+        'Check the comparison, then click "Apply Schema Update" or "Cancel Update".',
+        'Applying updates only the schema you are working with — others stay untouched.'),
+      tourStep('#changePasswordBtn', 'bottom', 'Operational password (Settings)',
+        'Change the password required to unlock this Update Schema section.',
+        'Lets your organization rotate the password whenever needed.',
+        'Enter the current password plus a new password (twice) and click Change Password.',
+        'The new password takes effect immediately for this browser.'),
+      tourStep('#deleteSchemaBtn', 'top', 'Danger Zone',
+        'Permanently clears every table/column/relationship from the schema you are working with.',
+        'A safety backup is downloaded automatically first.',
+        'Click "Delete This Schema\'s Contents", confirm the password.',
+        'The schema becomes empty and ready for a fresh import.')
+    ],
+    errorrectifier: [
+      tourStep('[data-tour="err-safety"]', 'bottom', 'What Error Rectifier does',
+        'Paste a database error together with the SQL statement that caused it.',
+        'It proposes a corrected query and explains what went wrong in plain language.',
+        'Fill in both boxes below, then click Rectify SQL.',
+        'This tool never runs anything against a database — it only suggests corrected SQL text.'),
+      tourStep('#errErrorInput', 'bottom', 'Enter the database error',
+        'Paste the exact error message your database returned.',
+        'The wording helps the engine auto-detect your SQL dialect.',
+        'Copy/paste the full error text here.',
+        'If detected, the SQL dialect dropdown below is set automatically.'),
+      tourStep('#errSqlInput', 'bottom', 'Enter the SQL that caused it',
+        'Paste the exact SQL statement that produced the error.',
+        'Having the real query lets the engine target the specific fix.',
+        'Paste your SQL, confirm the dialect, then click "Rectify SQL".',
+        'A corrected version appears with an explanation of the fix.'),
+      tourStep('#errRectifiedSqlBody', 'left', 'Rectified SQL',
+        'The corrected query, ready to copy and re-run.',
+        'A safe, reviewable fix instead of manually tracking down the syntax issue.',
+        'Review the corrected SQL, then use "Copy SQL".',
+        'Always re-test the corrected query in your normal review process.'),
+      tourStep('#errExplanationBody', 'top', 'Explanation',
+        'A plain-language description of the error and the correction applied.',
+        'Helps you learn from the fix or explain it to a teammate.',
+        'Read the explanation, use "Copy Explanation" to share it elsewhere.',
+        'If a change was made, a "What Changed" card appears with a before/after view.')
+    ]
   };
-  var TOUR = TOURS.quickstart; var tourIdx = 0, tourOpen = false;
+  var TOUR = TOURS.quickstart;
+  var tourIdx = 0, tourOpen = false;
   var overlay = $('tourOverlay'), spotlight = $('tourSpotlight'), popup = $('tourPopup');
-  function clampToViewport(top, left, popW, popH) { var vw = window.innerWidth, vh = window.innerHeight, margin = 12; return { top: Math.min(Math.max(margin, top), Math.max(margin, vh - popH - margin)), left: Math.min(Math.max(margin, left), Math.max(margin, vw - popW - margin)) }; }
-  function positionTour() {
-    var step = TOUR[tourIdx]; var target = document.querySelector(step.sel); if (!target) { endTour(); return; }
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  var TOUR_MARGIN = 12;
+  var TOUR_GAP = 14;
+  var MOBILE_BREAKPOINT = 767.98;
+  var tourResizeScheduled = false;
+  function isMobileTourViewport() { return window.innerWidth <= MOBILE_BREAKPOINT; }
+  function getNavbarOffset() { var navbar = $('mainNavbar'); return (navbar && navbar.offsetHeight) ? navbar.offsetHeight : 64; }
+  function isElementVisible(el) {
+    if (!el) return false;
+    if (!(el.offsetWidth || el.offsetHeight || (el.getClientRects && el.getClientRects().length))) return false;
+    var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+    return true;
+  }
+  function clampToViewport(top, left, popW, popH, minTop) {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var lowestTop = Math.max(TOUR_MARGIN, minTop || 0);
+    return { top: Math.min(Math.max(lowestTop, top), Math.max(lowestTop, vh - popH - TOUR_MARGIN)), left: Math.min(Math.max(TOUR_MARGIN, left), Math.max(TOUR_MARGIN, vw - popW - TOUR_MARGIN)) };
+  }
+  function choosePlacement(rect, popW, popH, preferred, navbarOffset) {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var space = { top: Math.max(0, rect.top - navbarOffset - TOUR_GAP), bottom: Math.max(0, vh - rect.bottom - TOUR_GAP), left: Math.max(0, rect.left - TOUR_GAP), right: Math.max(0, vw - rect.right - TOUR_GAP) };
+    var fits = { top: space.top >= popH, bottom: space.bottom >= popH, left: space.left >= popW, right: space.right >= popW };
+    var order = ['top', 'bottom', 'left', 'right'];
+    if (preferred && order.indexOf(preferred) !== -1) { order.splice(order.indexOf(preferred), 1); order.unshift(preferred); }
+    for (var i = 0; i < order.length; i++) { if (fits[order[i]]) return order[i]; }
+    var best = 'bottom', bestSpace = -1;
+    order.forEach(function (side) { if (space[side] > bestSpace) { bestSpace = space[side]; best = side; } });
+    return best;
+  }
+  function computeVisibleProgress() {
+    var visibleIndices = [];
+    for (var i = 0; i < TOUR.length; i++) { var t = document.querySelector(TOUR[i].sel); if (t && isElementVisible(t)) visibleIndices.push(i); }
+    if (!visibleIndices.length) return { position: 1, total: 1 };
+    var position = visibleIndices.indexOf(tourIdx);
+    if (position === -1) { position = 0; for (var j = 0; j < visibleIndices.length; j++) { if (visibleIndices[j] <= tourIdx) position = j; } }
+    return { position: position + 1, total: visibleIndices.length };
+  }
+  function renderTourChrome(step) {
+    var progress = computeVisibleProgress();
+    $('tourStepLabel').textContent = 'Step ' + progress.position + ' of ' + progress.total + (currentView ? (' \u2014 ' + currentView) : '');
+    $('tourTitle').textContent = step.title;
+    $('tourBody').innerHTML = step.body;
+    $('tourDots').innerHTML = TOUR.map(function (_, i) { return '<i class="' + (i === tourIdx ? 'on' : '') + '"></i>'; }).join('');
+    var progressPct = progress.total > 1 ? Math.round(((progress.position - 1) / (progress.total - 1)) * 100) : 100;
+    var progressBar = popup.querySelector('.tour-progressbar-fill');
+    if (progressBar) progressBar.style.width = progressPct + '%';
+    $('tourPrev').disabled = tourIdx === 0;
+    $('tourNext').textContent = (progress.position >= progress.total) ? 'Finish' : 'Next';
+  }
+  function ensureProgressBar() {
+    if (popup.querySelector('.tour-progressbar')) return;
+    var bar = document.createElement('div'); bar.className = 'tour-progressbar'; bar.innerHTML = '<div class="tour-progressbar-fill"></div>';
+    var stepLabel = $('tourStepLabel'); if (stepLabel && stepLabel.parentNode) stepLabel.parentNode.insertBefore(bar, stepLabel);
+  }
+  function scrollTargetIntoView(target, navbarOffset) {
+    var rect = target.getBoundingClientRect();
+    var needsScroll = rect.top < navbarOffset + 16 || rect.bottom > window.innerHeight - (isMobileTourViewport() ? 220 : 16);
+    if (!needsScroll) return false;
+    var elTop = rect.top + window.scrollY; var desired = Math.max(0, elTop - navbarOffset - 32);
+    window.scrollTo({ top: desired, behavior: 'smooth' }); return true;
+  }
+  function positionTourAttempt(skipCount, direction) {
+    skipCount = skipCount || 0; direction = direction || 1;
+    if (skipCount > TOUR.length) { endTour(); return; }
+    var step = TOUR[tourIdx]; if (!step) { endTour(); return; }
+    var target = document.querySelector(step.sel);
+    if (!target || !isElementVisible(target)) {
+      var nextIdx = tourIdx + direction;
+      if (nextIdx >= 0 && nextIdx <= TOUR.length - 1) { tourIdx = nextIdx; positionTourAttempt(skipCount + 1, direction); }
+      else { endTour(); }
+      return;
+    }
+    ensureProgressBar(); renderTourChrome(step);
+    var navbarOffset = getNavbarOffset(); var scrolled = scrollTargetIntoView(target, navbarOffset);
     setTimeout(function () {
       var r = target.getBoundingClientRect(); var pad = 8;
       spotlight.style.top = (r.top - pad) + 'px'; spotlight.style.left = (r.left - pad) + 'px'; spotlight.style.width = (r.width + pad * 2) + 'px'; spotlight.style.height = (r.height + pad * 2) + 'px';
-      var popW = Math.min(popup.offsetWidth || 360, window.innerWidth - 24); var popH = Math.min(popup.offsetHeight || 190, window.innerHeight - 24); var vh = window.innerHeight;
-      var place = step.place || 'bottom';
-      if (place === 'bottom' && r.bottom + popH + 20 > vh) place = 'top';
-      if (place === 'top' && r.top - popH - 20 < 0) place = 'bottom';
+      if (isMobileTourViewport()) { popup.classList.add('tour-mobile-sheet'); popup.style.top = ''; popup.style.left = ''; return; }
+      popup.classList.remove('tour-mobile-sheet');
+      var popW = Math.min(popup.offsetWidth || 360, window.innerWidth - TOUR_MARGIN * 2);
+      var popH = Math.min(popup.offsetHeight || 190, window.innerHeight - TOUR_MARGIN * 2);
+      var place = choosePlacement(r, popW, popH, step.place, navbarOffset);
       var rawTop, rawLeft;
-      if (place === 'bottom') { rawTop = r.bottom + 14; rawLeft = r.left; } else if (place === 'top') { rawTop = r.top - popH - 14; rawLeft = r.left; } else if (place === 'left') { rawLeft = r.left - popW - 14; rawTop = r.top; } else { rawLeft = r.right + 14; rawTop = r.top; }
-      var clamped = clampToViewport(rawTop, rawLeft, popW, popH); popup.style.top = clamped.top + 'px'; popup.style.left = clamped.left + 'px';
-      $('tourStepLabel').textContent = 'Step ' + (tourIdx + 1) + ' of ' + TOUR.length + ' \u2014 ' + currentView;
-      $('tourTitle').textContent = step.title; $('tourBody').innerHTML = step.body;
-      $('tourDots').innerHTML = TOUR.map(function (_, i) { return '<i class="' + (i === tourIdx ? 'on' : '') + '"></i>'; }).join('');
-      $('tourPrev').disabled = tourIdx === 0; $('tourNext').textContent = tourIdx === TOUR.length - 1 ? 'Done' : 'Next';
-    }, 260);
+      if (place === 'bottom') { rawTop = r.bottom + TOUR_GAP; rawLeft = r.left; }
+      else if (place === 'top') { rawTop = r.top - popH - TOUR_GAP; rawLeft = r.left; }
+      else if (place === 'left') { rawLeft = r.left - popW - TOUR_GAP; rawTop = r.top; }
+      else { rawLeft = r.right + TOUR_GAP; rawTop = r.top; }
+      if (place === 'left' || place === 'right') { rawTop = Math.min(rawTop, window.innerHeight - popH - TOUR_MARGIN); }
+      var clamped = clampToViewport(rawTop, rawLeft, popW, popH, navbarOffset + TOUR_MARGIN);
+      popup.style.top = clamped.top + 'px'; popup.style.left = clamped.left + 'px';
+      if (popup.setAttribute) { popup.setAttribute('tabindex', '-1'); if (popup.focus) popup.focus({ preventScroll: true }); }
+    }, scrolled ? 320 : 60);
   }
-  function startTour() { TOUR = TOURS[currentView] && TOURS[currentView].length ? TOURS[currentView] : TOURS.quickstart; tourIdx = 0; tourOpen = true; overlay.classList.add('show'); positionTour(); }
-  function endTour() { tourOpen = false; overlay.classList.remove('show'); }
-  function nextTour() { if (tourIdx < TOUR.length - 1) { tourIdx++; positionTour(); } else endTour(); }
-  function prevTour() { if (tourIdx > 0) { tourIdx--; positionTour(); } }
-  $('tourBtn').addEventListener('click', startTour); $('tourNext').addEventListener('click', nextTour); $('tourPrev').addEventListener('click', prevTour); $('tourSkip').addEventListener('click', endTour);
+  function positionTour(direction) { positionTourAttempt(0, direction || 1); }
+  function startTour() {
+    TOUR = (TOURS[currentView] && TOURS[currentView].length) ? TOURS[currentView] : TOURS.quickstart;
+    tourIdx = 0; tourOpen = true;
+    overlay.classList.add('show');
+    positionTour(1);
+  }
+  function endTour() { tourOpen = false; overlay.classList.remove('show'); popup.classList.remove('tour-mobile-sheet'); }
+  function nextTour() { if (tourIdx < TOUR.length - 1) { tourIdx++; positionTour(1); } else endTour(); }
+  function prevTour() { if (tourIdx > 0) { tourIdx--; positionTour(-1); } }
+  $('tourBtn').addEventListener('click', startTour);
+  $('tourNext').addEventListener('click', nextTour);
+  $('tourPrev').addEventListener('click', prevTour);
+  $('tourSkip').addEventListener('click', endTour);
   overlay.addEventListener('click', function (e) { if (e.target === overlay) endTour(); });
   document.addEventListener('keydown', function (e) { if (!tourOpen) return; if (e.key === 'Escape') endTour(); else if (e.key === 'ArrowRight') nextTour(); else if (e.key === 'ArrowLeft') prevTour(); });
-  window.addEventListener('resize', function () { if (tourOpen) positionTour(); });
-
+  function scheduleTourReposition() { if (!tourOpen || tourResizeScheduled) return; tourResizeScheduled = true; (window.requestAnimationFrame || function (fn) { setTimeout(fn, 16); })(function () { tourResizeScheduled = false; if (tourOpen) positionTour(); }); }
+  window.addEventListener('resize', scheduleTourReposition);
+  window.addEventListener('orientationchange', scheduleTourReposition);
+  window.addEventListener('scroll', scheduleTourReposition, { passive: true });
 })();
