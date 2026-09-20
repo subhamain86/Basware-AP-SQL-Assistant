@@ -1,7 +1,8 @@
 (function (root) {
   'use strict';
-  // Default operational password for Update Schema is "admin123" (documented in README).
-  // This can be changed at any time in-app via Update Schema > Operational Password.
+  // Default operational password for Update Schema is "admin123" (documented in README and shown in-app).
+  // This can be changed at any time via Update Schema > Operational Password, and reset back to this
+  // default at any time via the "Forgot password? Reset to default" control on the locked gate screen.
   var HARDCODED_PASSWORD_SHA256 = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
   function sha256Fallback(asciiOrBytes) {
     function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }

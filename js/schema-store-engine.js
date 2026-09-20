@@ -21,7 +21,7 @@
     };
   }
 
-  // Schema states (V11.1):
+  // Schema states:
   //   Stored   - present in state.entries (always true for any entry)
   //   Active   - entry.id is present in state.activeIds (available for use by SQL generation / Query Builder / Error Rectifier)
   //   Default  - entry.id === state.defaultId (primary schema for default operations; always included in activeIds)
@@ -85,13 +85,12 @@
     function getActiveEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
     function getActiveSchema() { var e = getActiveEntry(); return e ? e.schema : null; }
 
-    // ---- V11.1 multi-schema state accessors ----
+    // ---- Multi-schema state accessors ----
     function getDefaultId() { return state.defaultId; }
     function getDefaultEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
     function getActiveIds() { return state.activeIds.slice(); }
     function getActiveEntries() {
       var ordered = state.activeIds.slice();
-      // Ensure default appears first for predictable merge precedence.
       ordered.sort(function (a, b) { if (a === state.defaultId) return -1; if (b === state.defaultId) return 1; return 0; });
       return ordered.map(function (id) { return getEntry(id); }).filter(Boolean);
     }
@@ -111,7 +110,6 @@
       persist(); return true;
     }
 
-    // Replace the full active set. The default schema is always force-included.
     function setActiveIds(ids) {
       var validIds = {}; state.entries.forEach(function (e) { validIds[e.id] = true; });
       var next = (ids || []).filter(function (id) { return validIds[id]; });
@@ -127,7 +125,7 @@
       var idx = next.indexOf(id);
       if (on && idx === -1) next.push(id);
       if (!on && idx !== -1) {
-        if (id === state.defaultId) return false; // cannot deactivate the default schema directly
+        if (id === state.defaultId) return false;
         next.splice(idx, 1);
       }
       return setActiveIds(next);
@@ -140,7 +138,7 @@
       persist();
       return entry;
     }
-    function setActiveId(id) { return setDefaultId(id); } // backward-compat alias used by any legacy callers
+    function setActiveId(id) { return setDefaultId(id); }
     function updateEntry(id, patch) { var entry = getEntry(id); if (!entry) return null; Object.keys(patch || {}).forEach(function (k) { entry[k] = patch[k]; }); persist(); return entry; }
     function renameEntry(id, newName) { return updateEntry(id, { name: newName }); }
     function removeEntry(id) {
@@ -163,8 +161,6 @@
       state.entries = [entry]; state.defaultId = entry.id; state.activeIds = [entry.id]; persist(); return entry;
     }
 
-    // ---- Merged "active schema" used by the query engine: union of all ACTIVE schemas' tables. ----
-    // On table-name collisions, the entry earlier in getActiveEntries() (default first) wins.
     function getMergedActiveSchema() {
       var activeEntries = getActiveEntries();
       if (!activeEntries.length) return { schema_name: 'No Active Schema', schema_version: '0.0', module_labels: {}, tables: [] };

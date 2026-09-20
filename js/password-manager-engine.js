@@ -19,7 +19,11 @@
         return SCHEMA_TOOLS.sha256Hex(String(newPassword)).then(function (newHash) { saveCustomHash(newHash); return { ok: true }; });
       });
     }
-    function resetToDefault() { clearCustomHash(); }
+    // Resets any custom password back to the documented default ("admin123"). Used by the
+    // "Forgot password? Reset to default" recovery control on the locked Update Schema gate,
+    // so users are never permanently locked out even if a custom/stale hash exists in this
+    // browser's local storage (e.g. left over from an earlier session or version).
+    function resetToDefault() { clearCustomHash(); return true; }
     return { getCurrentHash: getCurrentHash, isCustomPasswordSet: isCustomPasswordSet, verifyCurrentPassword: verifyCurrentPassword, changePassword: changePassword, resetToDefault: resetToDefault };
   }
   var API = { STORAGE_KEY: STORAGE_KEY, createPasswordManager: createPasswordManager };

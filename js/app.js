@@ -18,8 +18,6 @@
 
   var relationshipStore = APSQL_RELATIONSHIPS.createRelationshipStore();
   var engine;
-  // V11.1: "currentSchema()" now returns the MERGED schema across every Active schema (default first),
-  // so SQL generation / Query Builder / Error Rectifier only ever see schemas configured as Active.
   function currentSchema() { return schemaStore.getMergedActiveSchema() || { tables: [] }; }
   function setDefaultSchemaObject(schemaObj) { var entry = schemaStore.getDefaultEntry(); if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj }); }
   function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); }
@@ -28,7 +26,6 @@
   var decodeStore = APSQL_DECODE.createDecodeStore();
 
   /* ---------------- Live Shared Schema ---------------- */
-  // Sync sources (Live Shared Schema / linked file / GitHub) always write into the Default Schema entry.
   var sharedSchemaChecked = false, sharedSchemaFound = false, sharedSchemaError = null;
   var SHARED_SCHEMA_PATH = APSQL_SHARED_SCHEMA.DEFAULT_SHARED_SCHEMA_PATH;
   function renderSharedSchemaStrip(elId) {
@@ -211,7 +208,7 @@
   })();
   (function defaultGithubPathToSharedPath() { var pathInput = $('githubPathInput'); if (pathInput && !pathInput.value) pathInput.value = SHARED_SCHEMA_PATH; })();
 
-  /* ---------------- Selectable sync schedule (navbar, clearly labeled as of V11.1) ---------------- */
+  /* ---------------- Selectable sync schedule (navbar, clearly labeled) ---------------- */
   var syncScheduleSelectedId = APSQL_SYNC_SCHEDULE.loadSelectedOptionId();
   var syncIntervalHandle = null;
   function runAllAutomaticSyncChecks() { if (document.hidden) return; checkSharedSchema(); checkLinkedFileForUpdates(false); checkGithubForUpdates(false); }
@@ -292,17 +289,32 @@
       $('currentPasswordInput').value = ''; $('newPasswordInput').value = ''; $('confirmNewPasswordInput').value = ''; renderPasswordCustomNote();
     });
   });
+  // V11.3 fix: "Forgot password? Reset to default" recovery control on the LOCKED gate screen.
+  // Root cause of the previously reported "Password section is not opening" issue: if this browser's
+  // localStorage ever held a custom password hash (from an earlier session, an earlier version, or any
+  // other testing), the documented default password ("admin123") would correctly stop working, and there
+  // was previously no way in the UI to recover from this without already knowing the current password.
+  // This control lets any user get back in immediately, without needing to know the current password.
+  if ($('resetDefaultPasswordBtn')) $('resetDefaultPasswordBtn').addEventListener('click', function () {
+    var box = $('resetDefaultPasswordResultBox');
+    var confirmed = window.confirm('Reset the Update Schema password back to the default ("admin123")? Any custom password previously set in this browser will no longer work.');
+    if (!confirmed) return;
+    passwordManager.resetToDefault();
+    if ($('updateSchemaPasswordInput')) $('updateSchemaPasswordInput').value = '';
+    if ($('updateSchemaPasswordError')) $('updateSchemaPasswordError').classList.add('d-none');
+    if (box) { box.classList.remove('d-none'); box.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> Password reset. Enter <code>admin123</code> above and click Unlock.</div>'; }
+  });
 
   /* ---------------- Persistence status ---------------- */
   function persistCurrentSchema() { schemaStore.persist(); syncWriteCurrentSchemaIfLinked(); pushToGithubIfConfigured(); }
   function renderSchemaPersistenceStatus() {
     var el = $('schemaPersistenceStatus'); if (!el) return;
     var defaultEntry = schemaStore.getDefaultEntry(); var activeCount = schemaStore.getActiveIds().length;
-    el.innerHTML = '<i class="bi bi-database-check"></i> Default schema: <strong>' + esc(defaultEntry ? defaultEntry.name : 'none') + '</strong> &middot; ' + activeCount + ' active schema' + (activeCount === 1 ? '' : 's') + ' of ' + schemaStore.count() + ' stored. Applying an update or deleting content is saved automatically from now on.';
+    el.innerHTML = '<i class="bi bi-database-check"></i> Default schema: <strong>' + esc(defaultEntry ? defaultEntry.name : 'none') + '</strong> &middot; ' + activeCount + ' active schema' + (activeCount === 1 ? '' : 's') + ' of ' + schemaStore.count() + ' stored.';
   }
   renderSchemaPersistenceStatus();
 
-  /* ---------------- V11.1: Schema state badges & shared list renderers ---------------- */
+  /* ---------------- Schema state badges & shared list renderers ---------------- */
   function schemaStateBadgeHtml(id) {
     var state = schemaStore.getSchemaState(id);
     if (state === 'default') return '<span class="badge text-bg-primary schema-state-badge">Default</span>';
@@ -310,7 +322,6 @@
     return '<span class="badge text-bg-secondary schema-state-badge">Inactive</span>';
   }
 
-  // ---- Used Schema page: "Select Stored Active Schemas" (multi-select, immediate effect, no admin password) ----
   function renderUsedSchemaActiveSelector() {
     var box = $('usedSchemaActiveSelector'); if (!box) return;
     var entries = schemaStore.listEntries();
@@ -335,7 +346,6 @@
     });
   }
 
-  // ---- Update Schema (admin) page: "Select Default Schema" (single) ----
   function renderDefaultSchemaSelector() {
     var box = $('defaultSchemaSelectorBody'); if (!box) return;
     var entries = schemaStore.listEntries();
@@ -354,7 +364,6 @@
     });
   }
 
-  // ---- Update Schema (admin) page: "Select Active Schemas" (multi-select + explicit Save) ----
   var pendingActiveSelection = null;
   function renderActiveSchemaSelector() {
     var box = $('activeSchemaSelectorBody'); if (!box) return;
@@ -385,7 +394,6 @@
   });
 
   function renderSchemaStoreList() {
-    // Legacy full list view retained on Used Schema page for reference/detail (read-only summary; management now via the selector above).
     var box = $('schemaStoreList'); if (!box) return; box.innerHTML = '';
     var entries = schemaStore.listEntries();
     if (!entries.length) { var empty = document.createElement('div'); empty.className = 'schema-store-empty'; empty.textContent = 'No schemas stored yet. Add one under Update Schema.'; box.appendChild(empty); return; }
@@ -439,7 +447,6 @@
   /* ---------------- Navbar / layout basics ---------------- */
   function syncNavbarOffset() { var navbar = $('mainNavbar'); if (!navbar) return; document.documentElement.style.setProperty('--navbar-h', navbar.offsetHeight + 'px'); }
   syncNavbarOffset(); window.addEventListener('resize', syncNavbarOffset); window.addEventListener('load', syncNavbarOffset);
-  // Recalculate after fonts/icons load and after the offcanvas menu toggles, since those can change navbar height too.
   setTimeout(syncNavbarOffset, 400);
 
   var THEME_KEY = 'ap_sql_theme';
@@ -1065,7 +1072,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap && aboutModalEl ? new window.bootstrap.Modal(aboutModalEl) : null;
   if ($('aboutMenuBtn')) $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.2.0'], ['Purpose', 'Schemas have a clear lifecycle: every stored schema can be marked Active (available for use) or left Inactive, exactly one Active schema is also the Default (used for Live Shared Schema / linked file / GitHub sync), and SQL generation, both Query Builders, and the Error Rectifier only ever use the schemas currently marked Active. V11.2 is a UI/UX modernization release: the Read Only Query Builder and Query Builder for CR were redesigned with a consistent, step-numbered, fully Bootstrap-enabled layout (cards, accordions, nav-pills, badges) for a cleaner and more approachable experience \u2014 no query-generation logic, validation, or output behavior was changed.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.3.0'], ['Purpose', 'V11.3 focuses on a compact, scrollable, and easy-to-navigate interface across the whole application, plus a fix for the "Password section not opening" issue \u2014 a "Forgot password? Reset to default" recovery control has been added directly to the locked Update Schema gate, so a stale or forgotten custom password can never permanently lock anyone out. Table lists, column lists, filters, and the schema tree now use compact, internally scrollable panels instead of stretching the whole page, and the main content area uses a constrained, centered container for a more compact, professional feel. No SQL generation, schema handling, filter, validation, or synchronization logic was changed.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password. The default password is documented as "admin123" and can be restored at any time via the Forgot Password control on the locked Update Schema screen.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
 
@@ -1181,11 +1188,11 @@
   if ($('errCopySqlBtn')) $('errCopySqlBtn').addEventListener('click', function () { if (!errLastResult) return; navigator.clipboard && navigator.clipboard.writeText(errLastResult.correctedSql); var old = $('errCopySqlBtn').innerHTML; $('errCopySqlBtn').innerHTML = '\u2705 Copied'; setTimeout(function () { $('errCopySqlBtn').innerHTML = old; }, 1300); });
   if ($('errCopyExplanationBtn')) $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'Error Identified: ' + errLastResult.errorIdentified + '\n\nCorrection Applied: ' + errLastResult.correctionApplied; navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '\u2705 Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
 
-  /* ---------------- Guided Walkthrough (V11.1: re-verified positioning + new steps for schema state controls) ---------------- */
+  /* ---------------- Guided Walkthrough ---------------- */
   var TOURS = {
     quickstart: [
       { sel: '[data-tour="hamburger"]', place: 'bottom', title: 'Open the Menu', body: 'What it does: Opens the side menu, which lists every page in the app.<br>Why it helps: This is how you get to the Read Only Query Builder, Query Builder for CR, Used Schema, Update Schema, and Error Rectifier.<br>What to do: Select this button any time you want to switch pages.' },
-      { sel: '#syncScheduleNavGroup', place: 'bottom', title: 'Schema Synchronization Schedule', body: 'What it does: Chooses how often this browser automatically checks the Live Shared Schema, a linked file, and GitHub for updates. New in V11.1: this control now has a clear, always-visible label so it is easy to find on any screen size.<br>What to do: Pick a frequency, or "Manual only" to disable automatic checks.' },
+      { sel: '#syncScheduleNavGroup', place: 'bottom', title: 'Schema Synchronization Schedule', body: 'What it does: Chooses how often this browser automatically checks the Live Shared Schema, a linked file, and GitHub for updates.<br>What to do: Pick a frequency, or "Manual only" to disable automatic checks.' },
       { sel: '#qsModuleChips', place: 'bottom', title: 'Areas covered by the active schema', body: 'What it does: Lists every module documented across your currently Active schema(s).<br>Why it helps: Gives you a quick sense of what data is available before you start building a query.' },
       { sel: '#qsExampleGrid', place: 'top', title: 'Try a ready-made example', body: 'What it does: Each card is a pre-written request.<br>Why it helps: Examples are the fastest way to see how Describe What You Need turns plain language into validated SQL.<br>What to do: Select any card that looks interesting.' }
     ],
@@ -1193,36 +1200,36 @@
       { sel: '#promptInput', place: 'bottom', title: 'Describe What You Need', body: 'What it does: A free-text box where you describe your requirement in plain language.<br>What to do: Type your requirement, then press Ctrl+Enter or select Build Query.' },
       { sel: '#dialectSel', place: 'bottom', title: 'SQL dialect', body: 'What it does: Chooses which database flavor the generated SQL should target.<br>What to do: Pick the dialect that matches your target database before building.' },
       { sel: '#manualTabs', place: 'bottom', title: 'Tables & Columns, Advanced Options, Requirements', body: 'What it does: Three tabs for manual, precise control.<br>What to do: Select a tab to configure that aspect of the query.' },
+      { sel: '#tableListGrid', place: 'top', title: 'Scrollable table list', body: 'What it does: Shows every table you can select. This list now scrolls within its own compact panel instead of stretching the page, so the rest of the builder always stays within reach.' },
+      { sel: '#columnListBody', place: 'top', title: 'Scrollable column list', body: 'What it does: Shows the columns for your selected table. This list also scrolls within a fixed-height panel, keeping the page compact even for wide tables.' },
+      { sel: '#readOnlyFilterGroup', place: 'top', title: 'Filters card', body: 'What it does: Add any number of filter conditions here. The Filters area is its own compact, scrollable card so a long list of conditions never stretches the whole page.' },
       { sel: '#generateFromDescriptionBtn', place: 'bottom', title: 'Build Query (from your description)', body: 'What it does: Interprets the text above and immediately builds the SQL.' },
       { sel: '#generateBtn', place: 'top', title: 'Build Query (from manual selections)', body: 'What it does: Generates SQL from whatever you have configured across the tabs.' },
-      { sel: '#resultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the validated, ready-to-copy SQL.<br>What to do: Use Copy Result, Optimize, or Explain This Query.' }
+      { sel: '#resultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the validated, ready-to-copy SQL in a scrollable code panel.<br>What to do: Use Copy Result, Optimize, or Explain This Query.' }
     ],
     crbuilder: [
       { sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: 'What it does: Selects whether you are drafting an INSERT, UPDATE, or DELETE statement.' },
       { sel: '#crDescriptionInput', place: 'bottom', title: 'Describe the change', body: 'What it does: A free-text box for describing an INSERT, UPDATE, or DELETE requirement in plain language.' },
       { sel: '#crTableSelect', place: 'bottom', title: 'Table', body: 'What it does: Chooses which table this Change Request targets.' },
       { sel: '#crManualTabs', place: 'top', title: 'Tables & Columns / Requirements', body: 'What it does: Holds the columns/values or WHERE conditions for your chosen command.' },
+      { sel: '#crFilterGroup', place: 'top', title: 'Filters card (WHERE conditions)', body: 'What it does: The WHERE conditions for UPDATE/DELETE live in their own compact, scrollable card, separated from column/value configuration above.' },
       { sel: '#crBuildBtn', place: 'top', title: 'Build Query', body: 'What it does: Generates the final Change Request SQL text.' },
-      { sel: '#crResultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the generated Change Request SQL.' }
+      { sel: '#crResultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the generated Change Request SQL in a scrollable code panel.' }
     ],
     usedschema: [
-      { sel: '#usedSchemaActiveSelector', place: 'bottom', title: 'Select Stored Active Schemas', body: 'What it does: Every schema stored in the browser is listed here with a checkbox. Ticking a box makes that schema Active (available for SQL generation, both Query Builders, and the Error Rectifier); unticking makes it Inactive without deleting it.<br>Why it helps: You can quickly combine or narrow down which schemas the app should use, without needing the Update Schema password.<br>What to do: Tick or untick any schema. The Default schema (badge) is always active and cannot be unticked here \u2014 change the default under Update Schema.<br>Then: The change applies immediately across the whole app.' },
+      { sel: '#usedSchemaActiveSelector', place: 'bottom', title: 'Select Stored Active Schemas', body: 'What it does: Every schema stored in the browser is listed here with a checkbox. Ticking a box makes that schema Active; unticking makes it Inactive without deleting it.<br>What to do: Tick or untick any schema \u2014 the Default schema (badge) is always active and cannot be unticked here.<br>Then: The change applies immediately across the whole app.' },
       { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: 'What it does: A quick summary of the merged schema currently in use (built from every Active schema).' },
       { sel: '#schemaSearchInput', place: 'bottom', title: 'Search the schema', body: 'What it does: A live search box across every table, column, and description.' },
       { sel: '#schemaTree', place: 'top', title: 'Browse tables and columns', body: 'What it does: An expandable tree of every module, table, and column in the active schema.' }
     ],
     updateschema_locked: [
-      { sel: '#updateSchemaPasswordStep', place: 'bottom', title: 'Administrator access', body: 'What it does: Update Schema is a password-protected administrator action that never connects to a production database.' }
+      { sel: '#updateSchemaPasswordStep', place: 'bottom', title: 'Administrator access', body: 'What it does: Update Schema is a password-protected administrator action that never connects to a production database. Default password: admin123.<br>Forgot it or is it not working? Use the "Forgot password? Reset to default" link right below the Unlock button \u2014 it clears any custom/stale password stored in this browser and restores admin123 immediately.' }
     ],
     updateschema_unlocked: [
       { sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Schema state at a glance', body: 'What it does: Shows the current Default schema and how many schemas are Active out of the total Stored.' },
-      { sel: '#defaultSchemaSelectorBody', place: 'bottom', title: 'Select Default Schema', body: 'What it does: Choose exactly one stored schema as the Default. The Default schema is always Active, and is the one updated automatically by Live Shared Schema, linked-file, and GitHub sync.<br>What to do: Select a radio button \u2014 the change applies immediately.' },
-      { sel: '#activeSchemaSelectorBody', place: 'bottom', title: 'Select Active Schemas', body: 'What it does: Tick any number of stored schemas to make them Active (available app-wide); untick to make them Inactive (kept in storage, just not used). The Default schema is always included.<br>What to do: Adjust the checkboxes, then click "Save Active Schema Selection" below to apply.' },
-      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing (uploading into, downloading, or deleting), add a new one, or delete one. This is separate from Default/Active status.' },
-      { sel: '#sharedSchemaCard', place: 'top', title: 'Live Shared Schema', body: 'What it does: Automatically checks a well-known file path relative to this page for a published schema, and applies it to the Default schema.' },
-      { sel: '#schemaSyncCard', place: 'top', title: 'Cross-Device Schema Sync (Option A)', body: 'What it does: Links the Default schema to a single shared file.' },
-      { sel: '#githubSyncCard', place: 'top', title: 'GitHub-Hosted Schema Sync (Option B)', body: 'What it does: Connects the Default schema to a file hosted in a GitHub repository.' },
-      { sel: '#vaultControls', place: 'top', title: 'Secure GitHub Connection Vault', body: 'What it does: Encrypts your GitHub connection details behind a passphrase.' },
+      { sel: '#defaultSchemaSelectorBody', place: 'bottom', title: 'Select Default Schema', body: 'What it does: Choose exactly one stored schema as the Default. The Default schema is always Active, and is the one updated automatically by Live Shared Schema, linked-file, and GitHub sync.' },
+      { sel: '#activeSchemaSelectorBody', place: 'bottom', title: 'Select Active Schemas', body: 'What it does: Tick any number of stored schemas to make them Active app-wide; untick to make them Inactive. The Default schema is always included.<br>What to do: Adjust the checkboxes, then click "Save Active Schema Selection" below to apply.' },
+      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing (uploading into, downloading, or deleting), add a new one, or delete one.' },
       { sel: '#updateSchemaFileInput', place: 'bottom', title: 'Smart Schema Import Engine', body: 'What it does: Reads a JSON or CSV file describing your database schema and merges it into the schema selected under "Working with" above.' },
       { sel: '#changePasswordBtn', place: 'top', title: 'Operational Password', body: 'What it does: Changes the password required to unlock this Update Schema section, for this browser.' },
       { sel: '#deleteSchemaBtn', place: 'top', title: 'Danger Zone', body: 'What it does: Permanently removes every table, column, and relationship from the schema currently selected under "Working with".' }
@@ -1279,6 +1286,5 @@
   document.addEventListener('keydown', function (e) { if (!tourOpen) return; if (e.key === 'Escape') endTour(); else if (e.key === 'ArrowRight') nextTour(); else if (e.key === 'ArrowLeft') prevTour(); });
   window.addEventListener('resize', function () { if (tourOpen) positionTour(); });
 
-  // Initial render of the new schema-state controls (safe even before Update Schema is unlocked; hidden by CSS until then).
   renderDefaultSchemaSelector(); renderActiveSchemaSelector();
 })();

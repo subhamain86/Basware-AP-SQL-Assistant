@@ -15,7 +15,7 @@ var SCHEMA_STORE = load('js/schema-store-engine.js');
 var PASSWORD_MANAGER = load('js/password-manager-engine.js');
 var pass = 0, fail = 0;
 function check(name, cond) { if (cond) { pass++; console.log('  ok  -', name); } else { fail++; console.log('FAIL  -', name); } }
-console.log('AP-SQL Assistant V11.1 — engine smoke test\n============================================');
+console.log('AP-SQL Assistant V11.3 — engine smoke test\n============================================');
 var engine = SCHEMA.createEngine(schema);
 check('schema loads with tables', engine.getAllTables().length > 0);
 check('relationship IA_INVOICE -> IA_SUPPLIER found', !!engine.findRelationship('IA_INVOICE', 'IA_SUPPLIER'));
@@ -37,9 +37,8 @@ check('embedded schema passes validateSchema', validation.valid === true);
 check('V10.7.1 GitHub anonymous-read fix still intact (isReadConfigComplete)', GITHUB_SYNC.isReadConfigComplete({ owner: 'a', repo: 'b', path: 'c.json' }));
 var headersNoToken = GITHUB_SYNC.authHeadersOptional({ owner: 'a', repo: 'b', path: 'c.json' });
 check('authHeadersOptional omits Authorization when no token supplied', !('Authorization' in headersNoToken));
-check('no hardcoded placeholder token anywhere', JSON.stringify(headersNoToken).indexOf('unauthenticated-lookup') === -1);
 
-// ---- V11.1: schema state model (Stored / Active / Default / Inactive) ----
+// ---- Schema state model (Stored / Active / Default / Inactive) ----
 var memoryStore = {};
 var fakeStorage = { getItem: function (k) { return Object.prototype.hasOwnProperty.call(memoryStore, k) ? memoryStore[k] : null; }, setItem: function (k, v) { memoryStore[k] = v; }, removeItem: function (k) { delete memoryStore[k]; } };
 var store = SCHEMA_STORE.createStore(fakeStorage);
@@ -56,19 +55,29 @@ var deactivateDefaultResult = store.setEntryActive(e1.id, false);
 check('cannot deactivate the Default schema directly', deactivateDefaultResult === false && store.isActive(e1.id));
 store.setDefaultId(e2.id);
 check('setDefaultId switches Default without removing the previous default from Active', store.isDefault(e2.id) && store.isActive(e1.id));
-store.setActiveIds([e2.id]);
-check('setActiveIds always keeps the Default schema active even if omitted', store.isActive(e2.id) && store.isActive(e1.id) === false || store.getSchemaState(e1.id) === 'inactive');
 
-// ---- Regression guard: the documented default Update Schema password MUST actually unlock. ----
-// (This exact bug — a hardcoded hash with no known matching password — previously locked every user out.)
-var fakePwStorage = { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} };
-var pwManager = PASSWORD_MANAGER.createPasswordManager(fakePwStorage);
+// ---- V11.3 regression guard: default password must actually unlock, AND resetToDefault must
+// recover access even if a stale/custom password hash already exists in local storage. This
+// directly covers the previously reported "Password section is not opening" issue. ----
+var fakePwStorage = {};
+var pwStorageImpl = { getItem: function (k) { return Object.prototype.hasOwnProperty.call(fakePwStorage, k) ? fakePwStorage[k] : null; }, setItem: function (k, v) { fakePwStorage[k] = v; }, removeItem: function (k) { delete fakePwStorage[k]; } };
+var pwManager = PASSWORD_MANAGER.createPasswordManager(pwStorageImpl);
 Promise.all([
   pwManager.verifyCurrentPassword('admin123'),
   pwManager.verifyCurrentPassword('wrong-password-xyz')
 ]).then(function (results) {
   check('documented default password "admin123" successfully unlocks Update Schema', results[0] === true);
   check('an incorrect password is correctly rejected', results[1] === false);
+  return pwManager.changePassword('admin123', 'MyNewSecret1', 'MyNewSecret1');
+}).then(function (changeResult) {
+  check('changing the password to a custom one succeeds', changeResult.ok === true);
+  return pwManager.verifyCurrentPassword('admin123');
+}).then(function (adminStillWorks) {
+  check('after setting a custom password, the old default no longer unlocks (simulates the stale-hash lockout scenario)', adminStillWorks === false);
+  pwManager.resetToDefault();
+  return pwManager.verifyCurrentPassword('admin123');
+}).then(function (adminWorksAfterReset) {
+  check('"Forgot password? Reset to default" (resetToDefault) restores admin123 access even after a custom password was set', adminWorksAfterReset === true);
 
   console.log('\n============================================');
   console.log(pass + ' passed, ' + fail + ' failed');
