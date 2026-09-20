@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>AP-SQL Assistant · Version 11.1</title>
+<title>AP-SQL Assistant · Version 11.2</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
 <link rel="stylesheet" href="css/styles.css">
@@ -82,199 +82,389 @@
 
   <!-- ===================== READ ONLY QUERY BUILDER ===================== -->
   <section class="app-view" id="view-builder">
-    <h1 class="h4 builder-heading">Read Only Query Builder</h1>
+    <h1 class="h4 builder-heading"><i class="bi bi-search text-primary"></i> Read Only Query Builder</h1>
     <div id="sharedSchemaStripBuilder"></div>
-    <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Describe What You Need (no manual selection required)</h2>
-      <p class="small text-body-secondary">Works from your description alone, your manual selections alone, or both together.</p>
-      <textarea class="form-control mb-2" id="promptInput" rows="3" placeholder="e.g. Show all active suppliers with their email, sorted by name."></textarea>
-      <div class="d-flex flex-wrap gap-2 align-items-center">
-        <select id="dialectSel" class="form-select form-select-sm w-auto"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
-        <div class="form-check ms-2"><input type="checkbox" class="form-check-input" id="optDistinct2"><label class="form-check-label small" for="optDistinct2">Remove duplicates</label></div>
-        <div class="ms-sm-auto d-flex gap-2 flex-wrap">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="resetQueryBtn">Start Over</button>
-          <button type="button" class="btn btn-primary btn-sm" id="generateFromDescriptionBtn">Build Query</button>
+
+    <!-- Step overview strip (visual guide only — purely presentational) -->
+    <div class="qb-steps-overview">
+      <span class="qb-step-chip"><span class="qb-step-num">1</span> Describe</span>
+      <span class="qb-step-chip"><span class="qb-step-num">2</span> Tables</span>
+      <span class="qb-step-chip"><span class="qb-step-num">3</span> Columns</span>
+      <span class="qb-step-chip"><span class="qb-step-num">4</span> Filters</span>
+      <span class="qb-step-chip"><span class="qb-step-num">5</span> Advanced</span>
+      <span class="qb-step-chip"><span class="qb-step-num">6</span> Generated SQL</span>
+    </div>
+
+    <!-- Step 1 — Describe What You Need -->
+    <div class="qb-section-card card">
+      <div class="qb-section-header">
+        <span class="qb-step-badge">1</span>
+        <div class="qb-section-titles">
+          <h2 class="h6 mb-0">Describe What You Need</h2>
+          <p class="qb-section-sub">No manual selection required — works from your description alone, your manual selections alone, or both together.</p>
         </div>
       </div>
-      <div id="descriptionInterpretationBox"></div>
-      <div id="confidenceChecklistBox" class="confidence-checklist-box"></div>
-      <div id="ambiguityBox" class="d-none"></div>
-    </div></div>
+      <div class="qb-section-body">
+        <div class="mb-2">
+          <label for="promptInput" class="form-label small fw-semibold">Your requirement, in plain language</label>
+          <textarea class="form-control qb-describe-textarea" id="promptInput" rows="3" placeholder="e.g. Show all active suppliers with their email, sorted by name."></textarea>
+        </div>
+        <div class="row g-2 align-items-center">
+          <div class="col-auto">
+            <label for="dialectSel" class="form-label small mb-1 d-block">SQL Dialect</label>
+            <select id="dialectSel" class="form-select form-select-sm"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
+          </div>
+          <div class="col-auto">
+            <div class="form-check mt-4">
+              <input type="checkbox" class="form-check-input" id="optDistinct2"><label class="form-check-label small" for="optDistinct2">Remove duplicates</label>
+            </div>
+          </div>
+        </div>
+        <div class="qb-describe-actions">
+          <div class="qb-describe-actions-right">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="resetQueryBtn"><i class="bi bi-arrow-counterclockwise"></i> Start Over</button>
+            <button type="button" class="btn btn-primary btn-sm" id="generateFromDescriptionBtn"><i class="bi bi-magic"></i> Build Query</button>
+          </div>
+        </div>
+        <div id="descriptionInterpretationBox"></div>
+        <div id="confidenceChecklistBox" class="confidence-checklist-box"></div>
+        <div id="ambiguityBox" class="d-none"></div>
+      </div>
+    </div>
 
     <div class="builder-row">
       <div class="builder-col-half">
-        <div class="card"><div class="card-body">
-          <ul class="nav nav-tabs flex-nowrap overflow-auto" id="manualTabs">
-            <li class="nav-item"><button class="nav-link active text-nowrap" data-tab="tables">Tables &amp; Columns</button></li>
-            <li class="nav-item"><button class="nav-link text-nowrap" data-tab="advanced">Advanced Options</button></li>
-            <li class="nav-item"><button class="nav-link text-nowrap" data-tab="requirements">Requirements</button></li>
-          </ul>
-          <div class="tab-content-wrap">
+
+        <!-- Steps 2–5 share one card, switched via a modernized pill nav (same #manualTabs / .tab-pane-manual JS hooks as before) -->
+        <div class="qb-section-card card">
+          <div class="qb-section-header">
+            <span class="qb-step-badge">2–5</span>
+            <div class="qb-section-titles">
+              <h2 class="h6 mb-0">Manual Query Configuration</h2>
+              <p class="qb-section-sub">Optional — for precise manual control. Use alongside or instead of the description above.</p>
+            </div>
+          </div>
+          <div class="qb-section-body">
+            <ul class="nav qb-step-nav nav-pills" id="manualTabs">
+              <li class="nav-item flex-fill"><button class="nav-link active text-nowrap w-100" data-tab="tables"><i class="bi bi-table"></i> Tables &amp; Columns</button></li>
+              <li class="nav-item flex-fill"><button class="nav-link text-nowrap w-100" data-tab="advanced"><i class="bi bi-sliders"></i> Advanced Options</button></li>
+              <li class="nav-item flex-fill"><button class="nav-link text-nowrap w-100" data-tab="requirements"><i class="bi bi-clipboard-check"></i> Requirements</button></li>
+            </ul>
+
             <div class="tab-pane-manual active" id="pane-tables">
-              <h3 class="h6">Pick Tables</h3>
-              <p class="small text-body-secondary">Use the module dropdown to narrow things down. You can select any number of tables.</p>
-              <div class="d-flex flex-wrap gap-2 mb-2">
-                <select id="moduleFilterSel" class="form-select form-select-sm w-auto"></select>
-                <input type="text" id="tableSearchInput" class="form-control form-control-sm w-auto" placeholder="Search tables...">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="tableSelectAllBtn">Select All (filtered)</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="tableUnselectAllBtn">Clear Selection</button>
-                <span class="small text-body-secondary ms-sm-auto" id="tableSelCount">0 tables selected</span>
+
+              <!-- Step 2 — Tables -->
+              <div class="qb-subsection">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">2</span> Select Schema / Tables</div>
+                <p class="qb-subsection-hint mb-2">Use the module dropdown to narrow things down. You can select any number of tables.</p>
+                <div class="qb-toolbar">
+                  <select id="moduleFilterSel" class="form-select form-select-sm w-auto"></select>
+                  <input type="text" id="tableSearchInput" class="form-control form-control-sm qb-toolbar-grow" placeholder="Search tables...">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="tableSelectAllBtn">Select All (filtered)</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="tableUnselectAllBtn">Clear Selection</button>
+                  <span class="qb-toolbar-spacer"></span>
+                  <span class="badge text-bg-secondary qb-count-pill" id="tableSelCount">0 tables selected</span>
+                </div>
+                <div class="row g-2" id="tableListGrid"></div>
               </div>
-              <div class="row g-2" id="tableListGrid"></div>
-              <h3 class="h6 mt-3">Pick Columns (optional)</h3>
-              <div class="d-flex flex-wrap gap-2 mb-2">
-                <select id="selectedTableDropdown" class="form-select form-select-sm w-auto"></select>
-                <input type="text" id="columnSearchInput" class="form-control form-control-sm w-auto" placeholder="Search columns...">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="columnSelectAllBtn">Select All</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="columnUnselectAllBtn">Unselect All</button>
+
+              <!-- Step 3 — Columns -->
+              <div class="qb-subsection">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">3</span> Select Columns <span class="text-body-secondary fw-normal small">(optional)</span></div>
+                <div class="qb-toolbar">
+                  <select id="selectedTableDropdown" class="form-select form-select-sm w-auto"></select>
+                  <input type="text" id="columnSearchInput" class="form-control form-control-sm qb-toolbar-grow" placeholder="Search columns...">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="columnSelectAllBtn">Select All</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="columnUnselectAllBtn">Unselect All</button>
+                </div>
+                <div id="columnListBody"></div>
+                <div class="small text-body-secondary" id="columnListEmpty"></div>
               </div>
-              <div id="columnListBody"></div>
-              <div class="small text-body-secondary" id="columnListEmpty"></div>
-              <h3 class="h6 mt-3">Filters</h3>
-              <p class="small text-body-secondary">Conditions that determine which records appear in the result. Use "Is one of" / "Is not one of" with a comma-separated list of values for SQL <code>IN</code> / <code>NOT IN</code>.</p>
-              <div id="readOnlyFilterGroup"></div>
-              <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="readOnlyAddFilterBtn">Add Filter</button><button type="button" class="btn btn-outline-secondary btn-sm" id="readOnlyClearFiltersBtn">Clear all filters</button></div>
+
+              <!-- Step 4 — Filters -->
+              <div class="qb-subsection">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">4</span> Configure Filters</div>
+                <p class="qb-subsection-hint mb-2">Conditions that determine which records appear in the result. Use "Is one of" / "Is not one of" with a comma-separated list of values for SQL <code>IN</code> / <code>NOT IN</code> (supports multiple-column filters — add as many rows as needed).</p>
+                <div id="readOnlyFilterGroup"></div>
+                <div class="d-flex gap-2 mt-2 flex-wrap">
+                  <button type="button" class="btn btn-outline-primary btn-sm" id="readOnlyAddFilterBtn"><i class="bi bi-plus-lg"></i> Add Filter</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="readOnlyClearFiltersBtn">Clear all filters</button>
+                </div>
+              </div>
+
             </div>
+
             <div class="tab-pane-manual d-none" id="pane-advanced">
-              <div class="card adv-option-card mb-3 d-none" id="joinOptionCard"><div class="card-body">
-                <h4 class="h6">How should tables be connected?</h4>
-                <p class="small text-body-secondary">This only appears because your query uses more than one table.</p>
-                <label class="join-choice" id="optJoinInnerLabel"><input type="radio" name="joinType" id="optJoinInner" checked> Only show records that match in every table</label>
-                <label class="join-choice" id="optJoinLeftLabel"><input type="radio" name="joinType" id="optJoinLeft"> Also show records that don't have a match</label>
-                <button type="button" class="btn btn-link btn-sm adv-reset-btn" id="joinResetBtn">Reset to default</button>
-                <div id="joinPreviewBox" class="mt-2"></div>
-                <div id="defineRelationshipContainer"></div>
-                <div class="adv-option-technical">Technical: SQL INNER JOIN / LEFT JOIN</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Choose how to order your results</h4>
-                <div id="sortRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addSortRowBtn">Add Sort Column</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearSortBtn">Clear all sorting</button></div>
-                <div class="adv-option-technical">Technical: SQL ORDER BY</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Limit the number of results</h4>
-                <div class="input-group input-group-sm" style="max-width:260px;"><input type="number" min="1" class="form-control" id="optLimit"><button class="btn btn-outline-secondary" id="optLimitClearBtn" type="button">Clear</button></div>
-                <div class="adv-option-technical">Technical: SQL TOP / LIMIT / FETCH FIRST</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Give this query a friendly name</h4>
-                <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optView"><button class="btn btn-outline-secondary" id="optViewClearBtn" type="button">Clear</button></div>
-                <div class="adv-option-technical">Technical: SQL WITH name AS (...)</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Only show records connected to another table</h4>
-                <div id="existsRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addExistsRowBtn">Add Related Table</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearExistsBtn">Clear all</button></div>
-                <div class="adv-option-technical">Technical: SQL EXISTS / NOT EXISTS</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Show a related count</h4>
-                <div id="scalarRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addScalarRowBtn">Add Count</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearScalarBtn">Clear all</button></div>
-                <div class="adv-option-technical">Technical: correlated COUNT(*) subquery</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Filter on a total (after grouping)</h4>
-                <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optHaving" placeholder="e.g. COUNT(*) > 5"><button class="btn btn-outline-secondary" id="optHavingClearBtn" type="button">Clear</button></div>
-                <div class="adv-option-technical">Technical: SQL HAVING</div>
-              </div></div>
-              <div class="card adv-option-card mb-3"><div class="card-body">
-                <h4 class="h6">Show a full org chart or hierarchy</h4>
-                <div class="input-group input-group-sm" style="max-width:320px;"><select class="form-select" id="optHierarchy"><option value="">— none —</option></select><button class="btn btn-outline-secondary" id="optHierarchyClearBtn" type="button">Clear</button></div>
-                <div class="adv-option-technical">Technical: SQL WITH RECURSIVE</div>
-              </div></div>
-              <p class="small text-body-secondary">Optional — for users who prefer precise manual control. Configure using the tabs above, and/or use the description above, then build.</p>
+              <!-- Step 5 — Advanced Options, presented as a genuine Bootstrap accordion -->
+              <div class="accordion qb-advanced-accordion" id="advancedOptionsAccordion">
+
+                <div class="card adv-option-card d-none" id="joinOptionCard">
+                  <div class="accordion-item">
+                    <h4 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseJoin"><span class="adv-option-icon"><i class="bi bi-diagram-2"></i></span>&nbsp; How should tables be connected?</button></h4>
+                    <div id="advCollapseJoin" class="accordion-collapse collapse show" data-bs-parent="#advancedOptionsAccordion">
+                      <div class="accordion-body card-body">
+                        <p class="small text-body-secondary">This only appears because your query uses more than one table.</p>
+                        <label class="join-choice" id="optJoinInnerLabel"><input type="radio" name="joinType" id="optJoinInner" checked> Only show records that match in every table</label>
+                        <label class="join-choice" id="optJoinLeftLabel"><input type="radio" name="joinType" id="optJoinLeft"> Also show records that don't have a match</label>
+                        <button type="button" class="btn btn-link btn-sm adv-reset-btn" id="joinResetBtn">Reset to default</button>
+                        <div id="joinPreviewBox" class="mt-2"></div>
+                        <div id="defineRelationshipContainer"></div>
+                        <div class="adv-option-technical">Technical: SQL INNER JOIN / LEFT JOIN</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseSort"><span class="adv-option-icon"><i class="bi bi-sort-down"></i></span>&nbsp; Choose how to order your results</button></h4>
+                  <div id="advCollapseSort" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div id="sortRowsContainer"></div>
+                      <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addSortRowBtn"><i class="bi bi-plus-lg"></i> Add Sort Column</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearSortBtn">Clear all sorting</button></div>
+                      <div class="adv-option-technical">Technical: SQL ORDER BY</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseLimit"><span class="adv-option-icon"><i class="bi bi-list-ol"></i></span>&nbsp; Limit the number of results</button></h4>
+                  <div id="advCollapseLimit" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div class="input-group input-group-sm" style="max-width:260px;"><input type="number" min="1" class="form-control" id="optLimit"><button class="btn btn-outline-secondary" id="optLimitClearBtn" type="button">Clear</button></div>
+                      <div class="adv-option-technical">Technical: SQL TOP / LIMIT / FETCH FIRST</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseName"><span class="adv-option-icon"><i class="bi bi-tag"></i></span>&nbsp; Give this query a friendly name</button></h4>
+                  <div id="advCollapseName" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optView"><button class="btn btn-outline-secondary" id="optViewClearBtn" type="button">Clear</button></div>
+                      <div class="adv-option-technical">Technical: SQL WITH name AS (...)</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseExists"><span class="adv-option-icon"><i class="bi bi-link-45deg"></i></span>&nbsp; Only show records connected to another table</button></h4>
+                  <div id="advCollapseExists" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div id="existsRowsContainer"></div>
+                      <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addExistsRowBtn"><i class="bi bi-plus-lg"></i> Add Related Table</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearExistsBtn">Clear all</button></div>
+                      <div class="adv-option-technical">Technical: SQL EXISTS / NOT EXISTS</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseScalar"><span class="adv-option-icon"><i class="bi bi-123"></i></span>&nbsp; Show a related count</button></h4>
+                  <div id="advCollapseScalar" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div id="scalarRowsContainer"></div>
+                      <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addScalarRowBtn"><i class="bi bi-plus-lg"></i> Add Count</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearScalarBtn">Clear all</button></div>
+                      <div class="adv-option-technical">Technical: correlated COUNT(*) subquery</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseHaving"><span class="adv-option-icon"><i class="bi bi-funnel"></i></span>&nbsp; Filter on a total (after grouping)</button></h4>
+                  <div id="advCollapseHaving" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optHaving" placeholder="e.g. COUNT(*) > 5"><button class="btn btn-outline-secondary" id="optHavingClearBtn" type="button">Clear</button></div>
+                      <div class="adv-option-technical">Technical: SQL HAVING</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="accordion-item">
+                  <h4 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#advCollapseHierarchy"><span class="adv-option-icon"><i class="bi bi-diagram-3"></i></span>&nbsp; Show a full org chart or hierarchy</button></h4>
+                  <div id="advCollapseHierarchy" class="accordion-collapse collapse" data-bs-parent="#advancedOptionsAccordion">
+                    <div class="accordion-body">
+                      <div class="input-group input-group-sm" style="max-width:320px;"><select class="form-select" id="optHierarchy"><option value="">— none —</option></select><button class="btn btn-outline-secondary" id="optHierarchyClearBtn" type="button">Clear</button></div>
+                      <div class="adv-option-technical">Technical: SQL WITH RECURSIVE</div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+              <p class="small text-body-secondary mt-3 mb-0">Optional — for users who prefer precise manual control. Configure using the sections above, and/or use the description in Step 1, then build.</p>
             </div>
+
             <div class="tab-pane-manual d-none" id="pane-requirements"><div id="requirementsSummaryBody"></div></div>
+
           </div>
-          <div class="mt-3"><button type="button" class="btn btn-primary" id="generateBtn">Build Query</button></div>
-        </div></div>
+          <div class="qb-section-body pt-0">
+            <button type="button" class="btn btn-primary" id="generateBtn"><i class="bi bi-play-fill"></i> Build Query</button>
+          </div>
+        </div>
       </div>
+
       <div class="builder-col-half result-col">
-        <div class="card"><div class="card-body">
-          <h3 class="h6">Generated SQL</h3>
-          <div id="resultBody"><p class="text-body-secondary mb-0">Your generated SQL will appear here as soon as you click Build Query.</p></div>
-          <div class="mt-2 d-flex gap-2 flex-wrap">
-            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="copyBtn">Copy Result</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="optimizeBtn">Optimize</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="explainBtn">Explain This Query</button>
+        <!-- Step 6 — Generated SQL -->
+        <div class="qb-section-card card">
+          <div class="qb-section-header">
+            <span class="qb-step-badge">6</span>
+            <div class="qb-section-titles">
+              <h2 class="h6 mb-0">Generated SQL</h2>
+              <p class="qb-section-sub">Read-only, ready to review and copy.</p>
+            </div>
           </div>
-          <div id="optimizeReportBox" class="mt-2"></div>
-          <div id="explanationReportBox" class="explanation-box mt-2 d-none"></div>
-        </div></div>
+          <div class="qb-section-body">
+            <div id="resultBody"><div class="qb-sql-empty-hint"><i class="bi bi-code-slash"></i>Your generated SQL will appear here as soon as you click Build Query.</div></div>
+            <div class="mt-2 qb-sql-toolbar">
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="copyBtn"><i class="bi bi-clipboard"></i> Copy Result</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="optimizeBtn"><i class="bi bi-lightning-charge"></i> Optimize</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="explainBtn"><i class="bi bi-info-circle"></i> Explain This Query</button>
+            </div>
+            <div id="optimizeReportBox" class="mt-2"></div>
+            <div id="explanationReportBox" class="explanation-box mt-2 d-none"></div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- ===================== QUERY BUILDER FOR CR ===================== -->
   <section class="app-view" id="view-crbuilder">
-    <h1 class="h4 builder-heading">Query Builder for CR</h1>
+    <h1 class="h4 builder-heading"><i class="bi bi-pencil-square text-primary"></i> Query Builder for CR</h1>
     <div id="sharedSchemaStripCr"></div>
-    <div class="alert alert-secondary cr-safety-banner">Generated SQL only – this application does not execute database changes.</div>
-    <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Query Type</h2>
-      <div class="cr-command-selector" id="crCommandSelector">
-        <div class="cr-command-option active" data-command="INSERT">INSERT</div>
-        <div class="cr-command-option" data-command="UPDATE">UPDATE</div>
-        <div class="cr-command-option" data-command="DELETE">DELETE</div>
+    <div class="alert alert-secondary cr-safety-banner"><i class="bi bi-shield-check"></i> Generated SQL only – this application does not execute database changes.</div>
+
+    <!-- Step overview strip (visual guide only — purely presentational) -->
+    <div class="qb-steps-overview">
+      <span class="qb-step-chip"><span class="qb-step-num">1</span> Query Type &amp; Describe</span>
+      <span class="qb-step-chip"><span class="qb-step-num">2</span> Table</span>
+      <span class="qb-step-chip"><span class="qb-step-num">3</span> Columns / Values</span>
+      <span class="qb-step-chip"><span class="qb-step-num">4</span> Conditions</span>
+      <span class="qb-step-chip"><span class="qb-step-num">5</span> Decode</span>
+      <span class="qb-step-chip"><span class="qb-step-num">6</span> Generated SQL</span>
+    </div>
+
+    <!-- Step 1 — Query Type & Describe -->
+    <div class="qb-section-card card">
+      <div class="qb-section-header">
+        <span class="qb-step-badge">1</span>
+        <div class="qb-section-titles">
+          <h2 class="h6 mb-0">Query Type &amp; Describe What You Need</h2>
+          <p class="qb-section-sub">Choose the operation, then describe it in plain language (optional) or configure it manually below.</p>
+        </div>
       </div>
-      <h2 class="h6 mt-3">Describe What You Need (optional)</h2>
-      <p class="small text-body-secondary">Works from your description alone, your manual selections alone, or both together.</p>
-      <textarea class="form-control mb-2" id="crDescriptionInput" rows="2" placeholder="e.g. Update supplier X, set is active to no where supplier code = ABC123"></textarea>
-      <div class="d-flex flex-wrap gap-2 align-items-center">
-        <select id="crDialectSel" class="form-select form-select-sm w-auto"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
-        <button type="button" class="btn btn-primary btn-sm ms-sm-auto" id="crGenerateFromDescriptionBtn">Build Query</button>
+      <div class="qb-section-body">
+        <label class="form-label small fw-semibold d-block mb-2">Query Type</label>
+        <div class="cr-command-selector" id="crCommandSelector">
+          <div class="cr-command-option active" data-command="INSERT"><i class="bi bi-plus-circle cr-command-icon"></i> INSERT</div>
+          <div class="cr-command-option" data-command="UPDATE"><i class="bi bi-pencil cr-command-icon"></i> UPDATE</div>
+          <div class="cr-command-option" data-command="DELETE"><i class="bi bi-trash cr-command-icon"></i> DELETE</div>
+        </div>
+
+        <hr class="my-3">
+
+        <label for="crDescriptionInput" class="form-label small fw-semibold">Describe the change <span class="text-body-secondary fw-normal">(optional)</span></label>
+        <textarea class="form-control mb-2 qb-describe-textarea" id="crDescriptionInput" rows="2" placeholder="e.g. Update supplier X, set is active to no where supplier code = ABC123"></textarea>
+        <div class="row g-2 align-items-center">
+          <div class="col-auto">
+            <label for="crDialectSel" class="form-label small mb-1 d-block">SQL Dialect</label>
+            <select id="crDialectSel" class="form-select form-select-sm"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
+          </div>
+        </div>
+        <div class="qb-describe-actions">
+          <div class="qb-describe-actions-right">
+            <button type="button" class="btn btn-primary btn-sm" id="crGenerateFromDescriptionBtn"><i class="bi bi-magic"></i> Build Query</button>
+          </div>
+        </div>
+        <div id="crDescriptionInterpretationBox"></div>
       </div>
-      <div id="crDescriptionInterpretationBox"></div>
-      <div class="mt-2"><label class="form-label small mb-1">Table</label><select id="crTableSelect" class="form-select form-select-sm w-auto"></select></div>
-    </div></div>
+    </div>
+
+    <!-- Step 2 — Table -->
+    <div class="qb-section-card card">
+      <div class="qb-section-header">
+        <span class="qb-step-badge">2</span>
+        <div class="qb-section-titles"><h2 class="h6 mb-0">Select Table</h2></div>
+      </div>
+      <div class="qb-section-body">
+        <label for="crTableSelect" class="form-label small">Table</label>
+        <select id="crTableSelect" class="form-select form-select-sm w-auto"></select>
+      </div>
+    </div>
 
     <div class="builder-row">
       <div class="builder-col-half">
-        <div class="card"><div class="card-body">
-          <ul class="nav nav-tabs flex-nowrap overflow-auto" id="crManualTabs">
-            <li class="nav-item"><button class="nav-link active text-nowrap" data-cr-tab="tables">Tables &amp; Columns</button></li>
-            <li class="nav-item"><button class="nav-link text-nowrap" data-cr-tab="requirements">Requirements</button></li>
-          </ul>
-          <div class="tab-content-wrap">
+
+        <div class="qb-section-card card">
+          <div class="qb-section-header">
+            <span class="qb-step-badge">3–5</span>
+            <div class="qb-section-titles">
+              <h2 class="h6 mb-0">Columns, Conditions &amp; Decode</h2>
+              <p class="qb-section-sub">Configure exactly what this Change Request should do.</p>
+            </div>
+          </div>
+          <div class="qb-section-body">
+            <ul class="nav qb-step-nav nav-pills" id="crManualTabs">
+              <li class="nav-item flex-fill"><button class="nav-link active text-nowrap w-100" data-cr-tab="tables"><i class="bi bi-table"></i> Tables &amp; Columns</button></li>
+              <li class="nav-item flex-fill"><button class="nav-link text-nowrap w-100" data-cr-tab="requirements"><i class="bi bi-clipboard-check"></i> Requirements</button></li>
+            </ul>
+
             <div class="tab-pane-cr active" id="cr-pane-tables">
-              <div class="d-none" id="crInsertPanel">
-                <h3 class="h6">Pick Columns</h3>
+
+              <!-- Step 3 — Columns / Values -->
+              <div class="qb-subsection d-none" id="crInsertPanel">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">3</span> Pick Columns &amp; Values (INSERT)</div>
                 <div id="crInsertColumnsBody"></div>
               </div>
-              <div class="d-none" id="crUpdatePanel">
-                <h3 class="h6">Pick Columns</h3>
+              <div class="qb-subsection d-none" id="crUpdatePanel">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">3</span> Pick Columns &amp; New Values (UPDATE)</div>
                 <div id="crUpdateColumnsBody"></div>
               </div>
-              <div class="d-none" id="crWherePanel">
-                <h3 class="h6 mt-3">Filters — WHERE Conditions</h3>
-                <div class="alert alert-warning small d-none" id="crWhereRequiredWarning">⚠️ A WHERE condition is required to identify which records should be updated or deleted.</div>
+
+              <!-- Step 4 — Conditions -->
+              <div class="qb-subsection d-none" id="crWherePanel">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">4</span> Filters — WHERE Conditions</div>
+                <div class="alert alert-warning small d-none" id="crWhereRequiredWarning"><i class="bi bi-exclamation-triangle-fill"></i> A WHERE condition is required to identify which records should be updated or deleted.</div>
                 <div id="crFilterGroup"></div>
-                <div class="d-flex gap-2 mt-2 flex-wrap">
-                  <button type="button" class="btn btn-outline-primary btn-sm" id="crAddFilterBtn">Add Filter</button>
+                <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
+                  <button type="button" class="btn btn-outline-primary btn-sm" id="crAddFilterBtn"><i class="bi bi-plus-lg"></i> Add Filter</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm" id="crClearFiltersBtn">Clear all filters</button>
-                  <div class="form-check ms-2"><input type="checkbox" class="form-check-input" id="crAllowNoWhere"><label class="form-check-label small" for="crAllowNoWhere">I explicitly confirm this query should have no WHERE condition</label></div>
                 </div>
+                <div class="form-check mt-2"><input type="checkbox" class="form-check-input" id="crAllowNoWhere"><label class="form-check-label small" for="crAllowNoWhere">I explicitly confirm this query should have no WHERE condition</label></div>
               </div>
-              <h3 class="h6 mt-3">Decode</h3>
-              <div id="crDecodeBody"><p class="text-body-secondary small mb-0">Select a column above to configure its decode.</p></div>
+
+              <!-- Step 5 — Decode -->
+              <div class="qb-subsection">
+                <div class="qb-subsection-title"><span class="qb-mini-badge">5</span> Decode</div>
+                <div id="crDecodeBody"><p class="text-body-secondary small mb-0">Select a column above to configure its decode.</p></div>
+              </div>
+
             </div>
             <div class="tab-pane-cr d-none" id="cr-pane-requirements"><div id="crRequirementsSummaryBody"></div></div>
           </div>
-          <div class="mt-3"><button type="button" class="btn btn-primary" id="crBuildBtn">Build Query</button></div>
-        </div></div>
-      </div>
-      <div class="builder-col-half result-col">
-        <div class="card"><div class="card-body">
-          <h3 class="h6">Generated SQL</h3>
-          <div id="crResultBody"><p class="text-body-secondary mb-0">Choose a query type, select a table, and click Build Query.</p></div>
-          <div class="mt-2 d-flex gap-2 flex-wrap">
-            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="crCopyBtn">Copy Result</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="crOptimizeBtn">Optimize</button>
+          <div class="qb-section-body pt-0">
+            <button type="button" class="btn btn-primary" id="crBuildBtn"><i class="bi bi-play-fill"></i> Build Query</button>
           </div>
-          <div id="crOptimizeReportBox" class="mt-2"></div>
-        </div></div>
+        </div>
+      </div>
+
+      <div class="builder-col-half result-col">
+        <!-- Step 6 — Generated SQL -->
+        <div class="qb-section-card card">
+          <div class="qb-section-header">
+            <span class="qb-step-badge">6</span>
+            <div class="qb-section-titles">
+              <h2 class="h6 mb-0">Generated SQL</h2>
+              <p class="qb-section-sub">Review before running through your approved change process.</p>
+            </div>
+          </div>
+          <div class="qb-section-body">
+            <div id="crResultBody"><div class="qb-sql-empty-hint"><i class="bi bi-code-slash"></i>Choose a query type, select a table, and click Build Query.</div></div>
+            <div class="mt-2 qb-sql-toolbar">
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="crCopyBtn"><i class="bi bi-clipboard"></i> Copy Result</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="crOptimizeBtn"><i class="bi bi-lightning-charge"></i> Optimize</button>
+            </div>
+            <div id="crOptimizeReportBox" class="mt-2"></div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -491,7 +681,7 @@
 </div>
 
 <footer class="text-center py-4 text-body-secondary small">
-  <div>AP-SQL Assistant · Version 11.1</div>
+  <div>AP-SQL Assistant · Version 11.2</div>
   <div class="creator-signature-wrap"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></div>
 </footer>
 

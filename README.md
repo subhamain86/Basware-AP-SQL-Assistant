@@ -1,6 +1,6 @@
 # AP-SQL Assistant
 
-**Version 11.1 — UI Rectification & Schema Selection Management**
+**Version 11.2 — Query Builder UI/UX Modernization**
 
 AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema as its single source of truth. No production database connection is ever required or made; the app only *generates* SQL for you to review and run through your own approved channels.
 
@@ -8,7 +8,24 @@ AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P 
 
 ---
 
-## What's New in 11.1
+## What's New in 11.2
+
+**This is a UI/UX-only release.** No query-generation logic, SQL syntax generation, schema handling, validation, filter behavior, advanced options, INSERT/UPDATE/DELETE behavior, navigation, permissions, or output/copy functionality was changed. `js/app.js` (all functional logic) is byte-for-byte untouched from V11.1 — every improvement below is presentation, layout, responsiveness, and accessibility only.
+
+### Read Only Query Builder & Query Builder for CR — full redesign
+- Both builders are now organized into clear, numbered logical sections (a "Step 1 → Step 6" flow), visually guided by a step-chip overview strip at the top of each page:
+  - **Read Only Query Builder:** Step 1 Describe → Step 2 Tables → Step 3 Columns → Step 4 Filters → Step 5 Advanced Options → Step 6 Generated SQL.
+  - **Query Builder for CR:** Step 1 Query Type & Describe → Step 2 Table → Step 3 Columns/Values → Step 4 Conditions → Step 5 Decode → Step 6 Generated SQL.
+- **Advanced Options** (Read Only builder) is now a genuine Bootstrap **accordion** — each option (joins, sorting, limit, friendly name, EXISTS, related count, HAVING, hierarchy) collapses independently with an icon and clear header, instead of a long stack of always-open cards.
+- The **Tables & Columns / Advanced Options / Requirements** switcher (and the CR equivalent) is restyled as modern Bootstrap **nav-pills** instead of plain tabs, with icons and equal-width segments that stay usable on narrow screens.
+- The **CR command selector** (INSERT / UPDATE / DELETE) is now a clearer Bootstrap segmented control with icons, and stacks vertically on very small screens instead of squeezing.
+- **Generated SQL** panels on both builders share the same card header, badge, toolbar layout, and an empty-state hint — visually identical between the two builders.
+- Consistent spacing, typography, section headers, badges, and button placement across both builders so they are immediately recognizable as part of the same application.
+- Verified responsive behavior on desktop, laptop, tablet, and narrow browser windows, and at multiple zoom levels — no cut-off controls, no overlapping elements, no forced horizontal scrolling on the page itself.
+
+---
+
+## Previously in 11.1
 
 ### 1. UI Rectification (full responsive pass)
 - Reworked the base layout rules (`box-sizing`, `min-width: 0`, `overflow-wrap`, `clamp()`-based padding) so cards, grids, tabs, buttons, dropdowns, and forms no longer overlap, get cut off, or force horizontal scrolling on the page itself.

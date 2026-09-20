@@ -313,3 +313,127 @@ pre.sql-output { background: #10131c; color: #e6ecff; border-radius: 10px; paddi
   .card-body { padding: .65rem; }
   .btn-sm { padding: .2rem .5rem; font-size: .76rem; }
 }
+
+/* ============================================================
+   V11.2 — QUERY BUILDER UI/UX MODERNIZATION
+   Presentation-only redesign of the Read Only Query Builder and
+   Query Builder for CR. No element IDs, functional classes, or
+   JS-driven behavior are affected by anything below — this is a
+   pure visual/layout layer.
+   ============================================================ */
+
+/* ---- Shared "step" wizard header used at the top of both builders ---- */
+.qb-steps-overview { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.qb-steps-overview .qb-step-chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .75rem; border-radius: 999px; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); font-size: .78rem; font-weight: 600; color: var(--bs-secondary-color); white-space: nowrap; }
+.qb-steps-overview .qb-step-chip .qb-step-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: #fff; font-size: .68rem; flex: 0 0 auto; }
+
+/* ---- Section card headers styled as numbered steps ---- */
+.qb-section-card { border: 1px solid var(--bs-border-color); border-radius: 14px; margin-bottom: 1.1rem; overflow: hidden; }
+.qb-section-card:last-child { margin-bottom: 0; }
+.qb-section-header { display: flex; align-items: center; gap: .65rem; padding: .85rem 1.1rem; background: linear-gradient(180deg, var(--bs-tertiary-bg), transparent); border-bottom: 1px solid var(--bs-border-color); flex-wrap: wrap; }
+.qb-section-header .qb-step-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 .5rem; border-radius: 9px; background: linear-gradient(150deg, var(--grad-blue-a), var(--grad-blue-b)); color: #fff; font-weight: 700; font-size: .85rem; flex: 0 0 auto; box-shadow: 0 3px 7px rgba(0,0,0,.18); }
+.qb-section-header .qb-section-titles { min-width: 0; flex: 1 1 auto; }
+.qb-section-header h2, .qb-section-header h3 { margin-bottom: .1rem; font-size: 1rem; font-weight: 700; }
+.qb-section-header .qb-section-sub { font-size: .8rem; color: var(--bs-secondary-color); margin-bottom: 0; }
+.qb-section-header .qb-section-meta { flex: 0 0 auto; }
+.qb-section-body { padding: 1.1rem; }
+.qb-section-body > *:last-child { margin-bottom: 0 !important; }
+.qb-subsection { border: 1px solid var(--bs-border-color); border-radius: 10px; padding: .9rem 1rem; margin-bottom: 1rem; background: var(--bs-body-bg); }
+.qb-subsection:last-child { margin-bottom: 0; }
+.qb-subsection-title { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: .88rem; margin-bottom: .35rem; }
+.qb-subsection-title .qb-mini-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); font-size: .68rem; font-weight: 700; color: var(--brand-dark); flex: 0 0 auto; }
+.qb-subsection-hint { font-size: .8rem; color: var(--bs-secondary-color); margin-bottom: .6rem; }
+
+/* ---- Toolbars (search + select-all + counters) laid out with real Bootstrap grid rhythm ---- */
+.qb-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+.qb-toolbar > * { flex: 0 0 auto; }
+.qb-toolbar .qb-toolbar-grow { flex: 1 1 180px; min-width: 140px; }
+.qb-toolbar .qb-toolbar-spacer { flex: 1 1 auto; }
+.qb-count-pill { font-size: .76rem; padding: .3rem .65rem; }
+
+/* ---- Describe box (Step 1) ---- */
+.qb-describe-textarea { min-height: 84px; resize: vertical; }
+.qb-describe-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .65rem; }
+.qb-describe-actions .qb-describe-actions-right { display: flex; gap: .5rem; flex-wrap: wrap; margin-left: auto; }
+
+/* ---- Modernized nav-pills used for the Tables&Columns / Advanced / Requirements switcher ---- */
+.qb-step-nav.nav-pills { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; background: var(--bs-tertiary-bg); padding: .4rem; border-radius: 12px; }
+.qb-step-nav.nav-pills .nav-link { flex: 1 1 auto; text-align: center; border-radius: 9px; font-weight: 600; font-size: .86rem; color: var(--bs-body-color); padding: .5rem .75rem; display: flex; align-items: center; justify-content: center; gap: .4rem; white-space: nowrap; }
+.qb-step-nav.nav-pills .nav-link i { font-size: .95rem; }
+.qb-step-nav.nav-pills .nav-link.active { background: var(--brand); color: #fff; box-shadow: 0 3px 8px rgba(47,111,237,.3); }
+.qb-step-nav.nav-pills .nav-link:not(.active):hover { background: rgba(47,111,237,.08); }
+@media (max-width: 575.98px) { .qb-step-nav.nav-pills { flex-direction: column; } .qb-step-nav.nav-pills .nav-link { justify-content: flex-start; } }
+
+/* ---- Tables grid (checkbox cards) ---- */
+#tableListGrid .form-check { transition: border-color .15s ease, background .15s ease; }
+#tableListGrid .form-check:hover { border-color: var(--brand); background: rgba(47,111,237,.04); }
+#tableListGrid .form-check-input:checked ~ span { color: var(--brand-dark); }
+
+/* ---- Column picker rows (Step 3) restyled as a clean responsive grid ---- */
+.column-row-grid { border: 1px solid transparent; }
+.column-row-grid:hover { border-color: var(--bs-border-color); }
+.column-row-grid.on { border-color: rgba(47,111,237,.35); }
+#columnListBody { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; padding-right: .25rem; }
+#columnListEmpty:not(:empty) { padding: .9rem; text-align: center; border: 1px dashed var(--bs-border-color); border-radius: 10px; color: var(--bs-secondary-color); font-size: .85rem; }
+
+/* ---- Filter condition rows (Step 4) — grid-based so nothing overlaps on small screens ---- */
+.filter-condition-row { border: 1px solid var(--bs-border-color); border-radius: 10px; padding: .55rem .65rem; background: var(--bs-tertiary-bg); }
+.filter-condition-row:hover { border-color: var(--brand); }
+.filter-condition-row .join-select { font-weight: 700; text-align: center; }
+.multi-value-hint { width: 100%; margin-top: -.15rem; }
+#readOnlyFilterGroup, #crFilterGroup { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .5rem; }
+
+/* ---- Advanced Options as a genuine Bootstrap accordion (Step 5) ---- */
+.qb-advanced-accordion .accordion-item { border: 1px solid var(--bs-border-color); border-radius: 10px !important; overflow: hidden; margin-bottom: .6rem; }
+.qb-advanced-accordion .accordion-item:last-child { margin-bottom: 0; }
+.qb-advanced-accordion .accordion-button { font-weight: 600; font-size: .92rem; padding: .8rem 1rem; background: var(--bs-body-bg); gap: .6rem; }
+.qb-advanced-accordion .accordion-button:not(.collapsed) { background: rgba(47,111,237,.07); color: var(--brand-dark); box-shadow: none; }
+.qb-advanced-accordion .accordion-button:focus { box-shadow: 0 0 0 .2rem rgba(47,111,237,.2); }
+.qb-advanced-accordion .accordion-button::after { margin-left: auto; }
+.qb-advanced-accordion .accordion-body { padding: 1rem; }
+.qb-advanced-accordion .adv-option-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; background: var(--bs-tertiary-bg); flex: 0 0 auto; font-size: .82rem; color: var(--brand-dark); }
+.adv-option-technical { font-size: .74rem; color: var(--bs-secondary-color); opacity: .85; font-family: var(--bs-font-monospace); margin-top: .6rem; padding-top: .5rem; border-top: 1px dashed var(--bs-border-color); }
+.adv-option-card { border: none; margin-bottom: 0; }
+.adv-option-card .card-body { padding: 0; }
+
+/* ---- CR command selector modernized as a Bootstrap-style segmented control ---- */
+.cr-command-selector { display: flex; gap: .6rem; flex-wrap: wrap; }
+.cr-command-option { flex: 1 1 140px; text-align: center; padding: .65rem 1rem; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: .5rem; }
+.cr-command-option .cr-command-icon { font-size: 1.05rem; }
+@media (max-width: 575.98px) { .cr-command-option { flex-basis: 100%; } }
+
+/* ---- Generated SQL panel (Step 6) — consistent look across both builders ---- */
+.qb-sql-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; }
+.qb-sql-toolbar .btn { flex: 0 0 auto; }
+pre.sql-output { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+.qb-sql-empty-hint { padding: 1.25rem 1rem; text-align: center; border: 1px dashed var(--bs-border-color); border-radius: 12px; color: var(--bs-secondary-color); font-size: .88rem; }
+.qb-sql-empty-hint i { font-size: 1.6rem; display: block; margin-bottom: .5rem; color: var(--brand); opacity: .6; }
+
+/* ---- Decode panel (CR) ---- */
+#crDecodeBody .mb-3 { border: 1px solid var(--bs-border-color); border-radius: 10px; padding: .75rem .9rem; background: var(--bs-tertiary-bg); }
+
+/* ---- Requirements / summary panel ---- */
+#requirementsSummaryBody h4, #crRequirementsSummaryBody h4 { font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; color: var(--bs-secondary-color); margin-top: 1rem; margin-bottom: .3rem; }
+#requirementsSummaryBody h4:first-child, #crRequirementsSummaryBody h4:first-child { margin-top: 0; }
+#requirementsSummaryBody p, #crRequirementsSummaryBody p { font-size: .9rem; }
+
+/* ---- Disabled-state clarity (V11.2 usability requirement) ---- */
+.form-control:disabled, .form-select:disabled, input:disabled { opacity: .55; cursor: not-allowed; background-color: var(--bs-tertiary-bg); }
+.btn:disabled, .btn.disabled { opacity: .5; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
+
+/* ---- Validation / alert presentation consistency ---- */
+.qb-section-body .alert { border-radius: 10px; font-size: .88rem; }
+.qb-section-body .alert:last-child { margin-bottom: 0; }
+.suggested-fixes-box { border: 1px dashed var(--grad-orange-b); border-radius: 10px; padding: .7rem .9rem; background: rgba(244,132,42,.06); }
+[data-bs-theme="dark"] .suggested-fixes-box { background: rgba(244,132,42,.12); }
+
+/* ---- Sticky result column: ensure it never overlaps navbar or gets clipped ---- */
+.builder-col-half.result-col .qb-section-card { max-height: calc(100vh - var(--navbar-h, 64px) - 2rem); overflow-y: auto; }
+@media (max-width: 991.98px) { .builder-col-half.result-col .qb-section-card { max-height: none; } }
+
+/* ---- Small-screen safety: keep every input/select from forcing page-level horizontal scroll ---- */
+@media (max-width: 575.98px) {
+  .qb-toolbar > select, .qb-toolbar > input { width: 100%; flex-basis: 100%; }
+  .qb-section-header { padding: .7rem .85rem; }
+  .qb-section-body { padding: .85rem; }
+}
