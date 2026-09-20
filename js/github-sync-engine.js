@@ -3,18 +3,38 @@
   var B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   function base64EncodeBytes(bytes) {
     var out = ''; var i;
-    for (i = 0; i + 2 < bytes.length; i += 3) { var n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]; out += B64_CHARS[(n >>> 18) & 63] + B64_CHARS[(n >>> 12) & 63] + B64_CHARS[(n >>> 6) & 63] + B64_CHARS[n & 63]; }
+    for (i = 0; i + 2 < bytes.length; i += 3) {
+      var n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+      out += B64_CHARS[(n >>> 18) & 63] + B64_CHARS[(n >>> 12) & 63] + B64_CHARS[(n >>> 6) & 63] + B64_CHARS[n & 63];
+    }
     var remaining = bytes.length - i;
-    if (remaining === 1) { var n1 = bytes[i] << 16; out += B64_CHARS[(n1 >>> 18) & 63] + B64_CHARS[(n1 >>> 12) & 63] + '=='; }
-    else if (remaining === 2) { var n2 = (bytes[i] << 16) | (bytes[i + 1] << 8); out += B64_CHARS[(n2 >>> 18) & 63] + B64_CHARS[(n2 >>> 12) & 63] + B64_CHARS[(n2 >>> 6) & 63] + '='; }
+    if (remaining === 1) {
+      var n1 = bytes[i] << 16;
+      out += B64_CHARS[(n1 >>> 18) & 63] + B64_CHARS[(n1 >>> 12) & 63] + '==';
+    } else if (remaining === 2) {
+      var n2 = (bytes[i] << 16) | (bytes[i + 1] << 8);
+      out += B64_CHARS[(n2 >>> 18) & 63] + B64_CHARS[(n2 >>> 12) & 63] + B64_CHARS[(n2 >>> 6) & 63] + '=';
+    }
     return out;
   }
   function base64DecodeToBytes(b64) {
-    var clean = String(b64 || '').replace(/[\r\n\s]/g, ''); var lookup = {};
+    var clean = String(b64 || '').replace(/[\r\n\s]/g, '');
+    var lookup = {};
     for (var i = 0; i < B64_CHARS.length; i++) lookup[B64_CHARS[i]] = i;
-    var cleanNoPad = clean.replace(/=+$/, ''); var byteLen = Math.floor((cleanNoPad.length * 6) / 8);
-    var bytes = new Uint8Array(byteLen); var bitBuffer = 0, bitCount = 0, byteIdx = 0;
-    for (var j = 0; j < cleanNoPad.length; j++) { var val = lookup[cleanNoPad[j]]; if (val === undefined) continue; bitBuffer = (bitBuffer << 6) | val; bitCount += 6; if (bitCount >= 8) { bitCount -= 8; bytes[byteIdx++] = (bitBuffer >>> bitCount) & 0xFF; } }
+    var cleanNoPad = clean.replace(/=+$/, '');
+    var byteLen = Math.floor((cleanNoPad.length * 6) / 8);
+    var bytes = new Uint8Array(byteLen);
+    var bitBuffer = 0, bitCount = 0, byteIdx = 0;
+    for (var j = 0; j < cleanNoPad.length; j++) {
+      var val = lookup[cleanNoPad[j]];
+      if (val === undefined) continue;
+      bitBuffer = (bitBuffer << 6) | val;
+      bitCount += 6;
+      if (bitCount >= 8) {
+        bitCount -= 8;
+        bytes[byteIdx++] = (bitBuffer >>> bitCount) & 0xFF;
+      }
+    }
     return bytes;
   }
   function utf8ToBase64(str) { return base64EncodeBytes(new TextEncoder().encode(String(str))); }
@@ -22,18 +42,47 @@
   var CONFIG_STORAGE_KEY = 'ap_sql_github_sync_v1';
   function createConfigStore(storageImpl) {
     storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
-    function saveConfig(config) { if (!storageImpl) return; storageImpl.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config)); }
-    function loadConfig() { if (!storageImpl) return null; var raw = storageImpl.getItem(CONFIG_STORAGE_KEY); if (!raw) return null; try { return JSON.parse(raw); } catch (e) { return null; } }
-    function clearConfig() { if (!storageImpl) return; if (typeof storageImpl.removeItem === 'function') storageImpl.removeItem(CONFIG_STORAGE_KEY); else storageImpl.setItem(CONFIG_STORAGE_KEY, ''); }
+    function saveConfig(config) {
+      if (!storageImpl) return;
+      storageImpl.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    }
+    function loadConfig() {
+      if (!storageImpl) return null;
+      var raw = storageImpl.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) return null;
+      try { return JSON.parse(raw); } catch (e) { return null; }
+    }
+    function clearConfig() {
+      if (!storageImpl) return;
+      if (typeof storageImpl.removeItem === 'function') storageImpl.removeItem(CONFIG_STORAGE_KEY);
+      else storageImpl.setItem(CONFIG_STORAGE_KEY, '');
+    }
     return { saveConfig: saveConfig, loadConfig: loadConfig, clearConfig: clearConfig };
   }
-  function isConfigComplete(config) { return !!(config && config.owner && config.repo && config.path && config.token); }
-  function isReadConfigComplete(config) { return !!(config && config.owner && config.repo && config.path); }
+  function isConfigComplete(config) {
+    return !!(config && config.owner && config.repo && config.path && config.token);
+  }
+  function isReadConfigComplete(config) {
+    return !!(config && config.owner && config.repo && config.path);
+  }
   function normalizeBranch(config) { return (config && config.branch) ? config.branch : 'main'; }
-  function buildContentsUrl(config) { var branch = normalizeBranch(config); return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) + '/contents/' + config.path.split('/').map(encodeURIComponent).join('/') + '?ref=' + encodeURIComponent(branch); }
-  function buildContentsWriteUrl(config) { return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) + '/contents/' + config.path.split('/').map(encodeURIComponent).join('/'); }
-  function authHeaders(config) { return { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }; }
-  function authHeadersOptional(config) { var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }; if (config && config.token) headers.Authorization = 'Bearer ' + config.token; return headers; }
+  function buildContentsUrl(config) {
+    var branch = normalizeBranch(config);
+    return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) +
+      '/contents/' + config.path.split('/').map(encodeURIComponent).join('/') + '?ref=' + encodeURIComponent(branch);
+  }
+  function buildContentsWriteUrl(config) {
+    return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) +
+      '/contents/' + config.path.split('/').map(encodeURIComponent).join('/');
+  }
+  function authHeaders(config) {
+    return { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  }
+  function authHeadersOptional(config) {
+    var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (config && config.token) headers.Authorization = 'Bearer ' + config.token;
+    return headers;
+  }
   function fetchRemoteSchema(config, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
@@ -45,8 +94,10 @@
       if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the schema file.'));
       return res.json().then(function (body) {
         if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific .json file.'));
-        var decoded; try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked schema file.')); }
-        var parsed; try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked schema file does not contain valid JSON.')); }
+        var decoded;
+        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked schema file.')); }
+        var parsed;
+        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked schema file does not contain valid JSON.')); }
         var tables = Array.isArray(parsed) ? parsed : parsed.tables;
         if (!Array.isArray(tables)) return Promise.reject(new Error('The linked file does not look like a valid AP-SQL Assistant schema.'));
         return { exists: true, schema: parsed, sha: body.sha };
@@ -64,8 +115,10 @@
       if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the file.'));
       return res.json().then(function (body) {
         if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific file.'));
-        var decoded; try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked file.')); }
-        var parsed; try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked file does not contain valid JSON.')); }
+        var decoded;
+        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked file.')); }
+        var parsed;
+        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked file does not contain valid JSON.')); }
         return { exists: true, content: parsed, sha: body.sha };
       });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
@@ -74,9 +127,15 @@
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
     if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, file path, and a Personal Access Token are all required).'));
-    var body = { message: 'Update AP-SQL Assistant schema (' + new Date().toISOString() + ')', content: utf8ToBase64(JSON.stringify(schemaObj, null, 2)), branch: normalizeBranch(config) };
+    var body = {
+      message: 'Update AP-SQL Assistant schema (' + new Date().toISOString() + ')',
+      content: utf8ToBase64(JSON.stringify(schemaObj, null, 2)),
+      branch: normalizeBranch(config)
+    };
     if (sha) body.sha = sha;
-    return fetchImpl(buildContentsWriteUrl(config), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders(config)), body: JSON.stringify(body) }).then(function (res) {
+    return fetchImpl(buildContentsWriteUrl(config), {
+      method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders(config)), body: JSON.stringify(body)
+    }).then(function (res) {
       if (res.status === 409) { var err = new Error('Someone else updated the shared schema file since this browser last checked it.'); err.conflict = true; return Promise.reject(err); }
       if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));
       if (res.status === 403) return Promise.reject(new Error('GitHub denied this write (403 Forbidden). The token may be missing the required Contents: Read and write permission.'));
@@ -91,7 +150,9 @@
     if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, file path, and a Personal Access Token are all required).'));
     if (!sha) return Promise.reject(new Error('Cannot delete the shared schema file without first knowing its current version (sha). Try checking/syncing first.'));
     var body = { message: 'Delete AP-SQL Assistant shared schema (' + new Date().toISOString() + ')', sha: sha, branch: normalizeBranch(config) };
-    return fetchImpl(buildContentsWriteUrl(config), { method: 'DELETE', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders(config)), body: JSON.stringify(body) }).then(function (res) {
+    return fetchImpl(buildContentsWriteUrl(config), {
+      method: 'DELETE', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders(config)), body: JSON.stringify(body)
+    }).then(function (res) {
       if (res.status === 409) { var err = new Error('Someone else updated the shared schema file since this browser last checked it, so it was not deleted.'); err.conflict = true; return Promise.reject(err); }
       if (res.status === 404) { var err2 = new Error('The shared schema file no longer exists at that location (it may already have been deleted).'); err2.conflict = true; return Promise.reject(err2); }
       if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));

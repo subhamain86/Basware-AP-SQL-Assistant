@@ -153,7 +153,8 @@
   } else renderSyncStatus();
 
   /* ------------------------------------------------------------------ *
-   * GitHub-hosted schema sync
+   * GitHub-hosted schema sync (includes the V10.7.1 anonymous-read fix
+   * for the credential vault lookup — see github-sync-engine.js)
    * ------------------------------------------------------------------ */
   var githubConfigStore = APSQL_GITHUB_SYNC.createConfigStore();
   var githubConfig = null, githubLastSha = null, githubError = null, githubConflict = false, githubLastCheckedAt = null;
@@ -272,6 +273,9 @@
     var pathInput = ($('githubPathInput').value || SHARED_SCHEMA_PATH).trim();
     var vaultPath = pathInput.replace(/(\.[^./]+)?$/, '') + '.vault.json';
     var owner = ($('githubOwnerInput').value || '').trim(), repo = ($('githubRepoInput').value || '').trim(), branch = ($('githubBranchInput').value || 'main').trim() || 'main';
+    /* V10.7.1 fix retained: send whatever real token is typed (if any); an
+       empty token performs an anonymous GitHub read instead of a fabricated
+       placeholder credential. */
     var typedToken = ($('githubTokenInput').value || '').trim();
     if (!owner || !repo) { resultBox.innerHTML = '<div class="alert alert-warning small">Please fill in at least the repository owner and name above.</div>'; return; }
     if (!passphrase) { resultBox.innerHTML = '<div class="alert alert-warning small">Please enter the vault passphrase to unlock.</div>'; return; }
@@ -326,7 +330,7 @@
       main.innerHTML = '<div class="fw-semibold">' + esc(e.name) + (isActive ? ' <span class="badge text-bg-primary">Active</span>' : '') + '</div><div class="small text-body-secondary">Version: ' + esc(st.schemaVersion || '—') + ' · Tables: ' + st.tableCount + ' · Source: ' + esc(e.source) + '</div>';
       item.appendChild(main);
       if (!isActive) {
-        var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm'; selectBtn.textContent = 'Set Active';
+        var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm schema-store-select-btn'; selectBtn.textContent = 'Set Active';
         selectBtn.addEventListener('click', function () { schemaStore.setActiveId(e.id); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); });
         item.appendChild(selectBtn);
       }
@@ -394,10 +398,10 @@
     document.querySelectorAll('.app-view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
     window.scrollTo(0, 0); currentView = view;
     if (view === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); }
-    if (APSQL_TOUR && APSQL_TOUR.hasTour(view) && !APSQL_TOUR.hasSeen(view)) setTimeout(function () { APSQL_TOUR.start(view); }, 350);
+    if (window.APSQL_TOUR && APSQL_TOUR.hasTour(view) && !APSQL_TOUR.hasSeen(view)) setTimeout(function () { APSQL_TOUR.start(view); }, 350);
   }
   document.querySelectorAll('[data-view]').forEach(function (b) { b.addEventListener('click', function () { showView(b.getAttribute('data-view')); closeMenu(); }); });
-  document.querySelectorAll('[data-tour-trigger]').forEach(function (b) { b.addEventListener('click', function () { closeMenu(); APSQL_TOUR.start(currentView); }); });
+  document.querySelectorAll('[data-tour-trigger]').forEach(function (b) { b.addEventListener('click', function () { closeMenu(); if (window.APSQL_TOUR) APSQL_TOUR.start(currentView); }); });
 
   function makeCollapsible(toggleId, submenuId) { var toggle = $(toggleId), submenu = $(submenuId); if (!toggle || !submenu) return; toggle.addEventListener('click', function () { toggle.classList.toggle('open'); submenu.classList.toggle('open'); }); }
   makeCollapsible('queryBuilderMenuToggle', 'queryBuilderSubmenu'); makeCollapsible('schemaMenuToggle', 'schemaSubmenu'); makeCollapsible('themeMenuToggle', 'themeSubmenu');
@@ -412,7 +416,7 @@
   });
 
   /* ------------------------------------------------------------------ *
-   * Home / Quick start
+   * Quick start
    * ------------------------------------------------------------------ */
   var QUICK_EXAMPLES = [
     { ic: '👤', title: 'Users whose login is allowed', desc: 'A simple single-table filter — resolved automatically.', text: 'Show all users whose login is allowed.' },
@@ -1052,12 +1056,12 @@
         var colsToShow = term ? t.columns.filter(function (c) { return columnMatchesSearch(c, term); }) : t.columns;
         matchedColumnCount += colsToShow.length;
         var colsHtml = colsToShow.map(function (c) {
-          var badge = c.primary_key ? '<span class="badge text-bg-primary">PK</span>' : (c.foreign_key ? '<span class="badge text-bg-info">FK → ' + c.foreign_key.table + '.' + c.foreign_key.column + '</span>' : '');
-          return '<div class="schema-tree-col-row"><code>' + highlightMatch(c.name, term) + '</code><span class="text-body-secondary">' + esc(c.type) + '</span>' + badge + '<span>' + highlightMatch(c.description || '', term) + '</span></div>';
+          var badge = c.primary_key ? '<span class="badge text-bg-warning">PK</span>' : (c.foreign_key ? '<span class="badge text-bg-info">FK → ' + c.foreign_key.table + '.' + c.foreign_key.column + '</span>' : '');
+          return '<div class="col-item"><code>' + highlightMatch(c.name, term) + '</code><span class="text-body-secondary">' + esc(c.type) + '</span>' + badge + '<span>' + highlightMatch(c.description || '', term) + '</span></div>';
         }).join('');
-        return '<div class="schema-tree-table-row" data-table="' + t.name + '"><span><code>' + highlightMatch(t.name, term) + '</code> <span class="text-body-secondary small">(' + colsToShow.length + ' columns)</span></span><i class="bi bi-chevron-down"></i></div><div class="schema-tree-col-body' + (term ? ' open' : '') + '" id="cols-' + t.name + '">' + colsHtml + '</div>';
+        return '<div class="schema-tree-table-row" data-table="' + t.name + '"><span><code>' + highlightMatch(t.name, term) + '</code> <span class="text-body-secondary small">(' + colsToShow.length + ' columns)</span></span><i class="bi bi-chevron-down"></i></div><div class="schema-tree-columns' + (term ? ' open' : '') + '" id="cols-' + t.name + '">' + colsHtml + '</div>';
       }).join('');
-      parts.push('<div class="schema-tree-module"><div class="schema-tree-module-header" data-module="' + mod + '"><span>' + highlightMatch(labels[mod] || mod, term) + ' <span class="text-body-secondary small">(' + matching.length + ' tables, ' + totalCols + ' columns)</span></span><i class="bi bi-chevron-down"></i></div><div class="schema-tree-module-body' + (term ? ' open' : '') + '" id="tables-' + mod + '">' + tablesHtml + '</div></div>');
+      parts.push('<div class="schema-tree-module"><div class="schema-tree-module-header" data-module="' + mod + '"><span>' + highlightMatch(labels[mod] || mod, term) + ' <span class="text-body-secondary small">(' + matching.length + ' tables, ' + totalCols + ' columns)</span></span><i class="bi bi-chevron-down"></i></div><div class="schema-tree-tables' + (term ? ' open' : '') + '" id="tables-' + mod + '">' + tablesHtml + '</div></div>');
     });
     $('schemaTree').innerHTML = parts.join('');
     $('schemaTree').querySelectorAll('.schema-tree-module-header').forEach(function (h) { h.addEventListener('click', function () { $('tables-' + h.getAttribute('data-module')).classList.toggle('open'); }); });
@@ -1078,7 +1082,8 @@
     $('aboutList').innerHTML = [
       ['Application name', 'AP-SQL Assistant'],
       ['Application version', '10.8.0'],
-      ['What\'s new in V10.8', 'A completely redesigned, page-specific Guided Walkthrough with fully responsive positioning, a clear step counter and progress dots, and a general responsive-layout pass across every page so controls never run off-screen or get covered.'],
+      ['What\'s new in V10.8', 'A completely redesigned, page-specific Guided Walkthrough with fully responsive positioning (it flips sides and docks as a bottom sheet on narrow screens so it always stays within the visible screen), a clear step counter and progress dots, and a general responsive-layout pass across every page so controls never run off-screen or get covered.'],
+      ['Carried over from V10.7.1', 'The Secure GitHub Connection Vault unlock fix (no hardcoded placeholder token; unlocking now works with no token typed at all, reading anonymously when the repository allows it), Multiple Schema Store, the selectable Synchronization Schedule, and Operational Password Management.'],
       ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated],
       ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key. The operational password is stored only as a SHA-256 hash, never in plain text.']
     ].map(function (row) { return '<li class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</li>'; }).join('');

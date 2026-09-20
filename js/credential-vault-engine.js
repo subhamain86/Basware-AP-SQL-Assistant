@@ -4,22 +4,34 @@
   var SALT_BYTES = 16;
   var IV_BYTES = 12;
   var VAULT_FORMAT_VERSION = 1;
-  function getSubtle() { if (typeof crypto !== 'undefined' && crypto.subtle) return crypto.subtle; return null; }
+  function getSubtle() {
+    if (typeof crypto !== 'undefined' && crypto.subtle) return crypto.subtle;
+    return null;
+  }
   function getRandomBytes(n) {
     var arr = new Uint8Array(n);
     if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(arr);
     else { for (var i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256); }
     return arr;
   }
-  function bytesToBase64(bytes) { var bin = ''; for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return (typeof btoa !== 'undefined') ? btoa(bin) : Buffer.from(bytes).toString('base64'); }
-  function base64ToBytes(b64) { if (typeof atob !== 'undefined') { var bin = atob(b64); var out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; } return new Uint8Array(Buffer.from(b64, 'base64')); }
+  function bytesToBase64(bytes) {
+    var bin = ''; for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return (typeof btoa !== 'undefined') ? btoa(bin) : Buffer.from(bytes).toString('base64');
+  }
+  function base64ToBytes(b64) {
+    if (typeof atob !== 'undefined') { var bin = atob(b64); var out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+    return new Uint8Array(Buffer.from(b64, 'base64'));
+  }
   function isSupported() { return !!getSubtle(); }
   function deriveKey(passphrase, saltBytes) {
     var subtle = getSubtle();
     if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
     var enc = new TextEncoder();
     return subtle.importKey('raw', enc.encode(String(passphrase || '')), { name: 'PBKDF2' }, false, ['deriveKey']).then(function (keyMaterial) {
-      return subtle.deriveKey({ name: 'PBKDF2', salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      return subtle.deriveKey(
+        { name: 'PBKDF2', salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+        keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+      );
     });
   }
   function encryptConfig(config, passphrase) {
@@ -32,7 +44,12 @@
       var enc = new TextEncoder();
       var plaintext = enc.encode(JSON.stringify(config));
       return subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, plaintext).then(function (cipherBuf) {
-        return { v: VAULT_FORMAT_VERSION, salt: bytesToBase64(salt), iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(cipherBuf)) };
+        return {
+          v: VAULT_FORMAT_VERSION,
+          salt: bytesToBase64(salt),
+          iv: bytesToBase64(iv),
+          ciphertext: bytesToBase64(new Uint8Array(cipherBuf))
+        };
       });
     });
   }
@@ -49,17 +66,29 @@
         var dec = new TextDecoder();
         var text = dec.decode(plainBuf);
         try { return JSON.parse(text); } catch (e) { throw new Error('The credential vault is corrupted and could not be read.'); }
-      }).catch(function () { throw new Error('Incorrect vault passphrase, or the credential vault is corrupted.'); });
+      }).catch(function () {
+        throw new Error('Incorrect vault passphrase, or the credential vault is corrupted.');
+      });
     });
   }
-  function buildVaultBlob(config, passphrase) { return encryptConfig(config, passphrase).then(function (vaultObj) { return JSON.stringify(Object.assign({ type: 'ap-sql-assistant-credential-vault' }, vaultObj), null, 2); }); }
+  function buildVaultBlob(config, passphrase) {
+    return encryptConfig(config, passphrase).then(function (vaultObj) {
+      return JSON.stringify(Object.assign({ type: 'ap-sql-assistant-credential-vault' }, vaultObj), null, 2);
+    });
+  }
   function parseVaultBlob(jsonText, passphrase) {
     var parsed;
     try { parsed = JSON.parse(jsonText); } catch (e) { return Promise.reject(new Error('The credential vault file does not contain valid JSON.')); }
     if (!parsed || parsed.type !== 'ap-sql-assistant-credential-vault') return Promise.reject(new Error('This file does not look like an AP-SQL Assistant credential vault.'));
     return decryptConfig(parsed, passphrase);
   }
-  var API = { PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION, isSupported: isSupported, deriveKey: deriveKey, encryptConfig: encryptConfig, decryptConfig: decryptConfig, buildVaultBlob: buildVaultBlob, parseVaultBlob: parseVaultBlob, bytesToBase64: bytesToBase64, base64ToBytes: base64ToBytes };
+  var API = {
+    PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION,
+    isSupported: isSupported, deriveKey: deriveKey,
+    encryptConfig: encryptConfig, decryptConfig: decryptConfig,
+    buildVaultBlob: buildVaultBlob, parseVaultBlob: parseVaultBlob,
+    bytesToBase64: bytesToBase64, base64ToBytes: base64ToBytes
+  };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_VAULT = API;
 })(typeof window !== 'undefined' ? window : this);

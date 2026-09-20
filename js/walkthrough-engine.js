@@ -1,18 +1,21 @@
 /* ==========================================================================
    AP-SQL Assistant — Guided Walkthrough Engine (V10.8)
    --------------------------------------------------------------------------
-   A dependency-free, fully responsive guided-tour engine.
+   A dependency-free, fully responsive guided-tour engine that replaces the
+   V10.7/V10.7.1 fixed-position tour (#tourOverlay/#tourPopup with a single,
+   generic step list shared loosely across pages).
 
-   Design goals (V10.8 requirements):
+   V10.8 redesign goals:
    - Page-specific tours (registered per view) instead of one generic tour.
-   - Every step explains: what it does, why it helps, what to do, what happens next.
-   - Tooltip/dialog always stays completely inside the viewport, on any screen
-     size, window size, or browser zoom level — it never covers the element
-     it is describing, and its own Next/Previous/Skip/Finish controls are
-     always reachable.
-   - Automatically flips to whichever side of the target has room, and drops
-     into a full-width "bottom sheet" layout on narrow screens so nothing is
-     ever cut off or requires extra scrolling to reach.
+   - Every step explains: what it does, why it helps, what to do, and what
+     happens after completing the step.
+   - The tooltip/dialog card ALWAYS stays completely inside the viewport, on
+     any screen size, window size, or browser zoom level — it never covers
+     the element it is describing, and its own Next/Previous/Skip/Finish
+     controls are always reachable without scrolling the page.
+   - Automatically flips to whichever side of the target has the most room,
+     and drops into a full-width "bottom sheet" layout on narrow screens so
+     nothing is ever cut off.
    - Clear step-by-step progress indicator (Step X of Y + progress dots).
    - Can be restarted at any time, from any page, for that page's tour.
    ========================================================================== */

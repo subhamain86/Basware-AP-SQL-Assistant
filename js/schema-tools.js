@@ -58,7 +58,7 @@
   }
   var SAMPLE_HEADER = ['Module', 'Table Name', 'Table Description', 'Column Name', 'Column Description', 'Data Type', 'Length', 'Precision', 'Nullable', 'Alias', 'Decode', 'Primary Key', 'Foreign Key', 'Relationship'];
   function normalizeHeader(label) { return String(label || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
-  var HEADER_ALIASES = { module: 'module', tablename: 'tableName', table: 'tableName', tabledescription: 'tableDescription', tabledesc: 'tableDescription', columnname: 'columnName', column: 'columnName', field: 'columnName', columndescription: 'columnDescription', columndesc: 'columnDescription', description: 'columnDescription', desc: 'columnDescription', datatype: 'dataType', type: 'dataType', length: 'length', datalength: 'length', precision: 'precision', dataprecision: 'precision', nullable: 'nullable', 'null': 'nullable', alias: 'alias', decode: 'decode', primarykey: 'primaryKey', pk: 'primaryKey', foreignkey: 'foreignKey', fk: 'foreignKey', relationship: 'relationship', relatedto: 'relationship', references: 'relationship' };
+  var HEADER_ALIASES = { module: 'module', tablename: 'tableName', table: 'tableName', tabledescription: 'tableDescription', tabledesc: 'tableDescription', columnname: 'columnName', column: 'columnName', field: 'columnName', columndescription: 'columnDescription', columndesc: 'columnDescription', description: 'columnDescription', desc: 'columnDescription', datatype: 'dataType', type: 'dataType', length: 'length', datalength: 'length', precision: 'precision', dataprecision: 'precision', nullable: 'nullable', null: 'nullable', alias: 'alias', decode: 'decode', primarykey: 'primaryKey', pk: 'primaryKey', foreignkey: 'foreignKey', fk: 'foreignKey', relationship: 'relationship', relatedto: 'relationship', references: 'relationship' };
   function classifyHeaderRow(headerCells) { var map = {}; (headerCells || []).forEach(function (label, idx) { var norm = normalizeHeader(label); var mapped = HEADER_ALIASES[norm]; if (mapped && map[mapped] === undefined) map[mapped] = idx; }); return map; }
   function truthy(cellText) { var v = String(cellText || '').trim().toUpperCase(); return v === 'Y' || v === 'YES' || v === 'TRUE' || v === '1'; }
   function parseRelationshipText(text) { if (!text) return null; var m = String(text).match(/([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_]*)/); if (m) return { table: m[1].toUpperCase(), column: m[2].toUpperCase() }; return null; }
@@ -206,12 +206,21 @@
     return { schema: newSchema, previousSchemaBackup: previousSchemaBackup, addedTables: addedTables, addedColumns: addedColumns };
   }
   function buildEmptySchema(baseSchema) {
-    return { schema_name: baseSchema.schema_name, schema_version: '0.0', last_updated: new Date().toISOString().slice(0, 10), source_documents: (baseSchema.source_documents || []).concat(['Schema deleted by administrator on ' + new Date().toISOString().slice(0, 10) + ' \u2014 awaiting new upload']), module_labels: baseSchema.module_labels, tables: [] };
+    return {
+      schema_name: baseSchema.schema_name,
+      schema_version: '0.0',
+      last_updated: new Date().toISOString().slice(0, 10),
+      source_documents: (baseSchema.source_documents || []).concat(['Schema deleted by administrator on ' + new Date().toISOString().slice(0, 10) + ' \u2014 awaiting new upload']),
+      module_labels: baseSchema.module_labels,
+      tables: []
+    };
   }
   function saveRelationshipToSchema(baseSchema, fromTable, fromColumn, toTable, toColumn) {
     var cloned = JSON.parse(JSON.stringify(baseSchema));
-    var fromTableUpper = String(fromTable).toUpperCase(); var toTableUpper = String(toTable).toUpperCase();
-    var fromColumnUpper = String(fromColumn).toUpperCase(); var toColumnUpper = String(toColumn).toUpperCase();
+    var fromTableUpper = String(fromTable).toUpperCase();
+    var toTableUpper = String(toTable).toUpperCase();
+    var fromColumnUpper = String(fromColumn).toUpperCase();
+    var toColumnUpper = String(toColumn).toUpperCase();
     var tFrom = cloned.tables.filter(function (t) { return String(t.name).toUpperCase() === fromTableUpper; })[0];
     if (!tFrom) throw new Error('Table "' + fromTable + '" was not found in the active schema.');
     var tTo = cloned.tables.filter(function (t) { return String(t.name).toUpperCase() === toTableUpper; })[0];

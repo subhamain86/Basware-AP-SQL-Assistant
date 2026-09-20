@@ -3,7 +3,9 @@
    Each view registers its own short, plain-language tour with the
    walkthrough engine (js/walkthrough-engine.js). Every step follows the
    same simple structure: what it does, why it helps, what to do, and what
-   happens next — so the tour stays consistent and easy to follow.
+   happens next — so the tour stays consistent and easy to follow across
+   every page of the application (Home, Read Only Query Builder, Query
+   Builder for CR, Error Rectifier, Used Schema, and Update Schema).
    ========================================================================== */
 (function () {
   'use strict';
@@ -41,10 +43,9 @@
       why: 'Different databases use slightly different syntax for things like row limits and data-type conversions.',
       doThis: 'Pick the dialect that matches your target database before building.',
       then: 'All subsequent SQL generated on this page will use the syntax rules for that dialect.' },
-    { selector: '#pane-tables', title: 'Tables & Columns',
+    { selector: '#pane-tables', title: 'Tables & Columns', doThis: 'Tick the tables you need on the left, then choose a table from the dropdown to pick its columns.',
       what: 'Lets you manually pick which tables and columns to include, as an alternative or a complement to the description box above.',
       why: 'Gives you precise, direct control whenever you already know exactly what you need.',
-      doThis: 'Tick the tables you need on the left, then choose a table from the dropdown to pick its columns.',
       then: 'Your selections combine with anything already identified from your description, ready for Build Query.' },
     { selector: '#pane-advanced', title: 'Advanced Options', doThis: 'Click this tab to see join behavior, sorting, limits, EXISTS/related-count filters, and hierarchy walks.',
       what: 'Groups every "extra" query capability — joins, sorting, limits, named views, related-record checks, and recursive hierarchy walks.',
@@ -68,7 +69,7 @@
       why: 'Speeds up drafting Change Request SQL without needing to remember exact column names.',
       doThis: 'Describe the change, choose INSERT/UPDATE/DELETE, and click Build Query.',
       then: 'The relevant table, columns, values, and WHERE conditions are filled in automatically below.' },
-    { selector: '#crCommandOptions', title: 'Query type',
+    { selector: '#crCommandSelector', title: 'Query type',
       what: 'Selects whether you are drafting an INSERT, UPDATE, or DELETE statement.',
       why: 'Each type has different safeguards — for example, UPDATE and DELETE require a WHERE condition to protect against unintended changes.',
       doThis: 'Click the query type you need.',
@@ -144,7 +145,7 @@
       then: 'The active schema is synced with the GitHub-hosted file, and future changes push and pull automatically.' },
     { selector: '#vaultControls', title: 'Secure GitHub Connection Vault',
       what: 'Encrypts your GitHub connection details (including the access token) behind a passphrase, so they can be safely shared and reused on other machines.',
-      why: 'Avoids sending or storing the raw Personal Access Token anywhere in plain text.',
+      why: 'Avoids sending or storing the raw Personal Access Token anywhere in plain text. Unlocking now works with no token typed at all (V10.7.1 fix), reading anonymously when the repository allows it.',
       doThis: 'Enter a passphrase and click Encrypt & Publish Vault, or enter a passphrase and click Fetch & Unlock Vault on another machine.',
       then: 'The encrypted vault is published to (or read from) GitHub, and the connection fields are filled in automatically once unlocked.' }
   ]);
