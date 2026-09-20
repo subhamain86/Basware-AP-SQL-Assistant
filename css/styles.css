@@ -16,6 +16,23 @@
 html, body { min-height: 100vh; max-width: 100%; overflow-x: hidden; }
 *, *::before, *::after { box-sizing: border-box; }
 body { padding-top: var(--navbar-h, 64px); }
+/* FIX: guarantee the navbar is pinned, independent of HTML class state,
+4
+so the reserved body padding never becomes an empty gap */
+5
+#mainNavbar {
+6
+position: fixed;
+7
+top: 0;
+8
+left: 0;
+9
+right: 0;
+10
+z-index: 1030; /* matches Bootstrap's default fixed-navbar stacking order */
+11
+}
 .navbar .container-fluid { flex-wrap: wrap; row-gap: 6px; }
 .app-view { display: none; }
 .app-view.active { display: block; animation: fadein .2s ease; }
