@@ -61,8 +61,8 @@
     if (!isReadConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (repository owner, name, and file path are required).'));
     return fetchImpl(buildContentsUrl(config), { headers: authHeadersOptional(config) }).then(function (res) {
       if (res.status === 404) return { exists: false };
-      if (res.status === 401) return Promise.reject(new Error(config && config.token ? 'GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.' : 'GitHub requires authentication to read this file (401 Unauthorized) \u2014 the repository is likely private. Enter a valid Personal Access Token in the Token field above and try again.'));
-      if (res.status === 403) return Promise.reject(new Error(config && config.token ? 'GitHub denied access to this repository (403 Forbidden). The token may be missing the required Contents permission, or you may have hit a rate limit.' : 'GitHub denied anonymous access (403 Forbidden) \u2014 this can happen for private repositories or if the anonymous rate limit was reached. Enter a valid Personal Access Token in the Token field above and try again.'));
+      if (res.status === 401) return Promise.reject(new Error(config && config.token ? 'GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.' : 'GitHub requires authentication to read this file (401 Unauthorized) — the repository is likely private. Enter a valid Personal Access Token in the Token field above and try again.'));
+      if (res.status === 403) return Promise.reject(new Error(config && config.token ? 'GitHub denied access to this repository (403 Forbidden). The token may be missing the required Contents permission, or you may have hit a rate limit.' : 'GitHub denied anonymous access (403 Forbidden) — this can happen for private repositories or if the anonymous rate limit was reached. Enter a valid Personal Access Token in the Token field above and try again.'));
       if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the file.'));
       return res.json().then(function (body) {
         if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file. Please point to a specific file.'));
@@ -84,7 +84,7 @@
       if (res.status === 409) { var err = new Error('Someone else updated the shared schema file since this browser last checked it.'); err.conflict = true; return Promise.reject(err); }
       if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));
       if (res.status === 403) return Promise.reject(new Error('GitHub denied this write (403 Forbidden). The token may be missing the required Contents: Read and write permission.'));
-      if (res.status === 422) return Promise.reject(new Error('GitHub rejected this update (422) \u2014 the repository, branch, or file path may not be valid.'));
+      if (res.status === 422) return Promise.reject(new Error('GitHub rejected this update (422) — the repository, branch, or file path may not be valid.'));
       if (res.status !== 200 && res.status !== 201) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while writing the schema file.'));
       return res.json().then(function (respBody) { return { sha: respBody.content && respBody.content.sha }; });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
@@ -100,7 +100,7 @@
       if (res.status === 404) { var err2 = new Error('The shared schema file no longer exists at that location (it may already have been deleted).'); err2.conflict = true; return Promise.reject(err2); }
       if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));
       if (res.status === 403) return Promise.reject(new Error('GitHub denied this delete (403 Forbidden). The token may be missing the required Contents: Read and write permission.'));
-      if (res.status === 422) return Promise.reject(new Error('GitHub rejected this delete (422) \u2014 the repository, branch, or file path may not be valid.'));
+      if (res.status === 422) return Promise.reject(new Error('GitHub rejected this delete (422) — the repository, branch, or file path may not be valid.'));
       if (res.status !== 200) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while deleting the shared schema file.'));
       return { deleted: true };
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
@@ -108,9 +108,9 @@
   function describeGitHubSyncStatus(state) {
     state = state || {};
     if (state.error) return { level: 'error', text: state.error };
-    if (!state.configured) return { level: 'unconfigured', text: 'Not set up yet. Enter your repository details and a Personal Access Token below, then click Connect to start syncing the schema through GitHub \u2014 this works in any browser, which is ideal when this app itself is hosted on GitHub Pages.' };
+    if (!state.configured) return { level: 'unconfigured', text: 'Not set up yet. Enter your repository details and a Personal Access Token below, then click Connect to start syncing the schema through GitHub — this works in any browser, which is ideal when this app itself is hosted on GitHub Pages.' };
     if (state.conflict) return { level: 'conflict', text: 'Someone else updated the shared schema file on GitHub since this browser last checked it. Click "Sync Now" to fetch the latest version.' };
-    return { level: 'connected', text: 'Connected to ' + state.owner + '/' + state.repo + ' \u2014 ' + state.path + ' (branch: ' + (state.branch || 'main') + '). Every Apply / Delete / Save Relationship action also updates this file, and this browser automatically checks it for changes made elsewhere.' };
+    return { level: 'connected', text: 'Connected to ' + state.owner + '/' + state.repo + ' — ' + state.path + ' (branch: ' + (state.branch || 'main') + '). Every Apply / Delete / Save Relationship action also updates this file, and this browser automatically checks it for changes made elsewhere.' };
   }
   var API = { base64EncodeBytes: base64EncodeBytes, base64DecodeToBytes: base64DecodeToBytes, utf8ToBase64: utf8ToBase64, base64ToUtf8: base64ToUtf8, createConfigStore: createConfigStore, isConfigComplete: isConfigComplete, isReadConfigComplete: isReadConfigComplete, normalizeBranch: normalizeBranch, buildContentsUrl: buildContentsUrl, buildContentsWriteUrl: buildContentsWriteUrl, authHeaders: authHeaders, authHeadersOptional: authHeadersOptional, fetchRemoteSchema: fetchRemoteSchema, pushSchemaToGitHub: pushSchemaToGitHub, deleteRemoteFile: deleteRemoteFile, fetchRawJsonFile: fetchRawJsonFile, describeGitHubSyncStatus: describeGitHubSyncStatus };
   if (typeof module === 'object' && module.exports) module.exports = API;

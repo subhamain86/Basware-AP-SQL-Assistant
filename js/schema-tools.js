@@ -205,7 +205,7 @@
     var newSchema = { schema_name: baseSchema.schema_name, schema_version: bumpVersion(baseSchema.schema_version), last_updated: new Date().toISOString().slice(0, 10), source_documents: (baseSchema.source_documents || []).concat([incomingSourceLabel || 'Imported file']), module_labels: baseSchema.module_labels, tables: Object.keys(byNameUpper).map(function (k) { return byNameUpper[k]; }) };
     return { schema: newSchema, previousSchemaBackup: previousSchemaBackup, addedTables: addedTables, addedColumns: addedColumns };
   }
-  function buildEmptySchema(baseSchema) { return { schema_name: baseSchema.schema_name, schema_version: '0.0', last_updated: new Date().toISOString().slice(0, 10), source_documents: (baseSchema.source_documents || []).concat(['Schema deleted by administrator on ' + new Date().toISOString().slice(0, 10) + ' \u2014 awaiting new upload']), module_labels: baseSchema.module_labels, tables: [] }; }
+  function buildEmptySchema(baseSchema) { return { schema_name: baseSchema.schema_name, schema_version: '0.0', last_updated: new Date().toISOString().slice(0, 10), source_documents: (baseSchema.source_documents || []).concat(['Schema deleted by administrator on ' + new Date().toISOString().slice(0, 10) + ' — awaiting new upload']), module_labels: baseSchema.module_labels, tables: [] }; }
   function saveRelationshipToSchema(baseSchema, fromTable, fromColumn, toTable, toColumn) {
     var cloned = JSON.parse(JSON.stringify(baseSchema));
     var fromTableUpper = String(fromTable).toUpperCase(); var toTableUpper = String(toTable).toUpperCase();

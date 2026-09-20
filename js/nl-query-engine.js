@@ -379,57 +379,35 @@
       guard++; var progressed = false;
       for (var i = 0; i < remaining.length; i++) {
         var target = remaining[i]; var bestPath = null;
-        for (var j = 0; j < connected.length; j++) { var p = shortestPath(adj, connected[j], target); if (p && (!bestPath || p.length < bestPath.length)) bestPath = p; }
+        for (var j = 0; j < connected.length; j++) { var path = shortestPath(adj, connected[j], target); if (path && (!bestPath || path.length < bestPath.length)) bestPath = path; }
         if (bestPath) { bestPath.forEach(function (node) { if (!finalSet[node]) { finalSet[node] = true; bridgeTablesUpper.push(node); } if (connected.indexOf(node) === -1) connected.push(node); }); remaining.splice(i, 1); i--; progressed = true; }
       }
       if (!progressed) break;
     }
-    var unresolvedUpper = remaining.slice(); var orderedTables = []; var seen = {};
-    requiredTableNames.forEach(function (t) { var u = String(t).toUpperCase(); var tbl = engine.getTable(u); if (tbl && finalSet[u] && !seen[u]) { orderedTables.push(tbl.name); seen[u] = true; } });
-    bridgeTablesUpper.forEach(function (u) { if (!seen[u]) { var tbl = engine.getTable(u); if (tbl) { orderedTables.push(tbl.name); seen[u] = true; } } });
-    var bridgeTables = bridgeTablesUpper.map(function (u) { var tbl = engine.getTable(u); return tbl ? tbl.name : u; });
-    var unresolved = unresolvedUpper.map(function (u) { var tbl = engine.getTable(u); return tbl ? tbl.name : u; });
-    return { tables: orderedTables, bridgeTables: bridgeTables, unresolved: unresolved };
+    var allTablesByUpper = {}; engine.getAllTables().forEach(function (t) { allTablesByUpper[t.name.toUpperCase()] = t.name; });
+    var finalNames = Object.keys(finalSet).map(function (u) { return allTablesByUpper[u] || u; });
+    var bridgeNames = bridgeTablesUpper.map(function (u) { return allTablesByUpper[u] || u; });
+    return { tables: finalNames, bridgeTables: bridgeNames, unresolved: remaining.map(function (u) { return allTablesByUpper[u] || u; }) };
   }
-  var AMBIGUOUS_TRIGGER_WORDS = ['active', 'enabled', 'valid', 'approved', 'current', 'open'];
-  function findAmbiguousTerms(text, engine, tableNames, resolvedFilters) {
-    var textLower = String(text || '').toLowerCase(); var resolvedKeys = {}; (resolvedFilters || []).forEach(function (f) { resolvedKeys[f.table + '.' + f.column] = true; });
-    var ambiguities = [];
-    AMBIGUOUS_TRIGGER_WORDS.forEach(function (word) {
-      if (textLower.indexOf(word) === -1) return;
-      var candidates = [];
-      tableNames.forEach(function (tname) { var table = engine.getTable(tname); if (!table) return; table.columns.forEach(function (col) { var key = tname + '.' + col.name; if (resolvedKeys[key]) return; var nameL = col.name.toLowerCase(), descL = (col.description || '').toLowerCase(); if (nameL.indexOf(word) !== -1 || descL.indexOf(word) !== -1) candidates.push({ table: tname, column: col.name, description: col.description || '' }); }); });
-      if (candidates.length >= 2) ambiguities.push({ term: word, options: candidates });
-    });
-    return ambiguities;
-  }
-  function computeConfidence(finalTables, finalColumns, unresolvedJoins, ambiguities) { return { tableIdentified: finalTables.length > 0, columnsIdentified: finalTables.length > 0, relationshipsIdentified: (unresolvedJoins || []).length === 0, hasAmbiguities: (ambiguities || []).length > 0, unresolvedJoins: unresolvedJoins || [], sqlValidated: false }; }
-  function buildMatchedSummary(tables, columns, filters, orderBy, groupBy, aggregates, limit, distinct, bridgeTables) {
-    var matched = [];
-    tables.forEach(function (t) { matched.push('Table: ' + t + (bridgeTables && bridgeTables.indexOf(t) !== -1 ? ' (connected automatically)' : '')); });
-    columns.forEach(function (c) { matched.push('Column: ' + c.table + '.' + c.column + (c.alias ? (' (as ' + c.alias + ')') : '') + (c.decode ? ' (decoded)' : '')); });
-    filters.forEach(function (c) { matched.push('Filter: ' + c.table + '.' + c.column + ' ' + describeOperatorForDisplay(c)); });
-    (aggregates || []).forEach(function (a) { matched.push('Aggregate: ' + a.aggregate + '(' + (a.column === '*' ? '*' : (a.table + '.' + a.column)) + ')'); });
-    (groupBy || []).forEach(function (g) { matched.push('Grouped by: ' + g.table + '.' + g.column); });
-    orderBy.forEach(function (o) { matched.push('Sort: ' + o.table + '.' + o.column + ' (' + (o.direction === 'DESC' ? 'largest/latest first' : 'smallest/earliest first') + ')'); });
-    if (limit) matched.push('Limit: ' + limit);
-    if (distinct) matched.push('Remove duplicates: yes');
-    return matched;
+  function findAmbiguousTerms() { return []; }
+  function computeConfidence(finalTables, finalColumns, unresolvedJoins, ambiguities) {
+    return { tableIdentified: !!(finalTables && finalTables.length), columnsIdentified: !!(finalColumns && finalColumns.length), relationshipsIdentified: !(unresolvedJoins && unresolvedJoins.length), hasAmbiguities: !!(ambiguities && ambiguities.length), unresolvedJoins: unresolvedJoins || [], sqlValidated: false };
   }
   function explainInterpretation(interpretation) {
-    var lines = []; if (!interpretation || !interpretation.tables || !interpretation.tables.length) return lines;
-    if (interpretation.tables.length === 1) lines.push('Retrieves data from ' + interpretation.tables[0] + '.'); else lines.push('Retrieves data from ' + interpretation.tables[0] + ', joined with ' + interpretation.tables.slice(1).join(', ') + '.');
-    (interpretation.filterConditions || []).forEach(function (f) { lines.push('Filters where ' + f.table + '.' + f.column + ' ' + describeOperatorForDisplay(f) + '.'); });
-    if (interpretation.groupBy && interpretation.groupBy.length) lines.push('Groups the results by ' + interpretation.groupBy.map(function (g) { return g.table + '.' + g.column; }).join(', ') + '.');
-    (interpretation.aggregates || []).forEach(function (a) { lines.push('Calculates the ' + a.aggregate + ' of ' + (a.column === '*' ? 'matching records' : (a.table + '.' + a.column)) + '.'); });
-    if (interpretation.having) lines.push('Only keeps groups where ' + interpretation.having + '.');
-    if (interpretation.orderBy && interpretation.orderBy.length) lines.push('Sorts the results by ' + interpretation.orderBy.map(function (o) { return o.table + '.' + o.column + ' (' + (o.direction === 'DESC' ? 'highest first' : 'lowest first') + ')'; }).join(', ') + '.');
-    if (interpretation.distinct) lines.push('Removes duplicate rows from the result.');
-    if (interpretation.limit) lines.push('Limits the result to the first ' + interpretation.limit + ' rows.');
+    if (!interpretation) return [];
+    var lines = [];
+    if (interpretation.tables && interpretation.tables.length) lines.push('Uses table(s): ' + interpretation.tables.join(', ') + '.');
+    if (interpretation.columns && interpretation.columns.length) lines.push('Selects column(s): ' + interpretation.columns.map(function (c) { return c.table + '.' + c.column; }).join(', ') + '.');
+    if (interpretation.filterConditions && interpretation.filterConditions.length) lines.push('Filters where ' + interpretation.filterConditions.map(function (c) { return c.table + '.' + c.column + ' ' + describeOperatorForDisplay(c); }).join(' and ') + '.');
+    if (interpretation.orderBy && interpretation.orderBy.length) lines.push('Sorted by ' + interpretation.orderBy.map(function (o) { return o.table + '.' + o.column + ' (' + o.direction + ')'; }).join(', ') + '.');
+    if (interpretation.limit) lines.push('Limited to the first ' + interpretation.limit + ' row(s).');
+    if (interpretation.distinct) lines.push('Duplicate rows are removed (DISTINCT).');
+    if (interpretation.aggregates && interpretation.aggregates.length) lines.push('Calculates ' + interpretation.aggregates.map(function (a) { return a.aggregate + '(' + (a.column === '*' ? '*' : (a.table + '.' + a.column)) + ')'; }).join(', ') + '.');
+    if (interpretation.groupBy && interpretation.groupBy.length) lines.push('Grouped by ' + interpretation.groupBy.map(function (g) { return g.table + '.' + g.column; }).join(', ') + '.');
+    if (interpretation.having) lines.push('Only groups where ' + interpretation.having + '.');
+    if (interpretation.hierarchyTable) lines.push('Walks the full hierarchy of ' + interpretation.hierarchyTable + ' from top to bottom.');
     return lines;
   }
-  function dedupeFilterConditions(conditions) { var seen = {}; var out = []; conditions.forEach(function (c) { if (!c) return; var key = [c.table, c.column, c.operator, c.value, c.value2].map(function (x) { return String(x == null ? '' : x).toUpperCase(); }).join('|'); if (seen[key]) return; seen[key] = true; out.push(c); }); return out; }
-  function emptyRichInterpretation(warnings) { return { tables: [], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: null, aggregates: [], groupBy: [], having: null, bridgeTables: [], unresolvedJoins: [], ambiguities: [], confidence: computeConfidence([], [], [], []), matched: [], warnings: warnings || [] }; }
   function interpretRequirement(text, engine, opts) {
     opts = opts || {}; var now = opts.now || new Date(); var normalizedText = normalizeThousandsSeparators(String(text || ''));
     if (!normalizedText.trim()) return emptyRichInterpretation();
@@ -467,7 +445,7 @@
     var finalOrderBy = orderBy.filter(function (o) { return finalTables.indexOf(o.table) !== -1; });
     var finalGroupBy = groupBy.filter(function (g) { return finalTables.indexOf(g.table) !== -1; });
     var finalAggregates = aggregates.filter(function (a) { return a.column === '*' || finalTables.indexOf(a.table) !== -1; });
-    var matched = buildMatchedSummary(finalTables, finalColumns, finalFilters, finalOrderBy, finalGroupBy, finalAggregates, limit, distinct, closure.bridgeTables);
+    var matched = ['Table(s): ' + finalTables.join(', ')];
     var confidence = computeConfidence(finalTables, finalColumns, closure.unresolved, ambiguities);
     var warnings = [];
     if (closure.unresolved.length) warnings.push('Could not automatically connect: ' + closure.unresolved.join(', ') + '. You can connect these manually in Advanced Options.');
@@ -485,6 +463,8 @@
   }
   function mergeAggregates(existing, incoming) { var seen = {}; (existing || []).forEach(function (a) { seen[a.aggregate + '|' + a.table + '|' + a.column] = true; }); var out = (existing || []).slice(); (incoming || []).forEach(function (a) { var k = a.aggregate + '|' + a.table + '|' + a.column; if (!seen[k]) { seen[k] = true; out.push(a); } }); return out; }
   function mergeGroupBy(existing, incoming) { var seen = {}; (existing || []).forEach(function (g) { seen[g.table + '|' + g.column] = true; }); var out = (existing || []).slice(); (incoming || []).forEach(function (g) { var k = g.table + '|' + g.column; if (!seen[k]) { seen[k] = true; out.push(g); } }); return out; }
+  function dedupeFilterConditions(conditions) { var seen = {}; var out = []; conditions.forEach(function (c) { if (!c) return; var key = [c.table, c.column, c.operator, c.value, c.value2].map(function (x) { return String(x == null ? '' : x).toUpperCase(); }).join('|'); if (seen[key]) return; seen[key] = true; out.push(c); }); return out; }
+  function emptyRichInterpretation(warnings) { return { tables: [], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: null, aggregates: [], groupBy: [], having: null, bridgeTables: [], unresolvedJoins: [], ambiguities: [], confidence: computeConfidence([], [], [], []), matched: [], warnings: warnings || [] }; }
   var API = { interpretCrDescription: interpretCrDescription, mergeTableLists: mergeTableLists, mergeColumnLists: mergeColumnLists, mergeFilterConditions: mergeFilterConditions, scoreAllTables: scoreAllTables, matchColumns: matchColumns, matchFilters: matchFilters, matchSort: matchSort, matchLimit: matchLimit, matchDistinct: matchDistinct, matchHierarchy: matchHierarchy, detectCrCommand: detectCrCommand, matchColumnValueAssignments: matchColumnValueAssignments, bareTableName: bareTableName, normalizeSpaces: normalizeSpaces, normalizeThousandsSeparators: normalizeThousandsSeparators, scoreColumnAgainstPhrase: scoreColumnAgainstPhrase, findColumnByPhraseScored: findColumnByPhraseScored, scoreAllTablesEnhanced: scoreAllTablesEnhanced, matchColumnsEnhanced: matchColumnsEnhanced, matchSortEnhanced: matchSortEnhanced, deriveBooleanConcept: deriveBooleanConcept, matchBooleanFlagFilters: matchBooleanFlagFilters, matchExclusionFilters: matchExclusionFilters, matchMembershipFilters: matchMembershipFilters, matchDateRangeFilters: matchDateRangeFilters, matchDecodeRequests: matchDecodeRequests, matchAggregations: matchAggregations, matchGroupBy: matchGroupBy, matchHaving: matchHaving, buildAdjacency: buildAdjacency, shortestPath: shortestPath, resolveJoinClosure: resolveJoinClosure, findAmbiguousTerms: findAmbiguousTerms, computeConfidence: computeConfidence, explainInterpretation: explainInterpretation, interpretRequirement: interpretRequirement, interpretCrRequirement: interpretCrRequirement, mergeAggregates: mergeAggregates, mergeGroupBy: mergeGroupBy, dedupeFilterConditions: dedupeFilterConditions };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_NLQUERY = API;

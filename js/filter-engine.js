@@ -42,18 +42,17 @@
       case 'between':
         if (condition.value === '' || condition.value == null || condition.value2 === '' || condition.value2 == null) { if (errors) errors.push('The "Between" condition on ' + col + ' needs both a from and a to value.'); return null; }
         return col + ' BETWEEN ' + sqlLiteral(condition.value) + ' AND ' + sqlLiteral(condition.value2);
-      case 'in':
-      case 'not_in': {
-        var values = Array.isArray(condition.values) && condition.values.length ? splitMultiValues(condition.values) : splitMultiValues(condition.value);
-        if (!values.length) { if (errors) errors.push('The "Is one of" / "Is not one of" condition on ' + col + ' needs at least one value.'); return null; }
-        var literals = values.map(function (v) { return sqlLiteral(v); });
-        return col + (op.id === 'in' ? ' IN (' : ' NOT IN (') + literals.join(', ') + ')';
+      case 'in': case 'not_in': {
+        var vals = splitMultiValues(condition.value);
+        if (!vals.length) { if (errors) errors.push('The "' + op.label + '" condition on ' + col + ' needs at least one value.'); return null; }
+        var literals = vals.map(function (v) { return sqlLiteral(v); }).join(', ');
+        return col + (op.id === 'not_in' ? ' NOT IN (' : ' IN (') + literals + ')';
       }
       case 'is_null': return col + ' IS NULL';
       case 'is_not_null': return col + ' IS NOT NULL';
       case 'is_empty': return "(" + col + " IS NULL OR " + col + " = '')";
       case 'is_not_empty': return "(" + col + " IS NOT NULL AND " + col + " <> '')";
-      default: return null;
+      default: if (errors) errors.push('Unsupported filter operator "' + op.id + '".'); return null;
     }
   }
   function buildWhereSql(filterGroup, dialect) {
