@@ -1,6 +1,8 @@
 (function (root) {
   'use strict';
+
   var B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
   function base64EncodeBytes(bytes) {
     var out = ''; var i;
     for (i = 0; i + 2 < bytes.length; i += 3) {
@@ -39,6 +41,7 @@
   }
   function utf8ToBase64(str) { return base64EncodeBytes(new TextEncoder().encode(String(str))); }
   function base64ToUtf8(b64) { return new TextDecoder().decode(base64DecodeToBytes(b64)); }
+
   var CONFIG_STORAGE_KEY = 'ap_sql_github_sync_v1';
   function createConfigStore(storageImpl) {
     storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
@@ -59,13 +62,26 @@
     }
     return { saveConfig: saveConfig, loadConfig: loadConfig, clearConfig: clearConfig };
   }
+
   function isConfigComplete(config) {
     return !!(config && config.owner && config.repo && config.path && config.token);
   }
+  /**
+   * isReadConfigComplete(config) — V10.7.1. A relaxed variant of
+   * isConfigComplete() used ONLY for read (GET) lookups where a token
+   * may not yet be known/typed by the user (e.g. the very first step of
+   * unlocking the credential vault, before the real token has been
+   * recovered). Only the repository location (owner/repo/path) is
+   * required; the token is optional, because GitHub's Contents API
+   * allows anonymous, unauthenticated GET requests against PUBLIC
+   * repositories (subject to a lower, IP-based rate limit). Write
+   * operations (PUT/DELETE) still always require isConfigComplete().
+   */
   function isReadConfigComplete(config) {
     return !!(config && config.owner && config.repo && config.path);
   }
   function normalizeBranch(config) { return (config && config.branch) ? config.branch : 'main'; }
+
   function buildContentsUrl(config) {
     var branch = normalizeBranch(config);
     return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) +
@@ -78,11 +94,27 @@
   function authHeaders(config) {
     return { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
   }
+  /**
+   * authHeadersOptional(config) — V10.7.1 fix. Builds request headers for
+   * a READ-only lookup, including an Authorization header ONLY when a
+   * real, non-empty token is actually present in `config.token`.
+   *
+   * THIS REPLACES THE PRIOR BUG: earlier versions of the vault-unlock
+   * flow hardcoded the literal string 'unauthenticated-lookup' as the
+   * Bearer token for this exact lookup call — GitHub always rejects that
+   * literal string as invalid credentials, producing a 401 Unauthorized
+   * on every attempt, regardless of what the user actually typed into
+   * the Token field. There is no longer any hardcoded placeholder
+   * token anywhere in this file: callers either supply a real token
+   * (used as-is) or omit it entirely (anonymous GET, which GitHub
+   * permits for public repositories).
+   */
   function authHeadersOptional(config) {
     var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
     if (config && config.token) headers.Authorization = 'Bearer ' + config.token;
     return headers;
   }
+
   function fetchRemoteSchema(config, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
@@ -104,6 +136,29 @@
       });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
+
+  /**
+   * fetchRawJsonFile(config, fetchImpl) — V10.7 (fixed in V10.7.1). Like
+   * fetchRemoteSchema, but for arbitrary non-schema-shaped JSON files
+   * (specifically the encrypted credential vault, whose shape
+   * `{ type, v, salt, iv, ciphertext }` would always fail
+   * fetchRemoteSchema's "must have a .tables array" validation).
+   *
+   * FIX: this now uses isReadConfigComplete() (token optional) and
+   * authHeadersOptional() (omits the Authorization header entirely when
+   * no token is supplied) instead of unconditionally requiring — and
+   * previously, silently fabricating — a token. Concretely:
+   *   - If `config.token` is a real value the caller already has (even a
+   *     lightweight read-only token), it is sent and used normally.
+   *   - If `config.token` is empty/undefined, the request is sent with
+   *     NO Authorization header at all, which GitHub's REST API accepts
+   *     for anonymous reads of public repositories.
+   *   - Only a genuinely invalid/expired real token, or an attempt to
+   *     read a PRIVATE repository with no token, will still produce a
+   *     401/403 — and the error message now reflects that possibility
+   *     honestly instead of blaming "the token" when no real token was
+   *     ever involved.
+   */
   function fetchRawJsonFile(config, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
@@ -123,6 +178,7 @@
       });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
+
   function pushSchemaToGitHub(config, schemaObj, sha, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
@@ -144,6 +200,7 @@
       return res.json().then(function (respBody) { return { sha: respBody.content && respBody.content.sha }; });
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
+
   function deleteRemoteFile(config, sha, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
@@ -162,6 +219,7 @@
       return { deleted: true };
     }, function () { return Promise.reject(new Error('Could not reach GitHub (network error). Check your internet connection and try again.')); });
   }
+
   function describeGitHubSyncStatus(state) {
     state = state || {};
     if (state.error) return { level: 'error', text: state.error };
@@ -169,6 +227,7 @@
     if (state.conflict) return { level: 'conflict', text: 'Someone else updated the shared schema file on GitHub since this browser last checked it. Click "Sync Now" to fetch the latest version.' };
     return { level: 'connected', text: 'Connected to ' + state.owner + '/' + state.repo + ' \u2014 ' + state.path + ' (branch: ' + (state.branch || 'main') + '). Every Apply / Delete / Save Relationship action also updates this file, and this browser automatically checks it for changes made elsewhere.' };
   }
+
   var API = {
     base64EncodeBytes: base64EncodeBytes, base64DecodeToBytes: base64DecodeToBytes,
     utf8ToBase64: utf8ToBase64, base64ToUtf8: base64ToUtf8,

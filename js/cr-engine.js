@@ -3,6 +3,7 @@
   var FILTER = (typeof module === 'object' && module.exports) ? require('./filter-engine.js') : root.APSQL_FILTER;
   var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
   var SAFETY_BANNER = 'Generated SQL only \u2013 this application does not execute database changes.';
+
   function sqlLiteralForColumn(engine, table, columnName, rawValue) {
     var col = engine.getColumn(table, columnName);
     var isNumericType = col && /^(INT|NUMBER|NUMERIC|DECIMAL|FLOAT|DOUBLE|BIGINT|SMALLINT)/i.test(col.type || '');
@@ -35,7 +36,8 @@
   function buildDelete(engine, request, dialect) {
     var check = VALIDATE.validateCrRequest(engine, { command: 'DELETE', table: request.table, filterGroup: request.filterGroup, allowNoWhere: request.allowNoWhere });
     if (!check.valid) return { status: 'rejected', message: check.errors.join(' '), requiresWhereConfirmation: /WHERE condition is required/.test(check.errors.join(' ')) };
-    var lines = ['DELETE FROM ' + request.table]; var filtersApplied = [];
+    var lines = ['DELETE FROM ' + request.table];
+    var filtersApplied = [];
     if (request.filterGroup && request.filterGroup.conditions && request.filterGroup.conditions.length) {
       var built = FILTER.buildWhereSql(request.filterGroup, dialect);
       if (built.errors.length) return { status: 'rejected', message: built.errors.join(' ') };
@@ -47,7 +49,8 @@
   function buildSelectPreview(engine, request, dialect) {
     var check = VALIDATE.validateCrRequest(engine, { command: 'SELECT', table: request.table, filterGroup: request.filterGroup });
     if (!check.valid) return { status: 'rejected', message: check.errors.join(' ') };
-    var lines = ['SELECT *', 'FROM ' + request.table]; var filtersApplied = [];
+    var lines = ['SELECT *', 'FROM ' + request.table];
+    var filtersApplied = [];
     if (request.filterGroup && request.filterGroup.conditions && request.filterGroup.conditions.length) {
       var built = FILTER.buildWhereSql(request.filterGroup, dialect);
       if (built.errors.length) return { status: 'rejected', message: built.errors.join(' ') };

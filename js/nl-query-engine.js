@@ -1,6 +1,11 @@
 (function (root) {
   'use strict';
   var DATATYPE = (typeof module === 'object' && module.exports) ? require('./datatype-engine.js') : root.APSQL_DATATYPE;
+
+  /* =====================================================================
+     SECTION 1 — V10.1–V10.5 ENGINE (UNCHANGED)
+     ===================================================================== */
+
   function tokenizeWords(text) { return String(text || '').toLowerCase().match(/[a-z0-9]+/g) || []; }
   function normalizeSpaces(s) { return String(s || '').toLowerCase().replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim(); }
   function containsPhrase(haystackLower, phrase) { if (!phrase) return false; return haystackLower.indexOf(phrase) !== -1; }
@@ -17,8 +22,10 @@
     var withoutModule = idx !== -1 ? tableName.slice(idx + 1) : tableName;
     return normalizeSpaces(withoutModule);
   }
+
   var VALUE_RE = '("[^"]*"|\'[^\']*\'|-?\\d+\\.\\d+|-?\\d+|[A-Za-z][A-Za-z0-9_\\-]*)';
   var MULTI_VALUE_LIST_RE = '((?:"[^"]*"|\'[^\']*\'|[A-Za-z0-9_\\-\\.]+)(?:\\s*,\\s*(?:"[^"]*"|\'[^\']*\'|[A-Za-z0-9_\\-\\.]+))*)';
+
   function scoreAllTables(text, engine) {
     var textLower = String(text || '').toLowerCase();
     var labels = engine.getModuleLabels();
@@ -33,6 +40,7 @@
       return { table: t, score: score };
     }).sort(function (a, b) { return b.score - a.score; });
   }
+
   function matchColumns(text, engine, tableNames, opts) {
     opts = opts || {};
     var threshold = opts.threshold != null ? opts.threshold : 2.5;
@@ -57,6 +65,7 @@
     });
     return out;
   }
+
   function findColumnByPhrase(engine, tableNames, phrase) {
     var best = null;
     tableNames.forEach(function (tname) {
@@ -80,6 +89,7 @@
     });
     return best;
   }
+
   var OPERATOR_DEFS = [
     { operator: 'not_in', arity: 'multi', re: '(?:is not one of|is not any of|not one of)\\s+' + MULTI_VALUE_LIST_RE },
     { operator: 'in', arity: 'multi', re: '(?:is one of|is any of|one of)\\s+' + MULTI_VALUE_LIST_RE },
@@ -95,6 +105,7 @@
     { operator: 'neq', arity: 1, re: '(?:is not|not equal to)\\s+' + VALUE_RE },
     { operator: 'eq', arity: 1, re: '(?:is|equals?|=)\\s+' + VALUE_RE }
   ];
+
   function findBestDateColumn(engine, tableNames, usedColumns) {
     var candidates = [];
     tableNames.forEach(function (tname) {
@@ -110,6 +121,7 @@
     var withDateWord = candidates.filter(function (c) { return /date/i.test(c.name); });
     return withDateWord[0] || candidates[0];
   }
+
   function matchFilters(text, engine, tableNames, now) {
     text = String(text || '');
     var textLower = text.toLowerCase();
@@ -175,6 +187,7 @@
     }
     return conditions;
   }
+
   function matchSort(text, engine, tableNames) {
     var textLower = String(text || '').toLowerCase();
     var re = /(?:sorted by|order(?:ed)? by|sort by)\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|\s+ascending|\s+asc\b|\s+descending|\s+desc\b|\s+newest|\s+oldest|\s+highest|\s+lowest|\s+largest|\s+smallest|[.;]|$))/g;
@@ -212,6 +225,7 @@
     if (scored[0].overlap > 0 && (scored.length === 1 || scored[0].overlap > scored[1].overlap)) return scored[0].table;
     return null;
   }
+
   function describeOperatorForDisplay(c) {
     switch (c.operator) {
       case 'eq': return '= ' + c.value;
@@ -230,35 +244,44 @@
       default: return String(c.operator);
     }
   }
+
   function emptyInterpretation(warnings) {
     return { tables: [], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: null, matched: [], warnings: warnings || [] };
   }
+
   function interpretDescription(text, engine, opts) {
     opts = opts || {};
     var now = opts.now || new Date();
     text = String(text || '');
     if (!text.trim()) return emptyInterpretation();
+
     var ranked = scoreAllTables(text, engine).filter(function (s) { return s.score >= 1; });
     var candidateNames = ranked.map(function (s) { return s.table.name; });
+
     var hierarchyTable = matchHierarchy(text, engine, candidateNames);
     if (hierarchyTable) {
       return { tables: [hierarchyTable], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: hierarchyTable, matched: ['Hierarchy: ' + hierarchyTable], warnings: [] };
     }
+
     if (!ranked.length) return emptyInterpretation(['Could not identify any tables mentioned in your description. Try naming a table explicitly, or select tables manually below.']);
+
     var columns = matchColumns(text, engine, candidateNames, {});
     var filterConditions = matchFilters(text, engine, candidateNames, now);
     var orderBy = matchSort(text, engine, candidateNames);
     var limit = matchLimit(text);
     var distinct = matchDistinct(text);
+
     var tablesWithPurpose = {};
     columns.forEach(function (c) { tablesWithPurpose[c.table] = true; });
     filterConditions.forEach(function (c) { tablesWithPurpose[c.table] = true; });
     orderBy.forEach(function (o) { tablesWithPurpose[o.table] = true; });
     tablesWithPurpose[ranked[0].table.name] = true;
+
     var finalTables = candidateNames.filter(function (t) { return tablesWithPurpose[t]; });
     var finalColumns = columns.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalFilters = filterConditions.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalOrderBy = orderBy.filter(function (o) { return finalTables.indexOf(o.table) !== -1; });
+
     var matched = [];
     finalTables.forEach(function (t) { matched.push('Table: ' + t); });
     finalColumns.forEach(function (c) { matched.push('Column: ' + c.table + '.' + c.column + (c.alias ? (' (as ' + c.alias + ')') : '')); });
@@ -266,8 +289,10 @@
     finalOrderBy.forEach(function (o) { matched.push('Sort: ' + o.table + '.' + o.column + ' (' + (o.direction === 'DESC' ? 'largest/latest first' : 'smallest/earliest first') + ')'); });
     if (limit) matched.push('Limit: ' + limit);
     if (distinct) matched.push('Remove duplicates: yes');
+
     return { tables: finalTables, columns: finalColumns, filterConditions: finalFilters, orderBy: finalOrderBy, limit: limit, distinct: distinct, hierarchyTable: null, matched: matched, warnings: [] };
   }
+
   function detectCrCommand(text) {
     var textLower = String(text || '').toLowerCase();
     var patterns = [
@@ -279,6 +304,7 @@
     patterns.forEach(function (p) { var m = textLower.match(p.re); if (m && m.index < bestIdx) { bestIdx = m.index; best = p.command; } });
     return best;
   }
+
   function matchColumnValueAssignments(searchText, engine, tableName) {
     var table = engine.getTable(tableName); if (!table) return [];
     var out = []; var used = {};
@@ -304,19 +330,24 @@
     });
     return out;
   }
+
   function interpretCrDescription(text, engine, opts) {
     opts = opts || {};
     text = String(text || '');
     if (!text.trim()) return { command: null, table: null, insertColumns: [], updateColumns: [], filterConditions: [], matched: [], warnings: [] };
+
     var command = detectCrCommand(text);
     var ranked = scoreAllTables(text, engine).filter(function (s) { return s.score >= 1; });
     var table = ranked.length ? ranked[0].table.name : null;
+
     var whereMatch = text.match(/\bwhere\b/i);
     var assignmentText = whereMatch ? text.slice(0, whereMatch.index) : text;
     var filterText = whereMatch ? text.slice(whereMatch.index) : text;
+
     var matched = [];
     if (command) matched.push('Query Type: ' + command);
     if (table) matched.push('Table: ' + table);
+
     var insertColumns = [], updateColumns = [], filterConditions = [];
     if (table && command === 'INSERT') {
       insertColumns = matchColumnValueAssignments(assignmentText, engine, table).map(function (c) { return { name: c.name, value: c.value }; });
@@ -331,6 +362,7 @@
     }
     return { command: command, table: table, insertColumns: insertColumns, updateColumns: updateColumns, filterConditions: filterConditions, matched: matched, warnings: [] };
   }
+
   function dedupeStrings(arr) {
     var seen = {}; var out = [];
     (arr || []).forEach(function (s) { var k = String(s).toUpperCase(); if (!seen[k]) { seen[k] = true; out.push(s); } });
@@ -358,6 +390,11 @@
     var additions = (nlConditions || []).filter(function (c) { var k = keyOf(c); if (existing[k]) return false; existing[k] = true; return true; });
     return (manualConditions || []).concat(additions);
   }
+
+  /* =====================================================================
+     SECTION 2 — V10.6 "INTELLIGENT QUERY BUILDER" ENGINE
+     ===================================================================== */
+
   var STOPWORDS = { a: 1, all: 1, an: 1, and: 1, are: 1, as: 1, at: 1, be: 1, by: 1, for: 1, from: 1, in: 1, into: 1, is: 1, it: 1, of: 1, on: 1, or: 1, our: 1, show: 1, that: 1, the: 1, their: 1, them: 1, then: 1, this: 1, to: 1, was: 1, were: 1, where: 1, which: 1, who: 1, whose: 1, with: 1, please: 1, also: 1, only: 1, its: 1 };
   function tokenize(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean); }
   function contentTokens(s) { return tokenize(s).filter(function (w) { return w.length >= 3 && !STOPWORDS[w]; }); }
@@ -369,9 +406,11 @@
     return word;
   }
   function normalizeWordSet(words) { return uniqueWords((words || []).map(singularize)); }
+
   function normalizeThousandsSeparators(text) {
     return String(text || '').replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, function (m) { return m.replace(/,/g, ''); });
   }
+
   var CATEGORICAL_NAME_MARKERS = ['group', 'category', 'type', 'class', 'department', 'team', 'organization', 'organisation'];
   function scoreColumnAgainstPhrase(col, phraseNormalized) {
     if (!phraseNormalized) return 0;
@@ -822,6 +861,7 @@
     var now = opts.now || new Date();
     var normalizedText = normalizeThousandsSeparators(String(text || ''));
     if (!normalizedText.trim()) return emptyRichInterpretation();
+
     var preliminaryRanked = scoreAllTablesEnhanced(normalizedText, engine).filter(function (s) { return s.score >= 1; });
     var preliminaryNames = preliminaryRanked.map(function (s) { return s.table.name; });
     var hierarchyTable = matchHierarchy(normalizedText, engine, preliminaryNames);
@@ -831,15 +871,18 @@
       hInterp.confidence = computeConfidence([hierarchyTable], [], [], []);
       return hInterp;
     }
+
     var ranked = preliminaryRanked;
     var candidateNames = preliminaryNames;
     if (!ranked.length) return emptyRichInterpretation(['Could not identify any tables mentioned in your description. Try naming a specific concept from your data (e.g. "invoices", "suppliers", "users"), or select tables manually below.']);
+
     var columns = matchColumnsEnhanced(normalizedText, engine, candidateNames);
     var decodeRequestCols = matchDecodeRequests(normalizedText, engine, candidateNames);
     decodeRequestCols.forEach(function (d) {
       var existing = columns.filter(function (c) { return c.table === d.table && c.column === d.column; })[0];
       if (existing) existing.decode = true; else columns.push({ table: d.table, column: d.column, decode: true });
     });
+
     var usedCols = {};
     var boolResult = matchBooleanFlagFilters(normalizedText, engine, candidateNames);
     boolResult.filters.forEach(function (f) { usedCols[f.table + '.' + f.column] = true; });
@@ -848,15 +891,18 @@
     var membershipFilters = matchMembershipFilters(normalizedText, engine, candidateNames);
     var dateRangeFilter = matchDateRangeFilters(normalizedText, engine, candidateNames, usedCols);
     var filterConditions = dedupeFilterConditions(boolResult.filters.concat(opFilters).concat(exclusionFilters).concat(membershipFilters).concat(dateRangeFilter ? [dateRangeFilter] : []));
+
     var orderBy = matchSortEnhanced(normalizedText, engine, candidateNames);
     var limit = matchLimit(normalizedText);
     var distinct = matchDistinct(normalizedText);
+
     var aggregates = matchAggregations(normalizedText, engine, candidateNames);
     var groupBy = matchGroupBy(normalizedText, engine, candidateNames);
     var having = matchHaving(normalizedText, aggregates);
     if (aggregates.length && !groupBy.length && columns.length) {
       groupBy = columns.filter(function (c) { return !c.decode; }).map(function (c) { return { table: c.table, column: c.column }; });
     }
+
     var tablesWithPurpose = {};
     columns.forEach(function (c) { tablesWithPurpose[c.table] = true; });
     filterConditions.forEach(function (c) { tablesWithPurpose[c.table] = true; });
@@ -866,19 +912,24 @@
     tablesWithPurpose[ranked[0].table.name] = true;
     var requiredTables = candidateNames.filter(function (t) { return tablesWithPurpose[t]; });
     if (aggregates.some(function (a) { return a.column === '*'; }) && requiredTables.indexOf(ranked[0].table.name) === -1) requiredTables.push(ranked[0].table.name);
+
     var closure = resolveJoinClosure(engine, requiredTables);
     var finalTables = closure.tables;
+
     var ambiguities = boolResult.ambiguities.concat(findAmbiguousTerms(normalizedText, engine, finalTables, filterConditions));
+
     var finalColumns = columns.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalFilters = filterConditions.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalOrderBy = orderBy.filter(function (o) { return finalTables.indexOf(o.table) !== -1; });
     var finalGroupBy = groupBy.filter(function (g) { return finalTables.indexOf(g.table) !== -1; });
     var finalAggregates = aggregates.filter(function (a) { return a.column === '*' || finalTables.indexOf(a.table) !== -1; });
+
     var matched = buildMatchedSummary(finalTables, finalColumns, finalFilters, finalOrderBy, finalGroupBy, finalAggregates, limit, distinct, closure.bridgeTables);
     var confidence = computeConfidence(finalTables, finalColumns, closure.unresolved, ambiguities);
     var warnings = [];
     if (closure.unresolved.length) warnings.push('Could not automatically connect: ' + closure.unresolved.join(', ') + '. You can connect these manually in Advanced Options.');
     ambiguities.forEach(function (a) { warnings.push('"' + a.term + '" could refer to more than one column \u2014 please clarify below.'); });
+
     return {
       tables: finalTables, columns: finalColumns, filterConditions: finalFilters, orderBy: finalOrderBy,
       limit: limit, distinct: distinct, hierarchyTable: null,
@@ -914,6 +965,7 @@
     (incoming || []).forEach(function (g) { var k = g.table + '|' + g.column; if (!seen[k]) { seen[k] = true; out.push(g); } });
     return out;
   }
+
   var API = {
     interpretDescription: interpretDescription, interpretCrDescription: interpretCrDescription,
     mergeTableLists: mergeTableLists, mergeColumnLists: mergeColumnLists, mergeFilterConditions: mergeFilterConditions,

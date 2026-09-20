@@ -4,6 +4,7 @@
     schema = schema || { tables: [] };
     var tablesByName = {};
     (schema.tables || []).forEach(function (t) { tablesByName[String(t.name).toUpperCase()] = t; });
+
     function getTable(name) { return tablesByName[String(name || '').toUpperCase()] || null; }
     function getAllTables() { return (schema.tables || []).slice(); }
     function getModuleLabels() { return schema.module_labels || {}; }

@@ -1,5 +1,6 @@
 (function (root) {
   'use strict';
+
   function baseType(typeStr) {
     var m = String(typeStr || '').trim().match(/^([A-Za-z0-9_]+)/);
     return m ? m[1].toUpperCase() : '';
@@ -8,6 +9,7 @@
   var TEXT_TYPES = ['VARCHAR', 'VARCHAR2', 'CHAR', 'NVARCHAR', 'NCHAR', 'TEXT', 'CLOB', 'NTEXT', 'STRING'];
   var TIMESTAMP_TYPES = ['TIMESTAMP', 'DATETIME', 'DATETIME2', 'SMALLDATETIME'];
   var BOOLEAN_TYPES = ['BOOLEAN', 'BOOL', 'BIT'];
+
   function classify(typeStr) {
     if (!typeStr) return 'unknown';
     var bt = baseType(typeStr);
@@ -19,11 +21,14 @@
     if (TEXT_TYPES.indexOf(bt) !== -1) return 'text';
     return 'unknown';
   }
+
   function needsConversion(typeStr) {
     var cat = classify(typeStr);
     return cat === 'numeric' || cat === 'date' || cat === 'timestamp' || cat === 'boolean';
   }
+
   function genericTextCast(expr) { return 'CAST(' + expr + ' AS VARCHAR(4000))'; }
+
   function numericElseExpr(expr, dialect) {
     switch (dialect) {
       case 'Oracle': return 'TO_CHAR(' + expr + ')';
@@ -57,6 +62,7 @@
       default: return numericElseExpr(expr, dialect);
     }
   }
+
   function getCompatibleElseExpression(expr, dataType, dialect) {
     if (!dataType) return expr;
     var cat = classify(dataType);
@@ -68,6 +74,7 @@
       default: return expr;
     }
   }
+
   function wrapDateLiteral(literal, dialect) {
     switch (dialect) {
       case 'Oracle': return "TO_DATE(" + literal + ", 'YYYY-MM-DD')";
@@ -77,6 +84,7 @@
       default: return "CAST(" + literal + " AS DATE)";
     }
   }
+
   var API = { classify: classify, needsConversion: needsConversion, getCompatibleElseExpression: getCompatibleElseExpression, wrapDateLiteral: wrapDateLiteral };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_DATATYPE = API;

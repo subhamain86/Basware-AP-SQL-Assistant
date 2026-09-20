@@ -3,6 +3,7 @@
   var FILTER = (typeof module === 'object' && module.exports) ? require('./filter-engine.js') : root.APSQL_FILTER;
   var DECODE = (typeof module === 'object' && module.exports) ? require('./decode-engine.js') : root.APSQL_DECODE;
   var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
+
   function limitClause(dialect, n) {
     switch (dialect) { case 'SQL Server': return { top: 'TOP ' + n, tail: '' }; case 'Oracle': return { top: '', tail: 'FETCH FIRST ' + n + ' ROWS ONLY' }; default: return { top: '', tail: 'LIMIT ' + n }; }
   }
@@ -17,7 +18,13 @@
         var target = remaining[i];
         var rel = null;
         for (var j = 0; j < included.length; j++) { rel = engine.findRelationship(included[j], target); if (rel) break; }
-        if (rel) { joins.push({ table: target, on: rel }); included.push(target); remaining.splice(i, 1); i--; progress = true; }
+        if (rel) {
+          joins.push({ table: target, on: rel });
+          included.push(target);
+          remaining.splice(i, 1);
+          i--;
+          progress = true;
+        }
       }
     }
     var errors = remaining.map(function (t) { return 'No documented relationship was found to join "' + t + '" with the tables already selected.'; });
