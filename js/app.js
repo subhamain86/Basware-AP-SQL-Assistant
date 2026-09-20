@@ -277,32 +277,63 @@
     }).catch(function (err) { resultBox.innerHTML = '<div class="alert alert-danger mb-0">' + esc(err.message) + '</div>'; });
   });
 
-  /* ---------------- Operational password ---------------- */
+  /* ---------------- Operational password (V11.3.1: single centralized mechanism) ----------------
+     One passwordManager instance is used by EVERY password-protected feature: the Update Schema
+     unlock gate, the Change Operational Password form, the Forgot Password recovery form, and every
+     re-authentication modal below (Delete Schema, Delete Stored Schema, Save Relationship, Apply
+     Schema Update). All of them call the exact same verifyCurrentPassword()/changePassword() /
+     resetForgottenPassword() methods, so there is exactly one authentication behavior everywhere. */
   var passwordManager = APSQL_PASSWORD_MANAGER.createPasswordManager();
-  function renderPasswordCustomNote() { var note = $('passwordCustomStatusNote'); if (!note) return; note.textContent = passwordManager.isCustomPasswordSet() ? '(A custom password is currently set in this browser.)' : '(Currently using the default password for this browser.)'; }
+  function renderPasswordCustomNote() { var note = $('passwordCustomStatusNote'); if (!note) return; note.textContent = passwordManager.isCustomPasswordSet() ? '(A custom password is currently set in this browser.)' : '(Currently using the default operational password for this browser.)'; }
   renderPasswordCustomNote();
+
+  // ---- Update Schema unlock gate ----
+  if ($('updateSchemaPasswordBtn')) $('updateSchemaPasswordBtn').addEventListener('click', function () {
+    var pw = $('updateSchemaPasswordInput').value;
+    $('updateSchemaPasswordBtn').disabled = true;
+    passwordManager.verifyCurrentPassword(pw).then(function (ok) {
+      $('updateSchemaPasswordBtn').disabled = false;
+      if (ok) {
+        $('updateSchemaPasswordError').classList.add('d-none');
+        $('updateSchemaPasswordStep').classList.add('d-none'); $('updateSchemaWorkArea').classList.remove('d-none'); renderWorkflowSteps(1);
+        renderSyncStatus(); renderGithubSyncStatus(); renderAllSharedSchemaStrips(); renderTargetSchemaSelect(); renderSchemaStoreList();
+        pendingActiveSelection = null; renderDefaultSchemaSelector(); renderActiveSchemaSelector();
+        setTimeout(syncNavbarOffset, 50);
+      } else { $('updateSchemaPasswordError').classList.remove('d-none'); }
+    }).catch(function () { $('updateSchemaPasswordBtn').disabled = false; $('updateSchemaPasswordError').classList.remove('d-none'); });
+  });
+  if ($('updateSchemaPasswordInput')) $('updateSchemaPasswordInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('updateSchemaPasswordBtn').click(); } });
+
+  // ---- Forgot Password recovery (never reveals any password value; only lets the user set a new one) ----
+  if ($('forgotPasswordToggleBtn')) $('forgotPasswordToggleBtn').addEventListener('click', function () {
+    var panel = $('forgotPasswordPanel'); var isHidden = panel.classList.contains('d-none');
+    panel.classList.toggle('d-none', !isHidden);
+    if (isHidden) { $('forgotNewPasswordInput').value = ''; $('forgotConfirmPasswordInput').value = ''; $('forgotPasswordResultBox').innerHTML = ''; $('forgotNewPasswordInput').focus(); }
+  });
+  if ($('cancelForgotPasswordBtn')) $('cancelForgotPasswordBtn').addEventListener('click', function () { $('forgotPasswordPanel').classList.add('d-none'); });
+  if ($('confirmForgotPasswordBtn')) $('confirmForgotPasswordBtn').addEventListener('click', function () {
+    var newPw = $('forgotNewPasswordInput').value; var confirmPw = $('forgotConfirmPasswordInput').value; var resultBox = $('forgotPasswordResultBox');
+    $('confirmForgotPasswordBtn').disabled = true;
+    passwordManager.resetForgottenPassword(newPw, confirmPw).then(function (result) {
+      $('confirmForgotPasswordBtn').disabled = false;
+      if (!result.ok) { resultBox.innerHTML = '<div class="alert alert-danger mb-0 py-2 small">' + esc(result.error) + '</div>'; return; }
+      resultBox.innerHTML = '<div class="alert alert-success mb-0 py-2 small"><i class="bi bi-check-circle"></i> New password saved securely. Enter it above and click Unlock.</div>';
+      $('forgotNewPasswordInput').value = ''; $('forgotConfirmPasswordInput').value = '';
+      renderPasswordCustomNote();
+      $('updateSchemaPasswordInput').value = ''; $('updateSchemaPasswordInput').focus();
+    }).catch(function () { $('confirmForgotPasswordBtn').disabled = false; resultBox.innerHTML = '<div class="alert alert-danger mb-0 py-2 small">Something went wrong while saving the new password. Please try again.</div>'; });
+  });
+
+  // ---- Change Operational Password (Current → New → Confirm → Validate → Securely Save) ----
   if ($('changePasswordBtn')) $('changePasswordBtn').addEventListener('click', function () {
     var current = $('currentPasswordInput').value, next = $('newPasswordInput').value, confirmNext = $('confirmNewPasswordInput').value; var resultBox = $('passwordChangeResultBox');
+    $('changePasswordBtn').disabled = true;
     passwordManager.changePassword(current, next, confirmNext).then(function (result) {
+      $('changePasswordBtn').disabled = false;
       if (!result.ok) { resultBox.innerHTML = '<div class="alert alert-danger mb-0">' + esc(result.error) + '</div>'; return; }
-      resultBox.innerHTML = '<div class="alert alert-success mb-0">The operational password has been changed successfully in this browser.</div>';
+      resultBox.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> The operational password has been changed and saved securely. Use the new password for all future authentication in this browser.</div>';
       $('currentPasswordInput').value = ''; $('newPasswordInput').value = ''; $('confirmNewPasswordInput').value = ''; renderPasswordCustomNote();
-    });
-  });
-  // V11.3 fix: "Forgot password? Reset to default" recovery control on the LOCKED gate screen.
-  // Root cause of the previously reported "Password section is not opening" issue: if this browser's
-  // localStorage ever held a custom password hash (from an earlier session, an earlier version, or any
-  // other testing), the documented default password ("admin123") would correctly stop working, and there
-  // was previously no way in the UI to recover from this without already knowing the current password.
-  // This control lets any user get back in immediately, without needing to know the current password.
-  if ($('resetDefaultPasswordBtn')) $('resetDefaultPasswordBtn').addEventListener('click', function () {
-    var box = $('resetDefaultPasswordResultBox');
-    var confirmed = window.confirm('Reset the Update Schema password back to the default ("admin123")? Any custom password previously set in this browser will no longer work.');
-    if (!confirmed) return;
-    passwordManager.resetToDefault();
-    if ($('updateSchemaPasswordInput')) $('updateSchemaPasswordInput').value = '';
-    if ($('updateSchemaPasswordError')) $('updateSchemaPasswordError').classList.add('d-none');
-    if (box) { box.classList.remove('d-none'); box.innerHTML = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> Password reset. Enter <code>admin123</code> above and click Unlock.</div>'; }
+    }).catch(function () { $('changePasswordBtn').disabled = false; resultBox.innerHTML = '<div class="alert alert-danger mb-0">Something went wrong while changing the password. Please try again.</div>'; });
   });
 
   /* ---------------- Persistence status ---------------- */
@@ -444,7 +475,7 @@
   function moduleLabels() { return engine.getModuleLabels(); }
   function allTables() { return engine.getAllTables().slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }); }
 
-  /* ---------------- Navbar / layout basics ---------------- */
+  /* ---------------- Navbar / layout basics (V11.3.1: navbar sizing hardened via CSS; JS only measures height) ---------------- */
   function syncNavbarOffset() { var navbar = $('mainNavbar'); if (!navbar) return; document.documentElement.style.setProperty('--navbar-h', navbar.offsetHeight + 'px'); }
   syncNavbarOffset(); window.addEventListener('resize', syncNavbarOffset); window.addEventListener('load', syncNavbarOffset);
   setTimeout(syncNavbarOffset, 400);
@@ -1072,7 +1103,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap && aboutModalEl ? new window.bootstrap.Modal(aboutModalEl) : null;
   if ($('aboutMenuBtn')) $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.3.0'], ['Purpose', 'V11.3 focuses on a compact, scrollable, and easy-to-navigate interface across the whole application, plus a fix for the "Password section not opening" issue \u2014 a "Forgot password? Reset to default" recovery control has been added directly to the locked Update Schema gate, so a stale or forgotten custom password can never permanently lock anyone out. Table lists, column lists, filters, and the schema tree now use compact, internally scrollable panels instead of stretching the whole page, and the main content area uses a constrained, centered container for a more compact, professional feel. No SQL generation, schema handling, filter, validation, or synchronization logic was changed.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password. The default password is documented as "admin123" and can be restored at any time via the Forgot Password control on the locked Update Schema screen.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.3.1'], ['Purpose', 'V11.3.1 fixes the Update Schema password authentication flow and consolidates every password-protected feature in the application (Update Schema unlock, Operational Password change, Forgot Password recovery, and every re-authentication modal) onto a single, centralized password-validation mechanism. The operational password is verified using a modern, salted, one-way hash (PBKDF2-HMAC-SHA256, 150,000 iterations) \u2014 the password itself is never stored, logged, or displayed in plain text anywhere. The Forgot Password flow lets you set and securely save a brand-new password directly, without ever revealing any current or default password value. The navbar has also been hardened so it always fits within the screen at any width, without affecting the rest of the page layout.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. Operational password verification uses PBKDF2-HMAC-SHA256 with a random salt and a high iteration count \u2014 a one-way hash, so the password cannot be recovered from what is stored. The GitHub connection vault (a separate, optional feature) uses reversible AES-256-GCM encryption because it must recover an actual token value; its passphrase is never stored alongside the encrypted vault and must be shared with authorized users separately. No password value, default or custom, is ever displayed, logged, or exposed by this application under any circumstance.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
 
@@ -1080,18 +1111,6 @@
   var WORKFLOW_STEPS = ['Upload Document', 'Read Document', 'Detect Format', 'Detect Modules', 'Detect Tables', 'Detect Columns', 'Extract Metadata', 'Normalize Schema', 'Validate Schema', 'Show Preview', 'User Reviews Changes', 'Generate JSON', 'Validate JSON', 'Apply Schema Update'];
   function renderWorkflowSteps(activeIdx) { var el = $('workflowStepList'); if (!el) return; el.innerHTML = WORKFLOW_STEPS.map(function (s, i) { var cls = i < activeIdx ? 'text-bg-success' : (i === activeIdx ? 'text-bg-primary' : 'text-bg-light border'); return '<span class="badge ' + cls + '">' + (i + 1) + '. ' + s + '</span>'; }).join(''); }
   renderWorkflowSteps(0);
-  if ($('updateSchemaPasswordBtn')) $('updateSchemaPasswordBtn').addEventListener('click', function () {
-    var pw = $('updateSchemaPasswordInput').value;
-    passwordManager.verifyCurrentPassword(pw).then(function (ok) {
-      if (ok) {
-        $('updateSchemaPasswordStep').classList.add('d-none'); $('updateSchemaWorkArea').classList.remove('d-none'); renderWorkflowSteps(1);
-        renderSyncStatus(); renderGithubSyncStatus(); renderAllSharedSchemaStrips(); renderTargetSchemaSelect(); renderSchemaStoreList();
-        pendingActiveSelection = null; renderDefaultSchemaSelector(); renderActiveSchemaSelector();
-        setTimeout(syncNavbarOffset, 50);
-      }
-      else $('updateSchemaPasswordError').classList.remove('d-none');
-    });
-  });
   if ($('sharedSchemaRefreshBtn')) $('sharedSchemaRefreshBtn').addEventListener('click', function () { checkSharedSchema(); });
   function triggerDownload(blob, filename) { var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { URL.revokeObjectURL(url); }, 2000); }
   if ($('downloadCurrentJsonBtn')) $('downloadCurrentJsonBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaJsonBlob(targetSchemaEntry().schema), 'current-schema.json'); });
@@ -1193,45 +1212,41 @@
     quickstart: [
       { sel: '[data-tour="hamburger"]', place: 'bottom', title: 'Open the Menu', body: 'What it does: Opens the side menu, which lists every page in the app.<br>Why it helps: This is how you get to the Read Only Query Builder, Query Builder for CR, Used Schema, Update Schema, and Error Rectifier.<br>What to do: Select this button any time you want to switch pages.' },
       { sel: '#syncScheduleNavGroup', place: 'bottom', title: 'Schema Synchronization Schedule', body: 'What it does: Chooses how often this browser automatically checks the Live Shared Schema, a linked file, and GitHub for updates.<br>What to do: Pick a frequency, or "Manual only" to disable automatic checks.' },
-      { sel: '#qsModuleChips', place: 'bottom', title: 'Areas covered by the active schema', body: 'What it does: Lists every module documented across your currently Active schema(s).<br>Why it helps: Gives you a quick sense of what data is available before you start building a query.' },
-      { sel: '#qsExampleGrid', place: 'top', title: 'Try a ready-made example', body: 'What it does: Each card is a pre-written request.<br>Why it helps: Examples are the fastest way to see how Describe What You Need turns plain language into validated SQL.<br>What to do: Select any card that looks interesting.' }
+      { sel: '#qsModuleChips', place: 'bottom', title: 'Areas covered by the active schema', body: 'What it does: Lists every module documented across your currently Active schema(s).' },
+      { sel: '#qsExampleGrid', place: 'top', title: 'Try a ready-made example', body: 'What it does: Each card is a pre-written request.<br>What to do: Select any card that looks interesting.' }
     ],
     builder: [
       { sel: '#promptInput', place: 'bottom', title: 'Describe What You Need', body: 'What it does: A free-text box where you describe your requirement in plain language.<br>What to do: Type your requirement, then press Ctrl+Enter or select Build Query.' },
-      { sel: '#dialectSel', place: 'bottom', title: 'SQL dialect', body: 'What it does: Chooses which database flavor the generated SQL should target.<br>What to do: Pick the dialect that matches your target database before building.' },
-      { sel: '#manualTabs', place: 'bottom', title: 'Tables & Columns, Advanced Options, Requirements', body: 'What it does: Three tabs for manual, precise control.<br>What to do: Select a tab to configure that aspect of the query.' },
-      { sel: '#tableListGrid', place: 'top', title: 'Scrollable table list', body: 'What it does: Shows every table you can select. This list now scrolls within its own compact panel instead of stretching the page, so the rest of the builder always stays within reach.' },
-      { sel: '#columnListBody', place: 'top', title: 'Scrollable column list', body: 'What it does: Shows the columns for your selected table. This list also scrolls within a fixed-height panel, keeping the page compact even for wide tables.' },
-      { sel: '#readOnlyFilterGroup', place: 'top', title: 'Filters card', body: 'What it does: Add any number of filter conditions here. The Filters area is its own compact, scrollable card so a long list of conditions never stretches the whole page.' },
+      { sel: '#dialectSel', place: 'bottom', title: 'SQL dialect', body: 'What it does: Chooses which database flavor the generated SQL should target.' },
+      { sel: '#manualTabs', place: 'bottom', title: 'Tables & Columns, Advanced Options, Requirements', body: 'What it does: Three tabs for manual, precise control.' },
       { sel: '#generateFromDescriptionBtn', place: 'bottom', title: 'Build Query (from your description)', body: 'What it does: Interprets the text above and immediately builds the SQL.' },
       { sel: '#generateBtn', place: 'top', title: 'Build Query (from manual selections)', body: 'What it does: Generates SQL from whatever you have configured across the tabs.' },
-      { sel: '#resultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the validated, ready-to-copy SQL in a scrollable code panel.<br>What to do: Use Copy Result, Optimize, or Explain This Query.' }
+      { sel: '#resultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the validated, ready-to-copy SQL.' }
     ],
     crbuilder: [
       { sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: 'What it does: Selects whether you are drafting an INSERT, UPDATE, or DELETE statement.' },
       { sel: '#crDescriptionInput', place: 'bottom', title: 'Describe the change', body: 'What it does: A free-text box for describing an INSERT, UPDATE, or DELETE requirement in plain language.' },
       { sel: '#crTableSelect', place: 'bottom', title: 'Table', body: 'What it does: Chooses which table this Change Request targets.' },
       { sel: '#crManualTabs', place: 'top', title: 'Tables & Columns / Requirements', body: 'What it does: Holds the columns/values or WHERE conditions for your chosen command.' },
-      { sel: '#crFilterGroup', place: 'top', title: 'Filters card (WHERE conditions)', body: 'What it does: The WHERE conditions for UPDATE/DELETE live in their own compact, scrollable card, separated from column/value configuration above.' },
       { sel: '#crBuildBtn', place: 'top', title: 'Build Query', body: 'What it does: Generates the final Change Request SQL text.' },
-      { sel: '#crResultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the generated Change Request SQL in a scrollable code panel.' }
+      { sel: '#crResultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the generated Change Request SQL.' }
     ],
     usedschema: [
-      { sel: '#usedSchemaActiveSelector', place: 'bottom', title: 'Select Stored Active Schemas', body: 'What it does: Every schema stored in the browser is listed here with a checkbox. Ticking a box makes that schema Active; unticking makes it Inactive without deleting it.<br>What to do: Tick or untick any schema \u2014 the Default schema (badge) is always active and cannot be unticked here.<br>Then: The change applies immediately across the whole app.' },
-      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: 'What it does: A quick summary of the merged schema currently in use (built from every Active schema).' },
+      { sel: '#usedSchemaActiveSelector', place: 'bottom', title: 'Select Stored Active Schemas', body: 'What it does: Every schema stored in the browser is listed here with a checkbox.' },
+      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: 'What it does: A quick summary of the merged schema currently in use.' },
       { sel: '#schemaSearchInput', place: 'bottom', title: 'Search the schema', body: 'What it does: A live search box across every table, column, and description.' },
-      { sel: '#schemaTree', place: 'top', title: 'Browse tables and columns', body: 'What it does: An expandable tree of every module, table, and column in the active schema.' }
+      { sel: '#schemaTree', place: 'top', title: 'Browse tables and columns', body: 'What it does: An expandable tree of every module, table, and column.' }
     ],
     updateschema_locked: [
-      { sel: '#updateSchemaPasswordStep', place: 'bottom', title: 'Administrator access', body: 'What it does: Update Schema is a password-protected administrator action that never connects to a production database. Default password: admin123.<br>Forgot it or is it not working? Use the "Forgot password? Reset to default" link right below the Unlock button \u2014 it clears any custom/stale password stored in this browser and restores admin123 immediately.' }
+      { sel: '#updateSchemaPasswordStep', place: 'bottom', title: 'Administrator access', body: 'What it does: Update Schema is a password-protected administrator action that never connects to a production database.<br>Forgot your password? Use the "Forgot password?" link below the Unlock button \u2014 it lets you set a brand-new password immediately, without needing to know the old one, and never displays any password value.' }
     ],
     updateschema_unlocked: [
       { sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Schema state at a glance', body: 'What it does: Shows the current Default schema and how many schemas are Active out of the total Stored.' },
-      { sel: '#defaultSchemaSelectorBody', place: 'bottom', title: 'Select Default Schema', body: 'What it does: Choose exactly one stored schema as the Default. The Default schema is always Active, and is the one updated automatically by Live Shared Schema, linked-file, and GitHub sync.' },
-      { sel: '#activeSchemaSelectorBody', place: 'bottom', title: 'Select Active Schemas', body: 'What it does: Tick any number of stored schemas to make them Active app-wide; untick to make them Inactive. The Default schema is always included.<br>What to do: Adjust the checkboxes, then click "Save Active Schema Selection" below to apply.' },
-      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing (uploading into, downloading, or deleting), add a new one, or delete one.' },
-      { sel: '#updateSchemaFileInput', place: 'bottom', title: 'Smart Schema Import Engine', body: 'What it does: Reads a JSON or CSV file describing your database schema and merges it into the schema selected under "Working with" above.' },
-      { sel: '#changePasswordBtn', place: 'top', title: 'Operational Password', body: 'What it does: Changes the password required to unlock this Update Schema section, for this browser.' },
+      { sel: '#defaultSchemaSelectorBody', place: 'bottom', title: 'Select Default Schema', body: 'What it does: Choose exactly one stored schema as the Default.' },
+      { sel: '#activeSchemaSelectorBody', place: 'bottom', title: 'Select Active Schemas', body: 'What it does: Tick any number of stored schemas to make them Active app-wide.' },
+      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing.' },
+      { sel: '#updateSchemaFileInput', place: 'bottom', title: 'Smart Schema Import Engine', body: 'What it does: Reads a JSON or CSV file describing your database schema.' },
+      { sel: '#changePasswordBtn', place: 'top', title: 'Operational Password', body: 'What it does: Changes the password required to unlock this Update Schema section, using the same secure hashing mechanism used everywhere else in the app.' },
       { sel: '#deleteSchemaBtn', place: 'top', title: 'Danger Zone', body: 'What it does: Permanently removes every table, column, and relationship from the schema currently selected under "Working with".' }
     ],
     errorrectifier: [

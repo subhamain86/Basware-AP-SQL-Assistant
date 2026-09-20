@@ -80,12 +80,10 @@
     function listEntries() { return state.entries.slice(); }
     function getEntry(id) { return state.entries.filter(function (e) { return e.id === id; })[0] || null; }
 
-    // ---- Legacy-compatible single-active accessors (kept for any code paths still expecting one) ----
     function getActiveId() { return state.defaultId; }
     function getActiveEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
     function getActiveSchema() { var e = getActiveEntry(); return e ? e.schema : null; }
 
-    // ---- Multi-schema state accessors ----
     function getDefaultId() { return state.defaultId; }
     function getDefaultEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
     function getActiveIds() { return state.activeIds.slice(); }

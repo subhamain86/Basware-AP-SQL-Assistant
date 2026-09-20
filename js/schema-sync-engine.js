@@ -26,8 +26,7 @@
         var parsed;
         try { parsed = JSON.parse(text); } catch (e) { throw new Error('The linked shared schema file does not contain valid JSON.'); }
         var tables = Array.isArray(parsed) ? parsed : parsed.tables;
-        if (!Array.isArray(tables)) throw new Error('The linked shared schema file does not look like a valid AP-SQL Assistant schema.');
-        return { schema: parsed, lastModified: file.lastModified };
+        if (!Array.isArray(tables)) throw new Error('The linked shared schema file does not look like a valid AP-SQL Assistant schema.'); return { schema: parsed, lastModified: file.lastModified };
       });
     });
   }
