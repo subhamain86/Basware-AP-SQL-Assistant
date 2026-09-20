@@ -24,7 +24,6 @@ body { padding-top: var(--navbar-h, 64px); }
 .app-logo-badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; flex: 0 0 auto; line-height: 0; transform-style: preserve-3d; transform: rotateX(8deg) rotateY(-10deg); box-shadow: 0 10px 18px rgba(20,30,70,.28), 0 3px 0 rgba(20,30,70,.35), inset 0 1px 0 rgba(255,255,255,.4); transition: transform .22s ease, box-shadow .22s ease; }
 .app-logo-badge:hover { transform: rotateX(14deg) rotateY(-18deg) translateY(-2px) scale(1.05); box-shadow: 0 16px 26px rgba(20,30,70,.34), 0 4px 0 rgba(20,30,70,.4), inset 0 1px 0 rgba(255,255,255,.45); }
 .app-logo-badge.app-logo-badge-lg { border-radius: 18px; }
-.app-logo-svg { display: block; }
 .hero-brand-row { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
 .hero-brand-row .builder-heading { margin-bottom: .15rem; }
 .icon-badge { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; flex: 0 0 auto; color: #fff; font-size: .95rem; box-shadow: 0 3px 7px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.35), inset 0 -2px 3px rgba(0,0,0,.18); transition: transform .15s ease, box-shadow .15s ease; }
@@ -58,8 +57,6 @@ h2.h6 > .icon-badge, h3.h6 > .icon-badge { margin-right: .5rem; vertical-align: 
 .creator-signature-wrap { display: inline-flex; align-items: baseline; gap: .35rem; white-space: nowrap; }
 .creator-signature-label { font-size: .68rem; color: var(--bs-secondary-color); opacity: .85; }
 .creator-signature { font-family: 'Dancing Script', 'Segoe Script', cursive; font-weight: 700; font-size: 1.32rem; line-height: 1; background: linear-gradient(100deg, var(--ink), var(--brand) 60%, var(--ink-dark)); -webkit-background-clip: text; background-clip: text; color: transparent; transform: rotate(-2deg); display: inline-block; filter: drop-shadow(0 1px 0 rgba(0,0,0,.06)); }
-.creator-signature-flourish { display: block; margin-top: -4px; opacity: .8; }
-.creator-signature-flourish path { stroke: var(--brand); }
 footer .creator-signature-wrap { justify-content: center; }
 footer .creator-signature { font-size: 1.5rem; }
 .qs-example-card { cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; height: 100%; }
@@ -247,8 +244,6 @@ pre.sql-output { background: #10131c; color: #e6ecff; border-radius: 10px; paddi
 [data-bs-theme="dark"] #tourPopup { background: rgba(30,34,44,.85); color: #f1f1f1; }
 #tourDots i { width: 6px; height: 6px; border-radius: 50%; background: #c6d2ea; display: inline-block; margin-right: 4px; }
 #tourDots i.on { background: var(--brand); }
-
-/* ---------------- V10.7: Multiple Schema Store ---------------- */
 .schema-store-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .75rem; }
 .schema-store-item { border: 1px solid var(--bs-border-color); border-radius: 10px; padding: .65rem .85rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; transition: border-color .15s ease, background .15s ease; }
 .schema-store-item.active { border-color: var(--brand); background: rgba(47,111,237,.06); }
@@ -267,8 +262,6 @@ pre.sql-output { background: #10131c; color: #e6ecff; border-radius: 10px; paddi
 .schema-store-empty { font-size: .84rem; color: var(--bs-secondary-color); padding: .75rem; text-align: center; border: 1px dashed var(--bs-border-color); border-radius: 10px; }
 .add-schema-form-box { border: 1px dashed var(--brand); border-radius: 10px; padding: .75rem .9rem; margin-top: .6rem; background: rgba(47,111,237,.05); }
 [data-bs-theme="dark"] .add-schema-form-box { background: rgba(47,111,237,.10); }
-
-/* ---------------- V10.7: Secure GitHub Vault ---------------- */
 .vault-status-line { display: flex; align-items: flex-start; gap: .5rem; padding: .6rem .8rem; border-radius: 8px; font-size: .85rem; margin-bottom: .6rem; }
 .vault-status-line.level-unset { background: var(--bs-tertiary-bg); }
 .vault-status-line.level-published { background: rgba(34,163,90,.10); color: #146c3a; }
@@ -281,12 +274,8 @@ pre.sql-output { background: #10131c; color: #e6ecff; border-radius: 10px; paddi
 .vault-form-row input { flex: 1 1 220px; min-width: 180px; }
 .vault-unsupported-note { font-size: .78rem; color: var(--bs-secondary-color); padding: .5rem .7rem; border-radius: 6px; background: var(--bs-tertiary-bg); }
 .vault-hint-note { font-size: .74rem; color: var(--bs-secondary-color); margin-top: -.3rem; margin-bottom: .5rem; }
-
-/* ---------------- V10.7: Sync Schedule ---------------- */
 .sync-schedule-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .sync-schedule-current { font-size: .8rem; color: var(--bs-secondary-color); margin-top: .4rem; }
-
-/* ---------------- V10.7: Operational Password Management ---------------- */
 .password-change-box { border: 1px dashed var(--bs-border-color); border-radius: 10px; padding: .75rem .9rem; margin-top: .5rem; }
 .password-change-row { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .5rem; }
 .password-change-row input { flex: 1 1 200px; min-width: 160px; }

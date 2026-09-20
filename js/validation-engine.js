@@ -23,10 +23,7 @@
       var t = cond.table || baseTables[0];
       if (!validateTableRef(engine, t, errors)) { ok = false; return; }
       if (!validateColumnRef(engine, t, cond.column, errors)) { ok = false; return; }
-      if (baseTables.indexOf(t) === -1) {
-        var relatedToAny = baseTables.some(function (bt) { return !!engine.findRelationship(bt, t); });
-        if (!relatedToAny) { errors.push('Filter column "' + cond.column + '" is on table "' + t + '", which is not related to the selected table(s).'); ok = false; }
-      }
+      if (baseTables.indexOf(t) === -1) { var relatedToAny = baseTables.some(function (bt) { return !!engine.findRelationship(bt, t); }); if (!relatedToAny) { errors.push('Filter column "' + cond.column + '" is on table "' + t + '", which is not related to the selected table(s).'); ok = false; } }
     });
     return ok;
   }
@@ -34,11 +31,7 @@
     var errors = []; var tables = request.tables || [];
     if (!tables.length) errors.push('At least one table must be selected (or determined from your description).');
     tables.forEach(function (t) { validateTableRef(engine, t, errors); });
-    (request.columns || []).forEach(function (c) {
-      if (!validateTableRef(engine, c.table, errors)) return;
-      if (c.aggregate && c.column === '*') return;
-      validateColumnRef(engine, c.table, c.column, errors);
-    });
+    (request.columns || []).forEach(function (c) { if (!validateTableRef(engine, c.table, errors)) return; if (c.aggregate && c.column === '*') return; validateColumnRef(engine, c.table, c.column, errors); });
     validateFilterGroup(engine, request.filterGroup, tables, errors);
     return { valid: errors.length === 0, errors: errors };
   }
@@ -56,9 +49,8 @@
     } else if (request.command === 'DELETE') {
       if (!request.allowNoWhere && (!request.filterGroup || !request.filterGroup.conditions || request.filterGroup.conditions.length === 0)) errors.push('A WHERE condition is required to identify which records should be updated or deleted.');
       validateFilterGroup(engine, request.filterGroup, [request.table], errors);
-    } else if (request.command === 'SELECT') {
-      validateFilterGroup(engine, request.filterGroup, [request.table], errors);
-    } else { errors.push('Unknown command type "' + request.command + '".'); }
+    } else if (request.command === 'SELECT') { validateFilterGroup(engine, request.filterGroup, [request.table], errors); }
+    else { errors.push('Unknown command type "' + request.command + '".'); }
     return { valid: errors.length === 0, errors: errors, warnings: warnings };
   }
   var API = { validateTableRef: validateTableRef, validateColumnRef: validateColumnRef, validateRelationship: validateRelationship, validateFilterGroup: validateFilterGroup, validateSelectRequest: validateSelectRequest, validateCrRequest: validateCrRequest };

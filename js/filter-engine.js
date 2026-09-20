@@ -15,7 +15,6 @@
   function isNumericLiteral(v) { return /^-?\d+(\.\d+)?$/.test(String(v).trim()); }
   function sqlLiteral(value) { if (value === null || value === undefined || value === '') return "''"; if (isNumericLiteral(value)) return String(value).trim(); return "'" + String(value).replace(/'/g, "''") + "'"; }
   function qualify(condition) { return condition.table ? (condition.table + '.' + condition.column) : condition.column; }
-
   function splitMultiValues(raw) {
     if (raw == null) return [];
     if (Array.isArray(raw)) return raw.map(function (v) { return String(v).trim(); }).filter(function (v) { return v.length > 0; });
@@ -24,7 +23,6 @@
       return s;
     });
   }
-
   function buildConditionSql(condition, dialect, errors) {
     var op = getOperator(condition.operator);
     if (!op) { if (errors) errors.push('Unknown filter condition "' + condition.operator + '".'); return null; }
