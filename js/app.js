@@ -18,14 +18,17 @@
 
   var relationshipStore = APSQL_RELATIONSHIPS.createRelationshipStore();
   var engine;
-  function currentSchema() { return schemaStore.getActiveSchema() || { tables: [] }; }
-  function setActiveSchemaObject(schemaObj) { var entry = schemaStore.getActiveEntry(); if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj }); }
+  // V11.1: "currentSchema()" now returns the MERGED schema across every Active schema (default first),
+  // so SQL generation / Query Builder / Error Rectifier only ever see schemas configured as Active.
+  function currentSchema() { return schemaStore.getMergedActiveSchema() || { tables: [] }; }
+  function setDefaultSchemaObject(schemaObj) { var entry = schemaStore.getDefaultEntry(); if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj }); }
   function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); }
   rebuildEngine();
 
   var decodeStore = APSQL_DECODE.createDecodeStore();
 
   /* ---------------- Live Shared Schema ---------------- */
+  // Sync sources (Live Shared Schema / linked file / GitHub) always write into the Default Schema entry.
   var sharedSchemaChecked = false, sharedSchemaFound = false, sharedSchemaError = null;
   var SHARED_SCHEMA_PATH = APSQL_SHARED_SCHEMA.DEFAULT_SHARED_SCHEMA_PATH;
   function renderSharedSchemaStrip(elId) {
@@ -53,7 +56,7 @@
       var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
       var validation = window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate);
       if (!validation.valid) { sharedSchemaFound = false; sharedSchemaError = 'The published shared schema failed validation, so it was ignored.'; renderAllSharedSchemaStrips(); return; }
-      sharedSchemaFound = true; setActiveSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderAllSharedSchemaStrips();
+      sharedSchemaFound = true; setDefaultSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderAllSharedSchemaStrips();
     }).catch(function () { sharedSchemaChecked = true; sharedSchemaFound = false; renderAllSharedSchemaStrips(); });
   }
   renderAllSharedSchemaStrips();
@@ -87,22 +90,24 @@
         if (lastKnownFileModified !== null && result.lastModified === lastKnownFileModified) { renderSyncStatus(isManual ? 'Checked just now.' : undefined); return; }
         var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
         if (!window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate).valid) { renderSyncStatus(); return; }
-        setActiveSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+        setDefaultSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
         renderSyncStatus(isManual ? 'Checked the shared file just now.' : 'Schema synced from the shared file.');
       });
     }).catch(function (err) { if (isManual) { syncError = err.message; renderSyncStatus(); } });
   }
   function syncWriteCurrentSchemaIfLinked() {
     if (!linkedHandle) return;
+    var defaultEntry = schemaStore.getDefaultEntry(); if (!defaultEntry) return;
     APSQL_SYNC.verifyPermissionSilent(linkedHandle, 'readwrite').then(function (granted) {
       if (!granted) { syncNeedsReconnect = true; renderSyncStatus(); return; }
-      return APSQL_SYNC.writeSchemaToHandle(linkedHandle, currentSchema()).then(function () { return APSQL_SYNC.readSchemaFromHandle(linkedHandle); }).then(function (result) { lastKnownFileModified = result.lastModified; renderSyncStatus(); });
+      return APSQL_SYNC.writeSchemaToHandle(linkedHandle, defaultEntry.schema).then(function () { return APSQL_SYNC.readSchemaFromHandle(linkedHandle); }).then(function (result) { lastKnownFileModified = result.lastModified; renderSyncStatus(); });
     }).catch(function (err) { syncError = 'Could not write to the linked shared file: ' + err.message; renderSyncStatus(); });
   }
   function linkNewSharedFile() {
     if (!window.showSaveFilePicker) return;
+    var defaultEntry = schemaStore.getDefaultEntry();
     window.showSaveFilePicker({ suggestedName: 'ap-sql-assistant-schema.json', types: [{ description: 'AP-SQL Assistant Schema', accept: { 'application/json': ['.json'] } }] })
-      .then(function (handle) { linkedHandle = handle; syncNeedsReconnect = false; return APSQL_SYNC.writeSchemaToHandle(handle, currentSchema()).then(function () { return APSQL_SYNC.readSchemaFromHandle(handle); }).then(function (r) { lastKnownFileModified = r.lastModified; return syncHandleStore.saveHandle(handle); }); })
+      .then(function (handle) { linkedHandle = handle; syncNeedsReconnect = false; return APSQL_SYNC.writeSchemaToHandle(handle, defaultEntry ? defaultEntry.schema : { tables: [] }).then(function () { return APSQL_SYNC.readSchemaFromHandle(handle); }).then(function (r) { lastKnownFileModified = r.lastModified; return syncHandleStore.saveHandle(handle); }); })
       .then(function () { syncLastCheckedAt = new Date(); renderSyncStatus('Created and linked the shared schema file.'); })
       .catch(function (err) { if (err && err.name === 'AbortError') return; syncError = err.message; renderSyncStatus(); });
   }
@@ -116,7 +121,7 @@
           return APSQL_SYNC.readSchemaFromHandle(handle).then(function (result) {
             var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
             if (!window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate).valid) throw new Error('That file does not contain a valid AP-SQL Assistant schema.');
-            linkedHandle = handle; syncNeedsReconnect = false; setActiveSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified; return syncHandleStore.saveHandle(handle);
+            linkedHandle = handle; syncNeedsReconnect = false; setDefaultSchemaObject(result.schema); rebuildEngine(); lastKnownFileModified = result.lastModified; return syncHandleStore.saveHandle(handle);
           });
         });
       })
@@ -160,15 +165,16 @@
   function connectGithub() {
     var config = { owner: ($('githubOwnerInput').value || '').trim(), repo: ($('githubRepoInput').value || '').trim(), branch: ($('githubBranchInput').value || '').trim() || 'main', path: ($('githubPathInput').value || '').trim(), token: ($('githubTokenInput').value || '').trim() };
     if (!APSQL_GITHUB_SYNC.isConfigComplete(config)) { githubError = 'Please fill in the repository owner, name, file path, and a Personal Access Token before connecting.'; renderGithubSyncStatus(); return; }
+    var defaultEntry = schemaStore.getDefaultEntry();
     APSQL_GITHUB_SYNC.fetchRemoteSchema(config).then(function (result) {
       if (result.exists) {
         var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
         if (!window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate).valid) throw new Error('That file does not contain a valid AP-SQL Assistant schema.');
-        githubConfig = config; githubLastSha = result.sha; setActiveSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+        githubConfig = config; githubLastSha = result.sha; setDefaultSchemaObject(result.schema); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
         return null;
       }
       githubConfig = config;
-      return APSQL_GITHUB_SYNC.pushSchemaToGitHub(config, currentSchema(), null).then(function (pushResult) { githubLastSha = pushResult.sha; });
+      return APSQL_GITHUB_SYNC.pushSchemaToGitHub(config, defaultEntry ? defaultEntry.schema : { tables: [] }, null).then(function (pushResult) { githubLastSha = pushResult.sha; });
     }).then(function () { githubConfigStore.saveConfig(config); githubError = null; githubConflict = false; githubLastCheckedAt = new Date(); renderGithubSyncStatus('Connected to GitHub and synced.'); })
       .catch(function (err) { githubConfig = null; githubError = err.message; renderGithubSyncStatus(); });
   }
@@ -181,16 +187,17 @@
       if (githubLastSha !== null && result.sha === githubLastSha) { renderGithubSyncStatus(isManual ? 'Checked GitHub just now.' : undefined); return; }
       var tablesToValidate = Array.isArray(result.schema) ? result.schema : result.schema.tables;
       if (!window.APSQL_SCHEMA_TOOLS.validateSchema(tablesToValidate).valid) { renderGithubSyncStatus(); return; }
-      setActiveSchemaObject(result.schema); rebuildEngine(); githubLastSha = result.sha; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); githubError = null; githubConflict = false;
+      setDefaultSchemaObject(result.schema); rebuildEngine(); githubLastSha = result.sha; refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); githubError = null; githubConflict = false;
       renderGithubSyncStatus(isManual ? 'Checked GitHub just now.' : 'Schema synced from GitHub.');
     }).catch(function (err) { if (isManual) { githubError = err.message; renderGithubSyncStatus(); } });
   }
   function pushToGithubIfConfigured() {
     if (!githubConfig) return;
-    APSQL_GITHUB_SYNC.pushSchemaToGitHub(githubConfig, currentSchema(), githubLastSha).then(function (result) { githubLastSha = result.sha; githubError = null; githubConflict = false; renderGithubSyncStatus(); })
+    var defaultEntry = schemaStore.getDefaultEntry(); if (!defaultEntry) return;
+    APSQL_GITHUB_SYNC.pushSchemaToGitHub(githubConfig, defaultEntry.schema, githubLastSha).then(function (result) { githubLastSha = result.sha; githubError = null; githubConflict = false; renderGithubSyncStatus(); })
       .catch(function (err) {
         if (!err.conflict) { githubError = err.message; renderGithubSyncStatus(); return; }
-        return APSQL_GITHUB_SYNC.fetchRemoteSchema(githubConfig).then(function (remote) { githubLastSha = remote.exists ? remote.sha : null; return APSQL_GITHUB_SYNC.pushSchemaToGitHub(githubConfig, currentSchema(), githubLastSha); })
+        return APSQL_GITHUB_SYNC.fetchRemoteSchema(githubConfig).then(function (remote) { githubLastSha = remote.exists ? remote.sha : null; return APSQL_GITHUB_SYNC.pushSchemaToGitHub(githubConfig, defaultEntry.schema, githubLastSha); })
           .then(function (result2) { githubLastSha = result2.sha; githubError = null; githubConflict = false; renderGithubSyncStatus(); })
           .catch(function (err2) { githubConflict = !!err2.conflict; githubError = err2.conflict ? 'Someone else updated the shared schema file again just now. Click "Sync Now" to fetch the latest version.' : err2.message; renderGithubSyncStatus(); });
       });
@@ -204,7 +211,7 @@
   })();
   (function defaultGithubPathToSharedPath() { var pathInput = $('githubPathInput'); if (pathInput && !pathInput.value) pathInput.value = SHARED_SCHEMA_PATH; })();
 
-  /* ---------------- Selectable sync schedule (V11: control now lives in the navbar) ---------------- */
+  /* ---------------- Selectable sync schedule (navbar, clearly labeled as of V11.1) ---------------- */
   var syncScheduleSelectedId = APSQL_SYNC_SCHEDULE.loadSelectedOptionId();
   var syncIntervalHandle = null;
   function runAllAutomaticSyncChecks() { if (document.hidden) return; checkSharedSchema(); checkLinkedFileForUpdates(false); checkGithubForUpdates(false); }
@@ -286,50 +293,130 @@
     });
   });
 
-  /* ---------------- Persistence status / multi-schema store ---------------- */
+  /* ---------------- Persistence status ---------------- */
   function persistCurrentSchema() { schemaStore.persist(); syncWriteCurrentSchemaIfLinked(); pushToGithubIfConfigured(); }
   function renderSchemaPersistenceStatus() {
-    var el = $('schemaPersistenceStatus'); if (!el) return; var entry = schemaStore.getActiveEntry();
-    el.innerHTML = '<i class="bi bi-database-check"></i> Currently working with <strong>' + esc(entry ? entry.name : 'an unnamed schema') + '</strong> (' + schemaStore.count() + ' schema' + (schemaStore.count() === 1 ? '' : 's') + ' stored in this browser). Applying an update or deleting content is saved automatically from now on.';
+    var el = $('schemaPersistenceStatus'); if (!el) return;
+    var defaultEntry = schemaStore.getDefaultEntry(); var activeCount = schemaStore.getActiveIds().length;
+    el.innerHTML = '<i class="bi bi-database-check"></i> Default schema: <strong>' + esc(defaultEntry ? defaultEntry.name : 'none') + '</strong> &middot; ' + activeCount + ' active schema' + (activeCount === 1 ? '' : 's') + ' of ' + schemaStore.count() + ' stored. Applying an update or deleting content is saved automatically from now on.';
   }
   renderSchemaPersistenceStatus();
+
+  /* ---------------- V11.1: Schema state badges & shared list renderers ---------------- */
+  function schemaStateBadgeHtml(id) {
+    var state = schemaStore.getSchemaState(id);
+    if (state === 'default') return '<span class="badge text-bg-primary schema-state-badge">Default</span>';
+    if (state === 'active') return '<span class="badge text-bg-success schema-state-badge">Active</span>';
+    return '<span class="badge text-bg-secondary schema-state-badge">Inactive</span>';
+  }
+
+  // ---- Used Schema page: "Select Stored Active Schemas" (multi-select, immediate effect, no admin password) ----
+  function renderUsedSchemaActiveSelector() {
+    var box = $('usedSchemaActiveSelector'); if (!box) return;
+    var entries = schemaStore.listEntries();
+    if (!entries.length) { box.innerHTML = '<div class="schema-store-empty">No schemas stored yet. Add one under Update Schema.</div>'; return; }
+    box.innerHTML = entries.map(function (e) {
+      var st = APSQL.createEngine(e.schema).getStatus();
+      var isDefault = schemaStore.isDefault(e.id); var isActive = schemaStore.isActive(e.id);
+      return '<div class="schema-store-item' + (isActive ? ' active' : '') + '" data-entry-id="' + e.id + '">'
+        + '<div class="schema-store-item-main">'
+        + '<label class="d-flex align-items-center gap-2 mb-1"><input type="checkbox" class="form-check-input schema-active-checkbox" data-entry-id="' + e.id + '"' + (isActive ? ' checked' : '') + (isDefault ? ' disabled title="The Default Schema is always active"' : '') + '>'
+        + '<span class="schema-store-item-name"><i class="bi bi-diagram-3"></i> ' + esc(e.name) + ' ' + schemaStateBadgeHtml(e.id) + '</span></label>'
+        + '<div class="schema-store-item-meta"><span>Version: ' + esc(st.schemaVersion || '\u2014') + '</span><span>Tables: ' + st.tableCount + '</span><span>Source: ' + esc(e.source) + '</span></div>'
+        + '</div></div>';
+    }).join('');
+    box.querySelectorAll('.schema-active-checkbox').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var id = cb.getAttribute('data-entry-id');
+        var ok = schemaStore.setEntryActive(id, cb.checked);
+        if (!ok) { cb.checked = true; return; }
+        rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderUsedSchemaActiveSelector();
+      });
+    });
+  }
+
+  // ---- Update Schema (admin) page: "Select Default Schema" (single) ----
+  function renderDefaultSchemaSelector() {
+    var box = $('defaultSchemaSelectorBody'); if (!box) return;
+    var entries = schemaStore.listEntries();
+    if (!entries.length) { box.innerHTML = '<div class="schema-store-empty">No schemas stored yet.</div>'; return; }
+    box.innerHTML = entries.map(function (e) {
+      var isDefault = schemaStore.isDefault(e.id);
+      return '<label class="define-relationship-row default-schema-row"><input type="radio" name="defaultSchemaRadio" value="' + e.id + '"' + (isDefault ? ' checked' : '') + '> <span>' + esc(e.name) + '</span>' + schemaStateBadgeHtml(e.id) + '</label>';
+    }).join('');
+    box.querySelectorAll('input[name="defaultSchemaRadio"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        schemaStore.setDefaultId(r.value); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+        renderDefaultSchemaSelector(); renderActiveSchemaSelector(); renderUsedSchemaActiveSelector(); renderTargetSchemaSelect();
+        $('defaultSchemaSavedNote').classList.remove('d-none'); $('defaultSchemaSavedNote').textContent = 'Default schema updated to "' + (schemaStore.getEntry(r.value) || {}).name + '".';
+        setTimeout(function () { $('defaultSchemaSavedNote').classList.add('d-none'); }, 3500);
+      });
+    });
+  }
+
+  // ---- Update Schema (admin) page: "Select Active Schemas" (multi-select + explicit Save) ----
+  var pendingActiveSelection = null;
+  function renderActiveSchemaSelector() {
+    var box = $('activeSchemaSelectorBody'); if (!box) return;
+    var entries = schemaStore.listEntries();
+    if (!entries.length) { box.innerHTML = '<div class="schema-store-empty">No schemas stored yet.</div>'; return; }
+    if (!pendingActiveSelection) pendingActiveSelection = schemaStore.getActiveIds().slice();
+    box.innerHTML = entries.map(function (e) {
+      var isDefault = schemaStore.isDefault(e.id);
+      var checked = pendingActiveSelection.indexOf(e.id) !== -1;
+      return '<label class="define-relationship-row active-schema-row"><input type="checkbox" class="form-check-input pending-active-checkbox" value="' + e.id + '"' + (checked ? ' checked' : '') + (isDefault ? ' disabled title="The Default Schema is always active"' : '') + '> <span>' + esc(e.name) + '</span>' + schemaStateBadgeHtml(e.id) + '</label>';
+    }).join('');
+    box.querySelectorAll('.pending-active-checkbox').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var id = cb.value;
+        if (cb.checked) { if (pendingActiveSelection.indexOf(id) === -1) pendingActiveSelection.push(id); }
+        else { pendingActiveSelection = pendingActiveSelection.filter(function (x) { return x !== id; }); }
+      });
+    });
+  }
+  if ($('saveActiveSchemasBtn')) $('saveActiveSchemasBtn').addEventListener('click', function () {
+    if (!pendingActiveSelection) return;
+    schemaStore.setActiveIds(pendingActiveSelection);
+    pendingActiveSelection = schemaStore.getActiveIds().slice();
+    rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus();
+    renderActiveSchemaSelector(); renderUsedSchemaActiveSelector(); renderDefaultSchemaSelector();
+    $('activeSchemaSavedNote').classList.remove('d-none'); $('activeSchemaSavedNote').textContent = 'Active schema configuration saved. ' + schemaStore.getActiveIds().length + ' schema(s) are now active.';
+    setTimeout(function () { $('activeSchemaSavedNote').classList.add('d-none'); }, 3500);
+  });
+
   function renderSchemaStoreList() {
+    // Legacy full list view retained on Used Schema page for reference/detail (read-only summary; management now via the selector above).
     var box = $('schemaStoreList'); if (!box) return; box.innerHTML = '';
     var entries = schemaStore.listEntries();
     if (!entries.length) { var empty = document.createElement('div'); empty.className = 'schema-store-empty'; empty.textContent = 'No schemas stored yet. Add one under Update Schema.'; box.appendChild(empty); return; }
-    var activeId = schemaStore.getActiveId();
     entries.forEach(function (e) {
-      var st = APSQL.createEngine(e.schema).getStatus(); var isActive = e.id === activeId;
-      var item = document.createElement('div'); item.className = 'schema-store-item' + (isActive ? ' active' : ''); item.setAttribute('data-entry-id', e.id);
+      var st = APSQL.createEngine(e.schema).getStatus();
+      var item = document.createElement('div'); item.className = 'schema-store-item' + (schemaStore.isActive(e.id) ? ' active' : ''); item.setAttribute('data-entry-id', e.id);
       var main = document.createElement('div'); main.className = 'schema-store-item-main';
-      var nameLine = document.createElement('div'); nameLine.className = 'schema-store-item-name'; nameLine.innerHTML = '<i class="bi bi-diagram-3"></i> ' + esc(e.name) + (isActive ? ' <span class="badge text-bg-primary schema-store-active-badge">Active</span>' : '');
+      var nameLine = document.createElement('div'); nameLine.className = 'schema-store-item-name'; nameLine.innerHTML = '<i class="bi bi-diagram-3"></i> ' + esc(e.name) + ' ' + schemaStateBadgeHtml(e.id);
       var metaLine = document.createElement('div'); metaLine.className = 'schema-store-item-meta';
       metaLine.innerHTML = '<span>Version: ' + esc(st.schemaVersion || '\u2014') + '</span><span>Source: ' + esc(e.source) + '</span><span>Tables: ' + st.tableCount + '</span><span>Last sync: ' + (e.lastSyncAt ? new Date(e.lastSyncAt).toLocaleString() : 'never') + '</span><span class="schema-store-sync-badge status-' + (e.lastSyncStatus || 'idle') + '">Sync status: ' + esc(e.lastSyncStatus || 'idle') + (e.lastSyncError ? ' (' + esc(e.lastSyncError) + ')' : '') + '</span>';
       main.appendChild(nameLine); main.appendChild(metaLine);
-      var actions = document.createElement('div'); actions.className = 'schema-store-item-actions';
-      if (!isActive) {
-        var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm schema-store-select-btn'; selectBtn.setAttribute('data-entry-id', e.id); selectBtn.innerHTML = 'Set Active';
-        selectBtn.addEventListener('click', function () { schemaStore.setActiveId(e.id); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); });
-        actions.appendChild(selectBtn);
-      }
-      item.appendChild(main); item.appendChild(actions); box.appendChild(item);
+      item.appendChild(main); box.appendChild(item);
     });
   }
+
   var targetSchemaId = null;
   function renderTargetSchemaSelect() {
     var sel = $('targetSchemaSelect'); if (!sel) return; var entries = schemaStore.listEntries();
-    if (!targetSchemaId || !entries.some(function (e) { return e.id === targetSchemaId; })) targetSchemaId = schemaStore.getActiveId();
-    sel.innerHTML = entries.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + (e.id === schemaStore.getActiveId() ? ' (active)' : '') + '</option>'; }).join('');
+    if (!targetSchemaId || !entries.some(function (e) { return e.id === targetSchemaId; })) targetSchemaId = schemaStore.getDefaultId();
+    sel.innerHTML = entries.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + (schemaStore.isDefault(e.id) ? ' (default)' : (schemaStore.isActive(e.id) ? ' (active)' : ' (inactive)')) + '</option>'; }).join('');
     sel.value = targetSchemaId;
   }
   if ($('targetSchemaSelect')) $('targetSchemaSelect').addEventListener('change', function () { targetSchemaId = $('targetSchemaSelect').value; });
-  function targetSchemaEntry() { return schemaStore.getEntry(targetSchemaId) || schemaStore.getActiveEntry(); }
+  function targetSchemaEntry() { return schemaStore.getEntry(targetSchemaId) || schemaStore.getDefaultEntry(); }
   if ($('showAddSchemaFormBtn')) $('showAddSchemaFormBtn').addEventListener('click', function () { $('addSchemaFormBox').classList.remove('d-none'); $('newSchemaNameInput').value = ''; $('newSchemaNameInput').focus(); });
   if ($('cancelAddSchemaBtn')) $('cancelAddSchemaBtn').addEventListener('click', function () { $('addSchemaFormBox').classList.add('d-none'); });
   if ($('confirmAddSchemaBtn')) $('confirmAddSchemaBtn').addEventListener('click', function () {
     var name = ($('newSchemaNameInput').value || '').trim(); if (!name) { $('newSchemaNameInput').focus(); return; }
     var entry = schemaStore.addEntry({ name: name, schema: { schema_name: name, schema_version: '0.0', tables: [] }, source: 'upload' });
-    targetSchemaId = entry.id; $('addSchemaFormBox').classList.add('d-none'); renderTargetSchemaSelect(); renderSchemaStoreList();
+    targetSchemaId = entry.id; pendingActiveSelection = null; $('addSchemaFormBox').classList.add('d-none');
+    renderTargetSchemaSelect(); renderSchemaStoreList(); renderDefaultSchemaSelector(); renderActiveSchemaSelector(); renderUsedSchemaActiveSelector();
   });
   if ($('deleteTargetSchemaBtn')) $('deleteTargetSchemaBtn').addEventListener('click', function () {
     if (schemaStore.count() <= 1) { alert('At least one schema must remain stored. Add another schema before removing this one.'); return; }
@@ -340,7 +427,8 @@
     var pw = $('deleteStoredSchemaPasswordInput').value;
     passwordManager.verifyCurrentPassword(pw).then(function (ok) {
       if (!ok) { $('deleteStoredSchemaPasswordError').classList.remove('d-none'); return; }
-      schemaStore.removeEntry(targetSchemaId); targetSchemaId = schemaStore.getActiveId(); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); renderTargetSchemaSelect();
+      schemaStore.removeEntry(targetSchemaId); targetSchemaId = schemaStore.getDefaultId(); pendingActiveSelection = null;
+      rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); renderTargetSchemaSelect(); renderDefaultSchemaSelector(); renderActiveSchemaSelector(); renderUsedSchemaActiveSelector();
       if (deleteStoredSchemaModal) deleteStoredSchemaModal.hide();
     });
   });
@@ -351,6 +439,8 @@
   /* ---------------- Navbar / layout basics ---------------- */
   function syncNavbarOffset() { var navbar = $('mainNavbar'); if (!navbar) return; document.documentElement.style.setProperty('--navbar-h', navbar.offsetHeight + 'px'); }
   syncNavbarOffset(); window.addEventListener('resize', syncNavbarOffset); window.addEventListener('load', syncNavbarOffset);
+  // Recalculate after fonts/icons load and after the offcanvas menu toggles, since those can change navbar height too.
+  setTimeout(syncNavbarOffset, 400);
 
   var THEME_KEY = 'ap_sql_theme';
   function systemPrefersDark() { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; }
@@ -370,7 +460,9 @@
     document.querySelectorAll('.offcanvas-body > button.nav-link, .menu-submenu .nav-link').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === view); });
     document.querySelectorAll('.app-view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
     window.scrollTo(0, 0); currentView = view;
-    if (view === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); }
+    if (view === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); renderUsedSchemaActiveSelector(); }
+    if (view === 'updateschema') { syncNavbarOffset(); }
+    setTimeout(syncNavbarOffset, 50);
   }
   document.querySelectorAll('[data-view]').forEach(function (b) { b.addEventListener('click', function () { showView(b.getAttribute('data-view')); closeMenu(); }); });
   function makeCollapsible(toggleId, submenuId) { var toggle = $(toggleId), submenu = $(submenuId); if (!toggle || !submenu) return; toggle.addEventListener('click', function () { toggle.classList.toggle('open'); submenu.classList.toggle('open'); }); }
@@ -424,9 +516,9 @@
     allTables().forEach(function (t) {
       if (moduleFilter && t.module !== moduleFilter) return;
       if (searchFilter && (t.name + ' ' + (t.notes || '')).toLowerCase().indexOf(searchFilter) === -1) return;
-      var col = document.createElement('div'); col.className = 'col-md-6 col-lg-4';
+      var col = document.createElement('div'); col.className = 'col-12 col-sm-6 col-lg-4';
       var checked = selectedTables.indexOf(t.name) !== -1;
-      col.innerHTML = '<label class="form-check d-flex align-items-start gap-2 border rounded p-2"><input type="checkbox" class="form-check-input mt-1"' + (checked ? ' checked' : '') + '><span><code>' + esc(t.name) + '</code><br><span class="small text-body-secondary">(' + esc(t.module) + ')</span></span></label>';
+      col.innerHTML = '<label class="form-check d-flex align-items-start gap-2 border rounded p-2 h-100"><input type="checkbox" class="form-check-input mt-1 flex-shrink-0"' + (checked ? ' checked' : '') + '><span class="text-break"><code>' + esc(t.name) + '</code><br><span class="small text-body-secondary">(' + esc(t.module) + ')</span></span></label>';
       col.querySelector('input').addEventListener('change', function (e) { toggleTable(t.name, e.target.checked); });
       grid.appendChild(col);
     });
@@ -944,7 +1036,7 @@
   function columnMatchesSearch(c, term) { if (!term) return true; return (c.name + ' ' + (c.alias || '') + ' ' + (c.description || '') + ' ' + (c.type || '')).toLowerCase().indexOf(term) !== -1; }
   function renderUsedSchema() {
     var st = engine.getStatus();
-    $('usedSchemaSummary').innerHTML = [['Schema', st.schemaName], ['Version', st.schemaVersion], ['Status', '\u2705 Valid / Active'], ['Modules', st.moduleCount], ['Tables', st.tableCount], ['Columns', st.columnCount], ['Last Updated', st.lastUpdated]].map(function (row) { return '<div class="d-flex justify-content-between border-bottom py-1"><span class="text-body-secondary">' + row[0] + '</span><span class="fw-semibold">' + row[1] + '</span></div>'; }).join('');
+    $('usedSchemaSummary').innerHTML = [['Schema', st.schemaName], ['Version', st.schemaVersion], ['Status', '\u2705 Valid / Active'], ['Modules', st.moduleCount], ['Tables', st.tableCount], ['Columns', st.columnCount], ['Last Updated', st.lastUpdated]].map(function (row) { return '<div class="d-flex justify-content-between border-bottom py-1 flex-wrap gap-2"><span class="text-body-secondary">' + row[0] + '</span><span class="fw-semibold text-break">' + row[1] + '</span></div>'; }).join('');
     if (!allTables().length) { $('schemaTree').innerHTML = '<div class="alert alert-secondary mb-0">The active schema currently has no tables. Upload a schema file under Schema \u2192 Update Schema to get started.</div>'; $('schemaSearchNoResults').classList.remove('show'); $('schemaSearchResultCount').textContent = ''; $('schemaSearchClearBtn').classList.add('d-none'); return; }
     var labels = moduleLabels(); var term = schemaSearchTerm.toLowerCase().trim(); var byModule = {};
     allTables().forEach(function (t) { (byModule[t.module] = byModule[t.module] || []).push(t); });
@@ -973,7 +1065,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap && aboutModalEl ? new window.bootstrap.Modal(aboutModalEl) : null;
   if ($('aboutMenuBtn')) $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.0.0'], ['Purpose', 'Multiple schemas can be stored, switched between, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is now selectable directly from the navigation bar on every page; and the operational password can be changed \u2014 all while retaining the intelligent Describe What You Need engine, the structured Query Builder, the CR Builder, and the Error Rectifier. V11.0 moves the Schema Synchronization Schedule control out of Update Schema and into the main navbar, so it is always one click away regardless of which page you are on, without changing any other part of the application.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.1.0'], ['Purpose', 'Schemas now have a clear lifecycle: every stored schema can be marked Active (available for use) or left Inactive, exactly one Active schema is also the Default (used for Live Shared Schema / linked file / GitHub sync), and SQL generation, both Query Builders, and the Error Rectifier only ever use the schemas currently marked Active. V11.1 also carries a full UI/responsive rectification pass (navbar, cards, grids, and the Guided Walkthrough all re-checked for alignment, overflow, and small-screen/zoom behavior), and the navbar Schema Synchronization Schedule control now has a clear, always-visible text label.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password.']].map(function (row) { return '<div class="mb-2"><strong>' + row[0] + ':</strong> ' + esc(row[1]) + '</div>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
 
@@ -984,17 +1076,22 @@
   if ($('updateSchemaPasswordBtn')) $('updateSchemaPasswordBtn').addEventListener('click', function () {
     var pw = $('updateSchemaPasswordInput').value;
     passwordManager.verifyCurrentPassword(pw).then(function (ok) {
-      if (ok) { $('updateSchemaPasswordStep').classList.add('d-none'); $('updateSchemaWorkArea').classList.remove('d-none'); renderWorkflowSteps(1); renderSyncStatus(); renderGithubSyncStatus(); renderAllSharedSchemaStrips(); renderTargetSchemaSelect(); renderSchemaStoreList(); }
+      if (ok) {
+        $('updateSchemaPasswordStep').classList.add('d-none'); $('updateSchemaWorkArea').classList.remove('d-none'); renderWorkflowSteps(1);
+        renderSyncStatus(); renderGithubSyncStatus(); renderAllSharedSchemaStrips(); renderTargetSchemaSelect(); renderSchemaStoreList();
+        pendingActiveSelection = null; renderDefaultSchemaSelector(); renderActiveSchemaSelector();
+        setTimeout(syncNavbarOffset, 50);
+      }
       else $('updateSchemaPasswordError').classList.remove('d-none');
     });
   });
   if ($('sharedSchemaRefreshBtn')) $('sharedSchemaRefreshBtn').addEventListener('click', function () { checkSharedSchema(); });
   function triggerDownload(blob, filename) { var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { URL.revokeObjectURL(url); }, 2000); }
-  if ($('downloadCurrentJsonBtn')) $('downloadCurrentJsonBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaJsonBlob(currentSchema()), 'current-schema.json'); });
-  if ($('downloadCurrentCsvBtn')) $('downloadCurrentCsvBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaCsvBlob(currentSchema()), 'current-schema.csv'); });
-  if ($('downloadCurrentDocxBtn')) $('downloadCurrentDocxBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaDocxBlob(currentSchema()), 'current-schema.docx'); });
-  if ($('downloadCurrentXlsxBtn')) $('downloadCurrentXlsxBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaXlsxBlob(currentSchema()), 'current-schema.xlsx'); });
-  if ($('downloadCurrentDocBtn')) $('downloadCurrentDocBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaDocBlob(currentSchema()), 'current-schema.doc'); });
+  if ($('downloadCurrentJsonBtn')) $('downloadCurrentJsonBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaJsonBlob(targetSchemaEntry().schema), 'current-schema.json'); });
+  if ($('downloadCurrentCsvBtn')) $('downloadCurrentCsvBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaCsvBlob(targetSchemaEntry().schema), 'current-schema.csv'); });
+  if ($('downloadCurrentDocxBtn')) $('downloadCurrentDocxBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaDocxBlob(targetSchemaEntry().schema), 'current-schema.docx'); });
+  if ($('downloadCurrentXlsxBtn')) $('downloadCurrentXlsxBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaXlsxBlob(targetSchemaEntry().schema), 'current-schema.xlsx'); });
+  if ($('downloadCurrentDocBtn')) $('downloadCurrentDocBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaDocBlob(targetSchemaEntry().schema), 'current-schema.doc'); });
   if ($('downloadJsonSampleBtn')) $('downloadJsonSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleJsonBlob(), 'sample-schema.json'); });
   if ($('downloadCsvSampleBtn')) $('downloadCsvSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleCsvBlob(), 'sample-schema.csv'); });
   if ($('downloadDocxSampleBtn')) $('downloadDocxSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleDocxBlob(), 'sample-schema.docx'); });
@@ -1025,12 +1122,12 @@
   });
   function refreshAllViewsAfterSchemaChange() {
     refreshTablesColumnsUI(); refreshHierarchyOptions(); refreshModuleChips(); crRefreshTableOptions(); crRenderAll();
-    if (currentView === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); }
+    if (currentView === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); renderUsedSchemaActiveSelector(); }
   }
   function performApplySchemaUpdate() {
     if (!pendingIncomingTables) return; var targetEntry = targetSchemaEntry();
     var mergeResult = window.APSQL_SCHEMA_TOOLS.mergeSchemas(targetEntry.schema, pendingIncomingTables, $('updateSchemaFileInput').files[0].name);
-    schemaStore.updateEntry(targetEntry.id, { schema: mergeResult.schema }); if (targetEntry.id === schemaStore.getActiveId()) rebuildEngine();
+    schemaStore.updateEntry(targetEntry.id, { schema: mergeResult.schema }); rebuildEngine();
     persistCurrentSchema(); renderSchemaPersistenceStatus(); renderWorkflowSteps(13); refreshAllViewsAfterSchemaChange(); renderSchemaStoreList(); renderTargetSchemaSelect();
     $('updateSchemaResult').innerHTML = '<div class="alert alert-success">' + mergeResult.addedTables.length + ' new table(s), ' + mergeResult.addedColumns.length + ' new column(s) added to \u201C' + esc(targetEntry.name) + '\u201D.<br>Schema Version: <code>' + esc(mergeResult.schema.schema_version) + '</code><br>Other stored schemas were not affected.</div>';
     $('updateSchemaPreviewCard').classList.add('d-none'); pendingIncomingTables = null;
@@ -1047,7 +1144,7 @@
       if (!ok) { $('deleteSchemaPasswordError').classList.remove('d-none'); return; }
       var targetEntry = targetSchemaEntry(); triggerDownload(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaJsonBlob(targetEntry.schema), 'schema-backup-before-delete.json');
       var emptied = window.APSQL_SCHEMA_TOOLS.buildEmptySchema(targetEntry.schema); schemaStore.updateEntry(targetEntry.id, { schema: emptied });
-      if (targetEntry.id === schemaStore.getActiveId()) { relationshipStore.clearAll(); relationshipDrafts = {}; rebuildEngine(); resetQueryState(true); }
+      if (schemaStore.isDefault(targetEntry.id) || schemaStore.isActive(targetEntry.id)) { relationshipStore.clearAll(); relationshipDrafts = {}; rebuildEngine(); resetQueryState(true); }
       persistCurrentSchema(); renderSchemaPersistenceStatus(); crInsertColumns = {}; crUpdateColumns = {}; crFilterGroup.conditions = []; $('crDescriptionInput').value = ''; $('crDescriptionInterpretationBox').innerHTML = '';
       refreshAllViewsAfterSchemaChange(); renderSchemaStoreList(); renderTargetSchemaSelect(); if (deleteSchemaModal) deleteSchemaModal.hide();
       $('updateSchemaResult').innerHTML = '<div class="alert alert-warning">\u201C' + esc(targetEntry.name) + '\u201D has been emptied. A backup was automatically downloaded. Other stored schemas were not affected.</div>';
@@ -1058,9 +1155,9 @@
     if (!pendingSaveRelationshipDraft) return; var pw = $('saveRelationshipPasswordInput').value;
     passwordManager.verifyCurrentPassword(pw).then(function (ok) {
       if (!ok) { $('saveRelationshipPasswordError').classList.remove('d-none'); return; }
-      var d = pendingSaveRelationshipDraft; var updatedSchema;
-      try { updatedSchema = window.APSQL_SCHEMA_TOOLS.saveRelationshipToSchema(currentSchema(), d.fromTable, d.fromColumn, d.toTable, d.toColumn); } catch (err) { $('saveRelationshipPasswordError').classList.remove('d-none'); $('saveRelationshipPasswordError').textContent = err.message; return; }
-      setActiveSchemaObject(updatedSchema); relationshipStore.clearManualRelationship(d.fromTable, d.toTable); delete relationshipDrafts[d.fromTable]; rebuildEngine(); persistCurrentSchema(); renderSchemaPersistenceStatus(); refreshAllViewsAfterSchemaChange(); renderJoinPreview();
+      var d = pendingSaveRelationshipDraft; var updatedSchema; var defaultEntry = schemaStore.getDefaultEntry();
+      try { updatedSchema = window.APSQL_SCHEMA_TOOLS.saveRelationshipToSchema(defaultEntry ? defaultEntry.schema : currentSchema(), d.fromTable, d.fromColumn, d.toTable, d.toColumn); } catch (err) { $('saveRelationshipPasswordError').classList.remove('d-none'); $('saveRelationshipPasswordError').textContent = err.message; return; }
+      setDefaultSchemaObject(updatedSchema); relationshipStore.clearManualRelationship(d.fromTable, d.toTable); delete relationshipDrafts[d.fromTable]; rebuildEngine(); persistCurrentSchema(); renderSchemaPersistenceStatus(); refreshAllViewsAfterSchemaChange(); renderJoinPreview();
       if (saveRelationshipModal) saveRelationshipModal.hide(); pendingSaveRelationshipDraft = null;
     });
   });
@@ -1084,11 +1181,12 @@
   if ($('errCopySqlBtn')) $('errCopySqlBtn').addEventListener('click', function () { if (!errLastResult) return; navigator.clipboard && navigator.clipboard.writeText(errLastResult.correctedSql); var old = $('errCopySqlBtn').innerHTML; $('errCopySqlBtn').innerHTML = '\u2705 Copied'; setTimeout(function () { $('errCopySqlBtn').innerHTML = old; }, 1300); });
   if ($('errCopyExplanationBtn')) $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'Error Identified: ' + errLastResult.errorIdentified + '\n\nCorrection Applied: ' + errLastResult.correctionApplied; navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '\u2705 Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
 
-  /* ---------------- Guided Walkthrough (carried forward from V10.9) ---------------- */
+  /* ---------------- Guided Walkthrough (V11.1: re-verified positioning + new steps for schema state controls) ---------------- */
   var TOURS = {
     quickstart: [
       { sel: '[data-tour="hamburger"]', place: 'bottom', title: 'Open the Menu', body: 'What it does: Opens the side menu, which lists every page in the app.<br>Why it helps: This is how you get to the Read Only Query Builder, Query Builder for CR, Used Schema, Update Schema, and Error Rectifier.<br>What to do: Select this button any time you want to switch pages.' },
-      { sel: '#qsModuleChips', place: 'bottom', title: 'Areas covered by the active schema', body: 'What it does: Lists every module documented in the schema that is currently active.<br>Why it helps: Gives you a quick sense of what data is available before you start building a query.' },
+      { sel: '#syncScheduleNavGroup', place: 'bottom', title: 'Schema Synchronization Schedule', body: 'What it does: Chooses how often this browser automatically checks the Live Shared Schema, a linked file, and GitHub for updates. New in V11.1: this control now has a clear, always-visible label so it is easy to find on any screen size.<br>What to do: Pick a frequency, or "Manual only" to disable automatic checks.' },
+      { sel: '#qsModuleChips', place: 'bottom', title: 'Areas covered by the active schema', body: 'What it does: Lists every module documented across your currently Active schema(s).<br>Why it helps: Gives you a quick sense of what data is available before you start building a query.' },
       { sel: '#qsExampleGrid', place: 'top', title: 'Try a ready-made example', body: 'What it does: Each card is a pre-written request.<br>Why it helps: Examples are the fastest way to see how Describe What You Need turns plain language into validated SQL.<br>What to do: Select any card that looks interesting.' }
     ],
     builder: [
@@ -1108,8 +1206,8 @@
       { sel: '#crResultBody', place: 'left', title: 'Generated SQL', body: 'What it does: Shows the generated Change Request SQL.' }
     ],
     usedschema: [
-      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: 'What it does: A quick summary of the active schema.' },
-      { sel: '#schemaStoreList', place: 'bottom', title: 'Stored Schemas', body: 'What it does: Lists every schema stored in this browser and lets you switch which one is active.' },
+      { sel: '#usedSchemaActiveSelector', place: 'bottom', title: 'Select Stored Active Schemas', body: 'What it does: Every schema stored in the browser is listed here with a checkbox. Ticking a box makes that schema Active (available for SQL generation, both Query Builders, and the Error Rectifier); unticking makes it Inactive without deleting it.<br>Why it helps: You can quickly combine or narrow down which schemas the app should use, without needing the Update Schema password.<br>What to do: Tick or untick any schema. The Default schema (badge) is always active and cannot be unticked here \u2014 change the default under Update Schema.<br>Then: The change applies immediately across the whole app.' },
+      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: 'What it does: A quick summary of the merged schema currently in use (built from every Active schema).' },
       { sel: '#schemaSearchInput', place: 'bottom', title: 'Search the schema', body: 'What it does: A live search box across every table, column, and description.' },
       { sel: '#schemaTree', place: 'top', title: 'Browse tables and columns', body: 'What it does: An expandable tree of every module, table, and column in the active schema.' }
     ],
@@ -1117,15 +1215,17 @@
       { sel: '#updateSchemaPasswordStep', place: 'bottom', title: 'Administrator access', body: 'What it does: Update Schema is a password-protected administrator action that never connects to a production database.' }
     ],
     updateschema_unlocked: [
-      { sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Multiple schemas', body: 'What it does: Shows which stored schema you are currently working with.' },
-      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing, add a new one, or delete one.' },
-      { sel: '#sharedSchemaCard', place: 'top', title: 'Live Shared Schema', body: 'What it does: Automatically checks a well-known file path relative to this page for a published schema.' },
-      { sel: '#schemaSyncCard', place: 'top', title: 'Cross-Device Schema Sync (Option A)', body: 'What it does: Links the schema you are working with to a single shared file.' },
-      { sel: '#githubSyncCard', place: 'top', title: 'GitHub-Hosted Schema Sync (Option B)', body: 'What it does: Connects to a schema file hosted in a GitHub repository.' },
+      { sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Schema state at a glance', body: 'What it does: Shows the current Default schema and how many schemas are Active out of the total Stored.' },
+      { sel: '#defaultSchemaSelectorBody', place: 'bottom', title: 'Select Default Schema', body: 'What it does: Choose exactly one stored schema as the Default. The Default schema is always Active, and is the one updated automatically by Live Shared Schema, linked-file, and GitHub sync.<br>What to do: Select a radio button \u2014 the change applies immediately.' },
+      { sel: '#activeSchemaSelectorBody', place: 'bottom', title: 'Select Active Schemas', body: 'What it does: Tick any number of stored schemas to make them Active (available app-wide); untick to make them Inactive (kept in storage, just not used). The Default schema is always included.<br>What to do: Adjust the checkboxes, then click "Save Active Schema Selection" below to apply.' },
+      { sel: '#targetSchemaSelect', place: 'bottom', title: 'Manage Stored Schemas', body: 'What it does: Lets you choose which stored schema you are currently editing (uploading into, downloading, or deleting), add a new one, or delete one. This is separate from Default/Active status.' },
+      { sel: '#sharedSchemaCard', place: 'top', title: 'Live Shared Schema', body: 'What it does: Automatically checks a well-known file path relative to this page for a published schema, and applies it to the Default schema.' },
+      { sel: '#schemaSyncCard', place: 'top', title: 'Cross-Device Schema Sync (Option A)', body: 'What it does: Links the Default schema to a single shared file.' },
+      { sel: '#githubSyncCard', place: 'top', title: 'GitHub-Hosted Schema Sync (Option B)', body: 'What it does: Connects the Default schema to a file hosted in a GitHub repository.' },
       { sel: '#vaultControls', place: 'top', title: 'Secure GitHub Connection Vault', body: 'What it does: Encrypts your GitHub connection details behind a passphrase.' },
-      { sel: '#updateSchemaFileInput', place: 'bottom', title: 'Smart Schema Import Engine', body: 'What it does: Reads a JSON or CSV file describing your database schema and merges it into the selected stored schema.' },
+      { sel: '#updateSchemaFileInput', place: 'bottom', title: 'Smart Schema Import Engine', body: 'What it does: Reads a JSON or CSV file describing your database schema and merges it into the schema selected under "Working with" above.' },
       { sel: '#changePasswordBtn', place: 'top', title: 'Operational Password', body: 'What it does: Changes the password required to unlock this Update Schema section, for this browser.' },
-      { sel: '#deleteSchemaBtn', place: 'top', title: 'Danger Zone', body: 'What it does: Permanently removes every table, column, and relationship from the schema you are currently working with.' }
+      { sel: '#deleteSchemaBtn', place: 'top', title: 'Danger Zone', body: 'What it does: Permanently removes every table, column, and relationship from the schema currently selected under "Working with".' }
     ],
     errorrectifier: [
       { sel: '[data-tour="err-safety"]', place: 'bottom', title: 'What Error Rectifier does', body: 'What it does: Helps you fix SQL after a database error, using the active schema to check table and column names.' },
@@ -1134,9 +1234,6 @@
       { sel: '#errDialectSel', place: 'bottom', title: 'SQL dialect', body: 'What it does: Confirms which database flavor the correction should target.' },
       { sel: '#errRectifyBtn', place: 'bottom', title: 'Rectify SQL', body: 'What it does: Analyzes the error and SQL together and attempts an automatic, schema-aware correction.' },
       { sel: '#errRectifiedSqlBody', place: 'left', title: 'Rectified SQL & Explanation', body: 'What it does: Shows the corrected SQL, plus what was wrong and what was changed.' }
-    ],
-    navbar: [
-      { sel: '#syncScheduleSelect', place: 'bottom', title: 'Schema Synchronization Schedule', body: 'What it does: Chooses how often this browser automatically checks the Live Shared Schema, a linked file, and GitHub for updates. New in V11.0: this control now lives in the navbar, so it is available on every page instead of only on Update Schema.<br>What to do: Pick a frequency, or "Manual only" to disable automatic checks.<br>Then: The chosen schedule applies immediately to all three sync sources.' }
     ],
     about: []
   };
@@ -1181,4 +1278,7 @@
   if (overlay) overlay.addEventListener('click', function (e) { if (e.target === overlay) endTour(); });
   document.addEventListener('keydown', function (e) { if (!tourOpen) return; if (e.key === 'Escape') endTour(); else if (e.key === 'ArrowRight') nextTour(); else if (e.key === 'ArrowLeft') prevTour(); });
   window.addEventListener('resize', function () { if (tourOpen) positionTour(); });
+
+  // Initial render of the new schema-state controls (safe even before Update Schema is unlocked; hidden by CSS until then).
+  renderDefaultSchemaSelector(); renderActiveSchemaSelector();
 })();

@@ -1,6 +1,6 @@
 # AP-SQL Assistant
 
-**Version 11.0**
+**Version 11.1 — UI Rectification & Schema Selection Management**
 
 AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema as its single source of truth. No production database connection is ever required or made; the app only *generates* SQL for you to review and run through your own approved channels.
 
@@ -8,62 +8,60 @@ AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P 
 
 ---
 
-## What's New in 11.0
+## What's New in 11.1
 
-Version 11.0 is a **navigation/UX release**:
+### 1. UI Rectification (full responsive pass)
+- Reworked the base layout rules (`box-sizing`, `min-width: 0`, `overflow-wrap`, `clamp()`-based padding) so cards, grids, tabs, buttons, dropdowns, and forms no longer overlap, get cut off, or force horizontal scrolling on the page itself.
+- Tabs (`Tables & Columns`, `Advanced Options`, etc.) now scroll horizontally within their own strip instead of wrapping/overlapping on narrow screens.
+- Long SQL, table/column names, and JSON now wrap safely (`overflow-wrap: anywhere`) inside cards and code blocks instead of pushing layouts wider than the viewport.
+- Verified and adjusted behavior across common desktop/laptop widths, narrow browser windows, and zoom levels from 80%–150%.
+- The **Guided Walkthrough** overlay/spotlight positioning logic was re-verified against the updated layout, and gained new steps describing the relocated/renamed controls below.
 
-- 🧭 **Schema Synchronization Schedule moved to the navbar.** The dropdown that controls how often the active schema checks the Live Shared Schema, a linked file, and GitHub for updates now lives in the top navigation bar (next to the Guided Walkthrough button), so it is one click away on **every page** — not just on Update Schema.
-- 🚫 **No functional change** to what the schedule does — it still drives the same automatic checks against the Live Shared Schema, the linked shared file (File System Access API), and GitHub-hosted sync, using the exact same options (Manual only, 30 seconds, 1/5/15/30 minutes, 1/6/24 hours).
-- 📘 The Guided Walkthrough gained a short new step (visible from any page) explaining the relocated control.
-- Everything else — schema store, GitHub vault, password management, Describe What You Need, both Query Builders, and the Error Rectifier — is unchanged from V10.9.
+### 2. Navbar — Schema Synchronization Schedule now clearly labeled
+- The sync-frequency dropdown in the top navbar now has a permanent, visible text label — **"Schema Synchronization Schedule"** — next to it (with an icon and `aria-label`/`title` fallback on very narrow screens).
+- The navbar wraps gracefully: on tablets/phones the schedule control drops to its own full-width row instead of squeezing or overlapping the logo, Guided Walkthrough button, or signature.
+
+### 3. Used Schema — "Select Stored Active Schemas"
+- The schema-activation control has moved to **Used Schema**, and is now a **multi-select** (checkbox list, not a single "Set Active" button).
+- Every stored schema is listed with its state clearly badged (**Default** / **Active** / **Inactive**).
+- Ticking/unticking a schema takes effect **immediately** — no password required — and instantly updates what SQL generation, both Query Builders, and the Error Rectifier can see.
+
+### 4 & 5. Update Schema — Default Schema & Active Schemas configuration
+Two new admin-only cards (behind the existing operational password):
+- **Select Default Schema** — a single-choice list of every stored schema; exactly one can be the Default at a time. The Default schema is what Live Shared Schema, linked-file sync, and GitHub sync update automatically. Changing the default does **not** remove any schema from the active set.
+- **Select Active Schemas** — a multi-select checklist (with an explicit **Save Active Schema Selection** button) to activate/deactivate any number of stored schemas at once. The Default schema is always force-included and can't be deselected here. Deactivating never deletes anything.
+
+### 6. Schema State Model
+| State | Meaning |
+|---|---|
+| **Stored** | Exists in the schema repository (`Manage Stored Schemas`) |
+| **Active** | Included in SQL generation, both Query Builders, and the Error Rectifier — a merged view of every Active schema's tables is used, with the Default schema's tables taking precedence on name collisions |
+| **Default** | The one schema always Active and used as the target for Live Shared Schema / linked-file / GitHub sync |
+| **Inactive** | Stored but currently excluded from use — nothing is deleted |
+
+A schema can be **Stored + Active + Default**, **Stored + Active**, or **Stored + Inactive**. These states are tracked independently from the "Working with" selector used for uploading/downloading/deleting a specific schema's content.
 
 ---
 
 ## Core Features (carried forward)
 
-### 🗂️ Multiple Schema Store & Management
-- Store any number of named schemas side by side in the browser.
-- Add, switch between, rename, or delete schemas independently — updating one never affects another.
-- The **active schema** is used consistently across SQL generation, both Query Builders, and the Error Rectifier.
-
-### 🔐 Secure Encrypted GitHub Connection Vault
-- Save GitHub connection details (token and repository info) in the project repository in **encrypted** form.
-- The vault can be shared and reused across machines and users **without ever exposing the token in plain text**.
-
-### ⏱️ Selectable Schema Synchronization Schedule — now in the navbar
-- Choose how often the active schema syncs from a set of predefined intervals via a dropdown in the top navigation bar, available from any page.
-
-### 🔑 Operational Password Change
-- Genuine, self-service password change option for the password-protected **Update Schema** administrator action.
-- New passwords are hashed (SHA-256) and stored locally; the current password must be verified before a change is accepted.
-
-### 💬 Describe What You Need (Natural-Language Query Builder)
-- Describe a requirement in plain language — tables, joins, columns, filters, sorting, and aggregations are identified automatically against the active schema.
-- Supports Generic, Oracle, SQL Server, PostgreSQL, and MySQL dialects.
-
-### 🧱 Structured Query Builder
-- Full manual control: tables/columns, joins, filters (`IN`/`NOT IN`), sorting, row limits, named CTEs, `EXISTS`/`NOT EXISTS`, related counts, `HAVING`, and recursive hierarchy walks (`WITH RECURSIVE`).
-
-### 📝 Query Builder for CR (Change Requests)
-- Build `INSERT`, `UPDATE`, and `DELETE` statements from a description or manual column/value selection.
-- `UPDATE`/`DELETE` require a `WHERE` condition (or an explicit override) to protect against unintended changes.
-
-### 🩹 Error Rectifier
-- Paste a database error and the SQL that caused it; get a corrected query with a plain-language explanation.
-
-### 🚀 Query Optimization & Explanation
-- **Optimize**: removes redundant `DISTINCT`, flags index candidates.
-- **Explain This Query**: plain-language summary of a built query.
+- **Describe What You Need** — natural-language query interpretation across the merged Active schema(s).
+- **Structured Query Builder** — full manual control: joins, filters (`IN`/`NOT IN`), sorting, limits, named CTEs, `EXISTS`/`NOT EXISTS`, related counts, `HAVING`, recursive hierarchy walks.
+- **Query Builder for CR** — `INSERT` / `UPDATE` / `DELETE` with mandatory `WHERE` protection (or explicit override).
+- **Error Rectifier** — schema-aware, rule-based SQL correction with plain-language explanations.
+- **Query Optimization & Explanation** — redundant `DISTINCT` removal, index-candidate flags, plain-language query summaries.
+- **Multiple Schema Store**, **Encrypted GitHub Connection Vault** (AES-256-GCM), **Selectable Sync Schedule**, and **Operational Password Change** (SHA-256 hashed, no fixed default once changed).
 
 ---
 
 ## Getting Started
 
-1. Open `ap-sql-assistant/index.html` in a modern Chromium-based browser (Chrome or Edge recommended — required for the shared-schema file linking feature).
-2. Follow the **Guided Walkthrough**, or go straight to **Quick Start** to try a ready-made example.
-3. Add or select an active schema under **Used Schema**.
-4. Use **Describe What You Need**, the **Read-Only Query Builder**, or the **Query Builder for CR** to generate SQL.
-5. Pick how often schemas sync using the dropdown in the **top navbar** (next to Guided Walkthrough).
+1. Open `ap-sql-assistant/index.html` in a modern Chromium-based browser (Chrome or Edge recommended for the shared-schema file linking feature).
+2. Follow the **Guided Walkthrough**, or go straight to **Quick Start**.
+3. Go to **Used Schema** to tick which stored schemas should be **Active** right now.
+4. Go to **Update Schema** (password-protected) to set the **Default Schema** and fine-tune the full **Active Schemas** list.
+5. Use **Describe What You Need**, the **Read-Only Query Builder**, or the **Query Builder for CR** to generate SQL — only your Active schema(s) are used.
+6. Adjust how often schemas sync using the clearly labeled dropdown in the **top navbar**.
 
 ---
 
@@ -71,14 +69,14 @@ Version 11.0 is a **navigation/UX release**:
 
 ```
 ap-sql-assistant/
-├── index.html                     # Main application shell and UI
+├── index.html                     # Main application shell and UI (V11.1 responsive pass + new schema-state UI)
 ├── css/
-│   └── styles.css                 # All application styling (incl. new navbar sync-schedule styles)
+│   └── styles.css                 # All application styling, incl. the V11.1 UI rectification rules
 ├── js/
 │   ├── schema-engine.js           # Core schema lookups (tables, columns, relationships)
-│   ├── schema-store-engine.js     # Multiple schema store & management
-│   ├── schema-sync-engine.js      # Local shared-schema file linking & sync
-│   ├── github-sync-engine.js      # Encrypted GitHub connection vault & sync
+│   ├── schema-store-engine.js     # V11.1: Stored/Active/Default/Inactive schema state model + merged-schema builder
+│   ├── schema-sync-engine.js      # Local shared-schema file linking & sync (writes to the Default schema)
+│   ├── github-sync-engine.js      # Encrypted GitHub connection vault & sync (writes to the Default schema)
 │   ├── password-manager-engine.js # Operational password change
 │   ├── relationship-store.js      # Manual table relationship overrides
 │   ├── sql-engine.js              # Read-only SELECT SQL generation
@@ -91,14 +89,14 @@ ap-sql-assistant/
 │   ├── error-rectifier-engine.js  # Error-driven SQL correction
 │   ├── optimize-engine.js         # Query optimization suggestions
 │   ├── credential-vault-engine.js # AES-256-GCM encrypted GitHub vault
-│   ├── sync-schedule-engine.js    # Schedule options/state (now surfaced in the navbar)
+│   ├── sync-schedule-engine.js    # Schedule options/state (labeled control in the navbar)
 │   ├── suggestion-engine.js       # Suggested fixes for rejected queries
 │   ├── shared-schema-loader.js    # Fetches a shared schema JSON file
-│   └── app.js                     # UI wiring for every page, including the navbar
+│   └── app.js                     # UI wiring for every page, incl. the new schema-state controls
 ├── schema/
 │   └── schema-sample.js           # Sample schema for local development/testing
 └── test/
-    └── smoke-test.js              # Node-based smoke tests for all engines
+    └── smoke-test.js              # Node-based smoke tests (engines + V11.1 schema-state model)
 ```
 
 ## Running Tests
@@ -107,14 +105,14 @@ ap-sql-assistant/
 node ap-sql-assistant/test/smoke-test.js
 ```
 
-The smoke test suite exercises the schema, filter, decode, SQL, CR, error-rectifier, natural-language query, schema-tools, and GitHub-sync engines. All 12 checks pass on this build.
+20 checks covering the schema, filter, decode, SQL, CR, error-rectifier, natural-language query, schema-tools, GitHub-sync engines, and the new V11.1 Stored/Active/Default/Inactive schema-state model (including the safeguard that prevents directly deactivating the Default schema). All 20 pass on this build.
 
 ## Security Notes
 
-- The application performs **no execution** of SQL against any database — it only generates statements for manual review and execution through your organization's approved process.
-- GitHub tokens are stored **encrypted** in the vault and are never exposed in plain text in the UI or logs.
-- The operational password is stored locally as a SHA-256 hash; there is no fixed or hardcoded password once a custom password has been set.
-- Update Schema is a password-protected administrator action and never connects to a production database.
+- The application performs **no execution** of SQL against any database — only generation for manual review.
+- GitHub tokens are stored **encrypted** in the vault, never in plain text.
+- The operational password is stored locally as a SHA-256 hash.
+- Update Schema (including the new Default/Active Schema configuration cards) remains a password-protected administrator action and never connects to a production database.
 
 ## Author
 

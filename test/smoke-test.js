@@ -11,9 +11,10 @@ var ERR = load('js/error-rectifier-engine.js');
 var NLQ = load('js/nl-query-engine.js');
 var SCHEMA_TOOLS = load('js/schema-tools.js');
 var GITHUB_SYNC = load('js/github-sync-engine.js');
+var SCHEMA_STORE = load('js/schema-store-engine.js');
 var pass = 0, fail = 0;
 function check(name, cond) { if (cond) { pass++; console.log('  ok  -', name); } else { fail++; console.log('FAIL  -', name); } }
-console.log('AP-SQL Assistant V11.0 — engine smoke test\n============================================');
+console.log('AP-SQL Assistant V11.1 — engine smoke test\n============================================');
 var engine = SCHEMA.createEngine(schema);
 check('schema loads with tables', engine.getAllTables().length > 0);
 check('relationship IA_INVOICE -> IA_SUPPLIER found', !!engine.findRelationship('IA_INVOICE', 'IA_SUPPLIER'));
@@ -36,6 +37,27 @@ check('V10.7.1 GitHub anonymous-read fix still intact (isReadConfigComplete)', G
 var headersNoToken = GITHUB_SYNC.authHeadersOptional({ owner: 'a', repo: 'b', path: 'c.json' });
 check('authHeadersOptional omits Authorization when no token supplied', !('Authorization' in headersNoToken));
 check('no hardcoded placeholder token anywhere', JSON.stringify(headersNoToken).indexOf('unauthenticated-lookup') === -1);
+
+// ---- V11.1: schema state model (Stored / Active / Default / Inactive) ----
+var memoryStore = {};
+var fakeStorage = { getItem: function (k) { return Object.prototype.hasOwnProperty.call(memoryStore, k) ? memoryStore[k] : null; }, setItem: function (k, v) { memoryStore[k] = v; }, removeItem: function (k) { delete memoryStore[k]; } };
+var store = SCHEMA_STORE.createStore(fakeStorage);
+var e1 = store.addEntry({ name: 'Schema A', schema: { schema_name: 'A', schema_version: '1.0', tables: [{ name: 'T1', module: 'X', columns: [{ name: 'ID', type: 'INTEGER', primary_key: true }] }] } });
+var e2 = store.addEntry({ name: 'Schema B', schema: { schema_name: 'B', schema_version: '1.0', tables: [{ name: 'T2', module: 'Y', columns: [{ name: 'ID', type: 'INTEGER', primary_key: true }] }] } });
+check('first stored schema becomes Default automatically', store.isDefault(e1.id));
+check('first stored schema is Active automatically', store.isActive(e1.id));
+check('second stored schema starts Inactive (not auto-activated)', store.getSchemaState(e2.id) === 'inactive');
+store.setEntryActive(e2.id, true);
+check('setEntryActive(true) makes a schema Active', store.isActive(e2.id));
+var merged = store.getMergedActiveSchema();
+check('merged active schema includes tables from every Active schema', merged.tables.some(function (t) { return t.name === 'T1'; }) && merged.tables.some(function (t) { return t.name === 'T2'; }));
+var deactivateDefaultResult = store.setEntryActive(e1.id, false);
+check('cannot deactivate the Default schema directly', deactivateDefaultResult === false && store.isActive(e1.id));
+store.setDefaultId(e2.id);
+check('setDefaultId switches Default without removing the previous default from Active', store.isDefault(e2.id) && store.isActive(e1.id));
+store.setActiveIds([e2.id]);
+check('setActiveIds always keeps the Default schema active even if omitted', store.isActive(e2.id) && store.isActive(e1.id) === false || store.getSchemaState(e1.id) === 'inactive');
+
 console.log('\n============================================');
 console.log(pass + ' passed, ' + fail + ' failed');
 if (fail > 0) process.exit(1);

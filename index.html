@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AP-SQL Assistant · Version 11.0</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>AP-SQL Assistant · Version 11.1</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
 <link rel="stylesheet" href="css/styles.css">
@@ -12,24 +12,27 @@
 
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top" id="mainNavbar">
   <div class="container-fluid">
-    <button class="btn btn-link text-white" type="button" data-bs-toggle="offcanvas" data-bs-target="#mainMenu" data-tour="hamburger"><i class="bi bi-list fs-4"></i></button>
-    <a class="navbar-brand d-flex align-items-center gap-2 hero-brand-row" href="#" data-view="quickstart">
-      <span class="logo-3d-wrap"><span class="app-logo-badge icon-badge-lg badge-blue"><i class="bi bi-database-gear"></i></span></span>
-      <span>
-        <div class="fw-bold">AP-SQL Assistant</div>
-        <div class="small text-white-50" style="font-size:.7rem;">Read-only &amp; Change Request SQL, built from your approved schema</div>
+    <button class="btn btn-link text-white px-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#mainMenu" data-tour="hamburger" aria-label="Open menu"><i class="bi bi-list fs-4"></i></button>
+    <a class="navbar-brand d-flex align-items-center gap-2 hero-brand-row flex-shrink-1 text-truncate" href="#" data-view="quickstart">
+      <span class="logo-3d-wrap flex-shrink-0"><span class="app-logo-badge icon-badge-lg badge-blue"><i class="bi bi-database-gear"></i></span></span>
+      <span class="text-truncate">
+        <div class="fw-bold text-truncate">AP-SQL Assistant</div>
+        <div class="small text-white-50 d-none d-md-block" style="font-size:.7rem;">Read-only &amp; Change Request SQL, built from your approved schema</div>
       </span>
     </a>
-    <!-- V11: Schema Synchronization Schedule now lives here in the navbar, available on every page -->
-    <div class="navbar-sync-schedule ms-auto me-3">
-      <i class="bi bi-arrow-repeat navbar-sync-icon"></i>
-      <select id="syncScheduleSelect" class="form-select form-select-sm"></select>
+    <!-- V11.1: Schema Synchronization Schedule now carries a clear, always-visible label and lives in the navbar on every page -->
+    <div class="navbar-sync-schedule ms-lg-auto" id="syncScheduleNavGroup">
+      <i class="bi bi-arrow-repeat navbar-sync-icon flex-shrink-0" aria-hidden="true"></i>
+      <label class="navbar-sync-label mb-0 flex-shrink-0" for="syncScheduleSelect">Schema Synchronization Schedule</label>
+      <select id="syncScheduleSelect" class="form-select form-select-sm" title="Schema Synchronization Schedule" aria-label="Schema Synchronization Schedule"></select>
+      <span id="syncScheduleCurrentNote" class="visually-hidden" aria-live="polite"></span>
     </div>
-    <button class="btn btn-outline-light btn-sm" id="tourBtn" type="button"><i class="bi bi-signpost-2"></i> Guided Walkthrough</button>
-    <span class="d-none d-lg-inline-flex creator-signature-wrap ms-3"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></span>
+    <div class="navbar-actions">
+      <button class="btn btn-outline-light btn-sm" id="tourBtn" type="button"><i class="bi bi-signpost-2"></i> <span class="d-none d-sm-inline">Guided Walkthrough</span></button>
+      <span class="d-none d-xl-inline-flex creator-signature-wrap ms-2"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></span>
+    </div>
   </div>
 </nav>
-<div class="small text-body-secondary text-center d-none" id="syncScheduleCurrentNoteWrap"><span id="syncScheduleCurrentNote"></span></div>
 
 <div class="offcanvas offcanvas-start" tabindex="-1" id="mainMenu">
   <div class="offcanvas-header"><h5 class="offcanvas-title">Menu</h5><button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button></div>
@@ -62,7 +65,7 @@
   <section class="app-view active" id="view-quickstart">
     <div class="card mb-3"><div class="card-body">
       <h1 class="h4">Welcome — what does this tool do?</h1>
-      <p class="mb-0">AP-SQL Assistant · Version 11.0 — This assistant writes database queries for you — both read-only reports and Change Request SQL — using your organization's approved database schema as its single source of truth. Describe What You Need remains an intelligent, schema-aware assistant, and the structured Query Builder remains fully available for precise manual control. <strong>New in V11.0:</strong> the Schema Synchronization Schedule control has moved to the navigation bar above, so you can change how often schemas sync from any page, not just Update Schema.</p>
+      <p class="mb-0">AP-SQL Assistant · Version 11.1 — This assistant writes database queries for you — both read-only reports and Change Request SQL — using your organization's approved database schema as its single source of truth. <strong>New in V11.1:</strong> a full UI rectification pass (alignment, spacing, and responsive behavior across every screen size and zoom level), a clearly labeled Schema Synchronization Schedule in the navbar, and a proper schema lifecycle — every stored schema can now be marked <strong>Active</strong> or <strong>Inactive</strong>, with exactly one <strong>Default</strong> schema, manageable from Used Schema (quick toggle) and Update Schema (full admin configuration).</p>
     </div></div>
     <div id="sharedSchemaStripQuickstart"></div>
     <h2 class="h6 mt-3">Areas covered by the active schema</h2>
@@ -73,7 +76,7 @@
       <div class="col"><div class="card h-100"><div class="card-body"><h3 class="h6"><i class="bi bi-search icon-badge icon-badge-sm badge-blue"></i> Read Only Query Builder</h3><p class="small text-body-secondary">Describe what you need in plain language and click Build Query — tables, joins, filters, and aggregations are found automatically.</p><button type="button" class="btn btn-outline-primary btn-sm" data-view="builder">Open Read Only Query Builder</button></div></div></div>
       <div class="col"><div class="card h-100"><div class="card-body"><h3 class="h6"><i class="bi bi-pencil-square icon-badge icon-badge-sm badge-indigo"></i> Query Builder for CR</h3><p class="small text-body-secondary">Describe the change in plain language and click Build Query, or use the manual controls.</p><button type="button" class="btn btn-outline-primary btn-sm" data-view="crbuilder">Open Query Builder for CR</button></div></div></div>
       <div class="col"><div class="card h-100"><div class="card-body"><h3 class="h6"><i class="bi bi-wrench-adjustable icon-badge icon-badge-sm badge-orange"></i> Error Rectifier</h3><p class="small text-body-secondary">Paste a database error and the SQL that caused it, and get a corrected query with a plain-language explanation.</p><button type="button" class="btn btn-outline-primary btn-sm" data-view="errorrectifier">Open Error Rectifier</button></div></div></div>
-      <div class="col"><div class="card h-100"><div class="card-body"><h3 class="h6"><i class="bi bi-diagram-3 icon-badge icon-badge-sm badge-teal"></i> Multiple Schemas</h3><p class="small text-body-secondary">Store several schemas side by side and switch which one is active at any time.</p><button type="button" class="btn btn-outline-primary btn-sm" data-view="usedschema">Open Used Schema</button></div></div></div>
+      <div class="col"><div class="card h-100"><div class="card-body"><h3 class="h6"><i class="bi bi-diagram-3 icon-badge icon-badge-sm badge-teal"></i> Multiple Schemas</h3><p class="small text-body-secondary">Manage which stored schemas are Active, Inactive, or the Default — right from Used Schema.</p><button type="button" class="btn btn-outline-primary btn-sm" data-view="usedschema">Open Used Schema</button></div></div></div>
     </div>
   </section>
 
@@ -88,7 +91,7 @@
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <select id="dialectSel" class="form-select form-select-sm w-auto"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
         <div class="form-check ms-2"><input type="checkbox" class="form-check-input" id="optDistinct2"><label class="form-check-label small" for="optDistinct2">Remove duplicates</label></div>
-        <div class="ms-auto d-flex gap-2">
+        <div class="ms-sm-auto d-flex gap-2 flex-wrap">
           <button type="button" class="btn btn-outline-secondary btn-sm" id="resetQueryBtn">Start Over</button>
           <button type="button" class="btn btn-primary btn-sm" id="generateFromDescriptionBtn">Build Query</button>
         </div>
@@ -101,10 +104,10 @@
     <div class="builder-row">
       <div class="builder-col-half">
         <div class="card"><div class="card-body">
-          <ul class="nav nav-tabs" id="manualTabs">
-            <li class="nav-item"><button class="nav-link active" data-tab="tables">Tables &amp; Columns</button></li>
-            <li class="nav-item"><button class="nav-link" data-tab="advanced">Advanced Options</button></li>
-            <li class="nav-item"><button class="nav-link" data-tab="requirements">Selected / Described Requirements</button></li>
+          <ul class="nav nav-tabs flex-nowrap overflow-auto" id="manualTabs">
+            <li class="nav-item"><button class="nav-link active text-nowrap" data-tab="tables">Tables &amp; Columns</button></li>
+            <li class="nav-item"><button class="nav-link text-nowrap" data-tab="advanced">Advanced Options</button></li>
+            <li class="nav-item"><button class="nav-link text-nowrap" data-tab="requirements">Requirements</button></li>
           </ul>
           <div class="tab-content-wrap">
             <div class="tab-pane-manual active" id="pane-tables">
@@ -115,7 +118,7 @@
                 <input type="text" id="tableSearchInput" class="form-control form-control-sm w-auto" placeholder="Search tables...">
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="tableSelectAllBtn">Select All (filtered)</button>
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="tableUnselectAllBtn">Clear Selection</button>
-                <span class="small text-body-secondary ms-auto" id="tableSelCount">0 tables selected</span>
+                <span class="small text-body-secondary ms-sm-auto" id="tableSelCount">0 tables selected</span>
               </div>
               <div class="row g-2" id="tableListGrid"></div>
               <h3 class="h6 mt-3">Pick Columns (optional)</h3>
@@ -130,7 +133,7 @@
               <h3 class="h6 mt-3">Filters</h3>
               <p class="small text-body-secondary">Conditions that determine which records appear in the result. Use "Is one of" / "Is not one of" with a comma-separated list of values for SQL <code>IN</code> / <code>NOT IN</code>.</p>
               <div id="readOnlyFilterGroup"></div>
-              <div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" id="readOnlyAddFilterBtn">Add Filter</button><button type="button" class="btn btn-outline-secondary btn-sm" id="readOnlyClearFiltersBtn">Clear all filters</button></div>
+              <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="readOnlyAddFilterBtn">Add Filter</button><button type="button" class="btn btn-outline-secondary btn-sm" id="readOnlyClearFiltersBtn">Clear all filters</button></div>
             </div>
             <div class="tab-pane-manual d-none" id="pane-advanced">
               <div class="card adv-option-card mb-3 d-none" id="joinOptionCard"><div class="card-body">
@@ -146,39 +149,39 @@
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Choose how to order your results</h4>
                 <div id="sortRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" id="addSortRowBtn">Add Sort Column</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearSortBtn">Clear all sorting</button></div>
+                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addSortRowBtn">Add Sort Column</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearSortBtn">Clear all sorting</button></div>
                 <div class="adv-option-technical">Technical: SQL ORDER BY</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Limit the number of results</h4>
-                <div class="input-group input-group-sm w-auto"><input type="number" min="1" class="form-control" id="optLimit"><button class="btn btn-outline-secondary" id="optLimitClearBtn" type="button">Clear</button></div>
+                <div class="input-group input-group-sm" style="max-width:260px;"><input type="number" min="1" class="form-control" id="optLimit"><button class="btn btn-outline-secondary" id="optLimitClearBtn" type="button">Clear</button></div>
                 <div class="adv-option-technical">Technical: SQL TOP / LIMIT / FETCH FIRST</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Give this query a friendly name</h4>
-                <div class="input-group input-group-sm w-auto"><input type="text" class="form-control" id="optView"><button class="btn btn-outline-secondary" id="optViewClearBtn" type="button">Clear</button></div>
+                <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optView"><button class="btn btn-outline-secondary" id="optViewClearBtn" type="button">Clear</button></div>
                 <div class="adv-option-technical">Technical: SQL WITH name AS (...)</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Only show records connected to another table</h4>
                 <div id="existsRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" id="addExistsRowBtn">Add Related Table</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearExistsBtn">Clear all</button></div>
+                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addExistsRowBtn">Add Related Table</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearExistsBtn">Clear all</button></div>
                 <div class="adv-option-technical">Technical: SQL EXISTS / NOT EXISTS</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Show a related count</h4>
                 <div id="scalarRowsContainer"></div>
-                <div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-outline-primary btn-sm" id="addScalarRowBtn">Add Count</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearScalarBtn">Clear all</button></div>
+                <div class="d-flex gap-2 mt-2 flex-wrap"><button type="button" class="btn btn-outline-primary btn-sm" id="addScalarRowBtn">Add Count</button><button type="button" class="btn btn-outline-secondary btn-sm" id="clearScalarBtn">Clear all</button></div>
                 <div class="adv-option-technical">Technical: correlated COUNT(*) subquery</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Filter on a total (after grouping)</h4>
-                <div class="input-group input-group-sm w-auto"><input type="text" class="form-control" id="optHaving" placeholder="e.g. COUNT(*) > 5"><button class="btn btn-outline-secondary" id="optHavingClearBtn" type="button">Clear</button></div>
+                <div class="input-group input-group-sm" style="max-width:320px;"><input type="text" class="form-control" id="optHaving" placeholder="e.g. COUNT(*) > 5"><button class="btn btn-outline-secondary" id="optHavingClearBtn" type="button">Clear</button></div>
                 <div class="adv-option-technical">Technical: SQL HAVING</div>
               </div></div>
               <div class="card adv-option-card mb-3"><div class="card-body">
                 <h4 class="h6">Show a full org chart or hierarchy</h4>
-                <div class="input-group input-group-sm w-auto"><select class="form-select" id="optHierarchy"><option value="">— none —</option></select><button class="btn btn-outline-secondary" id="optHierarchyClearBtn" type="button">Clear</button></div>
+                <div class="input-group input-group-sm" style="max-width:320px;"><select class="form-select" id="optHierarchy"><option value="">— none —</option></select><button class="btn btn-outline-secondary" id="optHierarchyClearBtn" type="button">Clear</button></div>
                 <div class="adv-option-technical">Technical: SQL WITH RECURSIVE</div>
               </div></div>
               <p class="small text-body-secondary">Optional — for users who prefer precise manual control. Configure using the tabs above, and/or use the description above, then build.</p>
@@ -221,7 +224,7 @@
       <textarea class="form-control mb-2" id="crDescriptionInput" rows="2" placeholder="e.g. Update supplier X, set is active to no where supplier code = ABC123"></textarea>
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <select id="crDialectSel" class="form-select form-select-sm w-auto"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
-        <button type="button" class="btn btn-primary btn-sm ms-auto" id="crGenerateFromDescriptionBtn">Build Query</button>
+        <button type="button" class="btn btn-primary btn-sm ms-sm-auto" id="crGenerateFromDescriptionBtn">Build Query</button>
       </div>
       <div id="crDescriptionInterpretationBox"></div>
       <div class="mt-2"><label class="form-label small mb-1">Table</label><select id="crTableSelect" class="form-select form-select-sm w-auto"></select></div>
@@ -230,9 +233,9 @@
     <div class="builder-row">
       <div class="builder-col-half">
         <div class="card"><div class="card-body">
-          <ul class="nav nav-tabs" id="crManualTabs">
-            <li class="nav-item"><button class="nav-link active" data-cr-tab="tables">Tables &amp; Columns</button></li>
-            <li class="nav-item"><button class="nav-link" data-cr-tab="requirements">Selected / Described Requirements</button></li>
+          <ul class="nav nav-tabs flex-nowrap overflow-auto" id="crManualTabs">
+            <li class="nav-item"><button class="nav-link active text-nowrap" data-cr-tab="tables">Tables &amp; Columns</button></li>
+            <li class="nav-item"><button class="nav-link text-nowrap" data-cr-tab="requirements">Requirements</button></li>
           </ul>
           <div class="tab-content-wrap">
             <div class="tab-pane-cr active" id="cr-pane-tables">
@@ -280,19 +283,27 @@
   <section class="app-view" id="view-usedschema">
     <h1 class="h4 builder-heading">Used Schema</h1>
     <div id="sharedSchemaStripUsedSchema"></div>
+
     <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Stored Schemas <span class="badge text-bg-info">New in V10.7</span></h2>
-      <p class="small text-body-secondary">All schemas stored in this browser. Select which one is active — the active schema is used consistently by SQL generation, both Query Builders, and the Error Rectifier.</p>
-      <div id="schemaStoreList"></div>
+      <h2 class="h6">Select Stored Active Schemas <span class="badge text-bg-info">New in V11.1</span></h2>
+      <p class="small text-body-secondary">Every schema stored in this browser is listed below. Tick a schema to make it <strong>Active</strong> (used by SQL generation, both Query Builders, and the Error Rectifier); untick to make it <strong>Inactive</strong> without deleting it. You can select any number of schemas at once, and changes apply immediately. The <span class="badge text-bg-primary schema-state-badge">Default</span> schema is always active — change it under Update Schema.</p>
+      <div id="usedSchemaActiveSelector"></div>
     </div></div>
+
     <div class="card mb-3"><div class="card-body"><div id="usedSchemaSummary"></div></div></div>
-    <div class="d-flex gap-2 mb-2 flex-wrap">
+    <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
       <input type="text" class="form-control form-control-sm w-auto" id="schemaSearchInput" placeholder="Search tables/columns...">
       <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="schemaSearchClearBtn">Clear</button>
       <span class="small text-body-secondary" id="schemaSearchResultCount"></span>
     </div>
     <div id="schemaSearchNoResults" class="alert alert-secondary">No tables or columns match your search.</div>
     <div id="schemaTree"></div>
+
+    <div class="card mt-4"><div class="card-body">
+      <h2 class="h6">All Stored Schemas (detail)</h2>
+      <p class="small text-body-secondary">Read-only reference list showing every stored schema and its current state.</p>
+      <div id="schemaStoreList"></div>
+    </div></div>
   </section>
 
   <!-- ===================== UPDATE SCHEMA ===================== -->
@@ -300,7 +311,7 @@
     <h1 class="h4 builder-heading">Update Schema</h1>
     <p class="text-body-secondary">This is a password-protected administrator action. It never connects to a production database.</p>
     <div class="card mb-3" id="updateSchemaPasswordStep"><div class="card-body">
-      <div class="input-group w-auto"><input type="password" class="form-control" id="updateSchemaPasswordInput" placeholder="Operational password"><button class="btn btn-primary" id="updateSchemaPasswordBtn" type="button">Unlock</button></div>
+      <div class="input-group" style="max-width:420px;"><input type="password" class="form-control" id="updateSchemaPasswordInput" placeholder="Operational password"><button class="btn btn-primary" id="updateSchemaPasswordBtn" type="button">Unlock</button></div>
       <div class="text-danger small mt-1 d-none" id="updateSchemaPasswordError">Incorrect password.</div>
     </div></div>
 
@@ -309,8 +320,23 @@
       <div id="workflowStepList" class="mb-3"></div>
 
       <div class="card mb-3"><div class="card-body">
+        <h2 class="h6">Select Default Schema <span class="badge text-bg-info">New in V11.1</span></h2>
+        <p class="small text-body-secondary">Choose exactly one stored schema as the <strong>Default</strong>. The Default schema is always Active, and is the schema that Live Shared Schema, linked-file sync, and GitHub sync update automatically. Changing the default does <strong>not</strong> remove any other schema from the active selection.</p>
+        <div id="defaultSchemaSelectorBody" class="d-flex flex-column gap-2"></div>
+        <div class="alert alert-success small mt-2 mb-0 d-none" id="defaultSchemaSavedNote"></div>
+      </div></div>
+
+      <div class="card mb-3"><div class="card-body">
+        <h2 class="h6">Select Active Schemas <span class="badge text-bg-info">New in V11.1</span></h2>
+        <p class="small text-body-secondary">Tick any number of stored schemas to make them <strong>Active</strong> app-wide; untick to make them <strong>Inactive</strong> (kept safely in storage, just not used for SQL generation, the Query Builders, or the Error Rectifier). The <span class="badge text-bg-primary schema-state-badge">Default</span> schema is always included and cannot be deselected here. Nothing is deleted by deactivating a schema.</p>
+        <div id="activeSchemaSelectorBody" class="d-flex flex-column gap-2"></div>
+        <button type="button" class="btn btn-primary btn-sm mt-2" id="saveActiveSchemasBtn">Save Active Schema Selection</button>
+        <div class="alert alert-success small mt-2 mb-0 d-none" id="activeSchemaSavedNote"></div>
+      </div></div>
+
+      <div class="card mb-3"><div class="card-body">
         <h2 class="h6">Manage Stored Schemas <span class="badge text-bg-info">New in V10.7</span></h2>
-        <p class="small text-body-secondary">Add a brand-new named schema, or choose an existing one below to update it — updating one schema never affects any other stored schema.</p>
+        <p class="small text-body-secondary">Add a brand-new named schema, or choose an existing one below as the target for uploading, downloading, or deleting content — this is independent of Default/Active status above.</p>
         <div class="d-flex flex-wrap gap-2 align-items-center">
           <label class="small text-body-secondary mb-0">Working with:</label>
           <select id="targetSchemaSelect" class="form-select form-select-sm w-auto"></select>
@@ -322,25 +348,18 @@
           <button type="button" class="btn btn-success btn-sm" id="confirmAddSchemaBtn">Create Empty Schema</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" id="cancelAddSchemaBtn">Cancel</button>
         </div>
-        <div class="mt-3"><div id="schemaStoreListAdmin"></div></div>
-      </div></div>
-
-      <!-- Note: as of V11.0, the schedule selector itself lives in the top navbar (see #syncScheduleSelect). -->
-      <div class="card mb-3"><div class="card-body">
-        <h2 class="h6">Schema Synchronization Schedule <span class="badge text-bg-info">New in V10.7</span></h2>
-        <p class="small text-body-secondary">Choose how often every configured schema automatically checks its source (Live Shared Schema, linked file, or GitHub) for updates. This applies to all stored schemas. <strong>New in V11.0:</strong> the selector for this has moved to the navigation bar at the top of every page — look for <i class="bi bi-arrow-repeat"></i> next to the Guided Walkthrough button.</p>
       </div></div>
 
       <div class="card mb-3" id="sharedSchemaCard"><div class="card-body">
         <h2 class="h6">Live Shared Schema <span class="badge text-bg-secondary">Zero Setup for Everyone Else</span></h2>
-        <p class="small text-body-secondary">Makes the active schema available automatically on every device and browser. On every page load, the app checks a well-known path <code id="sharedSchemaPathDisplay"></code> relative to this page.</p>
+        <p class="small text-body-secondary">Makes the Default schema available automatically on every device and browser. On every page load, the app checks a well-known path <code id="sharedSchemaPathDisplay"></code> relative to this page.</p>
         <div id="sharedSchemaStatusBodyAdmin"></div>
         <button type="button" class="btn btn-outline-primary btn-sm" id="sharedSchemaRefreshBtn">Check Now</button>
       </div></div>
 
       <div class="card mb-3" id="schemaSyncCard"><div class="card-body">
         <h2 class="h6">Cross-Device Schema Sync (Administrator) <span class="badge text-bg-secondary">Option A</span></h2>
-        <p class="small text-body-secondary">Link the schema you are currently working with to a single shared file (SharePoint, OneDrive, or a network drive). Requires a Chromium-based browser.</p>
+        <p class="small text-body-secondary">Link the Default schema to a single shared file (SharePoint, OneDrive, or a network drive). Requires a Chromium-based browser.</p>
         <div id="schemaSyncStatusBody"></div>
         <div id="schemaSyncActionsBody" class="d-flex gap-2 flex-wrap"></div>
         <div class="small text-body-secondary mt-1" id="schemaSyncLastCheck"></div>
@@ -412,7 +431,7 @@
             <div class="col-md-6"><strong>New (Pending)</strong><div id="previewNewBox"></div></div>
           </div>
           <div class="mt-2"><strong>Changes Detected</strong><div id="previewChangesBox"></div></div>
-          <div class="mt-3 d-flex gap-2"><button type="button" class="btn btn-primary btn-sm" id="activateSchemaBtn">Apply Schema Update</button><button type="button" class="btn btn-outline-secondary btn-sm" id="cancelPreviewBtn">Cancel Update</button></div>
+          <div class="mt-3 d-flex gap-2 flex-wrap"><button type="button" class="btn btn-primary btn-sm" id="activateSchemaBtn">Apply Schema Update</button><button type="button" class="btn btn-outline-secondary btn-sm" id="cancelPreviewBtn">Cancel Update</button></div>
         </div></div>
       </div></div>
 
@@ -432,7 +451,7 @@
 
       <div class="card danger-zone-card"><div class="card-body">
         <h2 class="h6 danger-zone-title">Danger Zone</h2>
-        <p class="small text-body-secondary">Permanently remove every table, column, and relationship from the schema you are currently working with. A backup is downloaded automatically first.</p>
+        <p class="small text-body-secondary">Permanently remove every table, column, and relationship from the schema currently selected under "Working with" above. A backup is downloaded automatically first.</p>
         <button type="button" class="btn btn-outline-danger btn-sm" id="deleteSchemaBtn">Delete This Schema's Contents</button>
       </div></div>
     </div>
@@ -450,7 +469,7 @@
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <select id="errDialectSel" class="form-select form-select-sm w-auto"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
         <span class="small text-body-secondary">Auto-detected from the pasted error where possible.</span>
-        <button type="button" class="btn btn-primary btn-sm ms-auto" id="errRectifyBtn">Rectify SQL</button>
+        <button type="button" class="btn btn-primary btn-sm ms-sm-auto" id="errRectifyBtn">Rectify SQL</button>
       </div>
     </div></div>
     <div class="card mb-3"><div class="card-body">
@@ -472,7 +491,7 @@
 </div>
 
 <footer class="text-center py-4 text-body-secondary small">
-  <div>AP-SQL Assistant · Version 11.0</div>
+  <div>AP-SQL Assistant · Version 11.1</div>
   <div class="creator-signature-wrap"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></div>
 </footer>
 
@@ -515,7 +534,7 @@
 <div class="modal fade" id="saveRelationshipModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
   <div class="modal-header"><h5 class="modal-title">Save Relationship to Schema</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
   <div class="modal-body">
-    <p class="small">This will permanently add the following relationship to the active schema.</p>
+    <p class="small">This will permanently add the following relationship to the Default schema.</p>
     <div id="saveRelationshipSummary" class="mb-2"></div>
     <input type="password" class="form-control" id="saveRelationshipPasswordInput" placeholder="Update Schema password">
     <div class="text-danger small mt-1 d-none" id="saveRelationshipPasswordError">Incorrect password. The relationship was not saved.</div>
@@ -530,7 +549,7 @@
     <div class="small text-body-secondary" id="tourStepLabel"></div>
     <h5 id="tourTitle"></h5>
     <div id="tourBody"></div>
-    <div class="d-flex justify-content-between align-items-center mt-3">
+    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
       <div id="tourDots"></div>
       <div class="d-flex gap-2">
         <button type="button" class="btn btn-outline-secondary btn-sm" id="tourSkip">Skip</button>
