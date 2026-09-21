@@ -2,18 +2,30 @@
 
 This assistant writes database queries for you — both read-only reports and Change Request SQL — using your organization's approved database schema(s). V11.4 focuses on **Query Builder layout** and **schema-aware CASE/DECODE** while preserving every existing capability from prior releases.
 
-## How to run
+## How to run locally
 Open `index.html` directly in a modern browser (Chrome/Edge/Firefox). Everything runs client-side — no server or build step is required. For GitHub sync and the shared-schema/vault features, serve the folder over `http://` (e.g. `npx http-server .`) since `fetch()` of local files is blocked under `file://` in some browsers.
 
 ```
 ap-sql-assistant/
 ├── index.html
 ├── css/styles.css
-├── js/                 (all engines + app.js UI wiring)
-├── schema/schema-sample.js   (embedded default schema; also drop a shared-schema.json or
-│                              shared-schema.vault.json here to publish a live/shared schema)
-└── test/smoke-test.js  (run with: node test/smoke-test.js)
+├── js/                          (all engines + app.js UI wiring)
+├── schema/schema-sample.js      (embedded default schema; also drop a shared-schema.json or
+│                                 shared-schema.vault.json here to publish a live/shared schema)
+├── test/smoke-test.js           (run with: node test/smoke-test.js)
+└── .github/workflows/deploy-pages.yml   (GitHub Pages deployment workflow)
 ```
+
+## Deploying to GitHub Pages
+`.github/workflows/deploy-pages.yml` publishes the app straight from the repository root on every push to `main` (or manually via **Actions → Run workflow**). It includes a fix for a known GitHub Actions issue:
+
+> **"Error: Multiple artifacts named `github-pages` were unexpectedly found for this workflow run. Artifact count is 2."**
+
+This happens because artifacts are scoped to the *workflow run*, not the *attempt* — using "Re-run failed jobs" after `upload-pages-artifact` already succeeded once leaves a second `github-pages` artifact in the same run, and `deploy-pages` refuses to guess which one to use. The workflow now:
+- Sets `concurrency: { group: pages, cancel-in-progress: true }` so overlapping runs can't collide.
+- Deletes any stale `github-pages` artifact for the current run **before** re-uploading, so "Re-run failed jobs" always works cleanly.
+
+If your app files live in a subfolder instead of the repo root, change the `path:` under **Upload Pages artifact** in the workflow accordingly.
 
 ## What's new in V11.4
 
@@ -34,7 +46,7 @@ The Read Only Query Builder now always renders in this order:
 `nl-query-engine.js` + `sql-engine.js` understand natural language, resolve it against the active schema (tables, columns, types, PK/FK relationships, aliases, decode/CASE definitions), plan the query, generate dialect-aware SQL (Oracle / SQL Server / PostgreSQL / MySQL / Generic), and validate it (`validation-engine.js`) before it's shown. Supports joins (INNER/LEFT), aggregation, GROUP BY/HAVING, DISTINCT, ORDER BY, result limits, EXISTS-based filters, and recursive hierarchy walks (self-referencing tables) via CTEs.
 
 ### Preserved from earlier versions
-Multiple Schema Store, Active/Default/Inactive schema states, CR Query Builder (INSERT/UPDATE/DELETE with mandatory WHERE unless explicitly overridden), Filters, Error Rectifier (schema-aware auto-correction with closest-match suggestions), Guided Walkthrough (now clamped so its tooltip always stays fully on-screen), GitHub schema sync, the Secure GitHub Connection Vault (AES-GCM + PBKDF2, 210,000 iterations), Schema Synchronization Schedule, and operational/admin password authentication.
+Multiple Schema Store, Active/Default/Inactive schema states, CR Query Builder (INSERT/UPDATE/DELETE with mandatory WHERE unless explicitly overridden), Filters, Error Rectifier (schema-aware auto-correction with closest-match suggestions), Guided Walkthrough (clamped so its tooltip always stays fully on-screen), GitHub schema sync, the Secure GitHub Connection Vault (AES-GCM + PBKDF2, 210,000 iterations), Schema Synchronization Schedule, and operational/admin password authentication.
 
 ## Operational / Admin password
 - Default: `admin123` (hashed with SHA-256, never stored or transmitted in plaintext).

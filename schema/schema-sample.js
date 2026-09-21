@@ -60,21 +60,24 @@
       { name: 'PE_PAYMENT', module: 'PE', notes: 'Executed / transferred payments', columns: [
         { name: 'PAYMENT_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the payment', decode: null },
         { name: 'PAYMENT_PLAN_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'PP_PAYMENT_PLAN', column: 'PAYMENT_PLAN_ID' }, alias: '', description: 'Payment plan this payment was executed from', decode: null },
-        { name: 'PAYMENT_DATE', type: 'DATE', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Date the payment was executed', decode: null },
-        { name: 'PAYMENT_METHOD', type: 'VARCHAR(30)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'Payment method used', decode: null },
-        { name: 'AMOUNT', type: 'NUMBER(19,2)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Amount paid', decode: null }
+        { name: 'COMPANY_ID', type: 'INTEGER', nullable: false, primary_key: false, foreign_key: { table: 'ADM_COMPANY', column: 'COMPANY_ID' }, alias: '', description: 'Company the payment was executed from', decode: null },
+        { name: 'PAYMENT_REFERENCE', type: 'VARCHAR(50)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Bank / payment reference number', decode: null },
+        { name: 'PAYMENT_METHOD', type: 'NUMBER(5)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Method used to execute the payment', decode: [{ code: '0', label: 'Bank Transfer' }, { code: '1', label: 'Cheque' }, { code: '2', label: 'Direct Debit' }] },
+        { name: 'PAYMENT_STATUS', type: 'NUMBER(5)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Status of the executed payment', decode: [{ code: '0', label: 'Pending' }, { code: '20', label: 'Sent to Bank' }, { code: '60', label: 'Settled' }, { code: '90', label: 'Failed' }] },
+        { name: 'EXECUTED_DATE', type: 'DATE', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'Date the payment was executed', decode: null },
+        { name: 'AMOUNT', type: 'NUMBER(19,2)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Amount transferred', decode: null }
       ] },
-      { name: 'ADM_COMPANY', module: 'ADM', notes: 'Legal entities / companies', columns: [
-        { name: 'COMPANY_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the company', decode: null },
-        { name: 'COMPANY_NAME', type: 'VARCHAR(250)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Legal name of the company', decode: null },
-        { name: 'COUNTRY_CODE', type: 'VARCHAR(2)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'ISO country code', decode: null }
+      { name: 'ADM_COMPANY', module: 'ADM', notes: 'Legal entities / companies configured in the system', columns: [
+        { name: 'COMPANY_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the company / legal entity', decode: null },
+        { name: 'COMPANY_NAME', type: 'VARCHAR(200)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Name of the company / legal entity', decode: null },
+        { name: 'COUNTRY_CODE', type: 'VARCHAR(2)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'ISO country code of the company', decode: null },
+        { name: 'IS_ACTIVE', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether the company is currently active', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] }
       ] },
-      { name: 'ADM_USER_DATA', module: 'ADM', notes: 'Application users', columns: [
+      { name: 'ADM_USER_DATA', module: 'ADM', notes: 'Application user accounts', columns: [
         { name: 'USER_ID', type: 'INTEGER', nullable: false, primary_key: true, foreign_key: null, alias: '', description: 'Unique identifier for the user', decode: null },
-        { name: 'FULL_NAME', type: 'VARCHAR(150)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Full name of the user', decode: null },
-        { name: 'LOGIN_ACCOUNT', type: 'VARCHAR(80)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Login account (username) used to sign in', decode: null },
-        { name: 'EMAIL', type: 'VARCHAR(150)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'Email address', decode: null },
-        { name: 'COMPANY_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_COMPANY', column: 'COMPANY_ID' }, alias: '', description: 'Company this user belongs to', decode: null },
+        { name: 'USER_NAME', type: 'VARCHAR(100)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Login name of the user', decode: null },
+        { name: 'FULL_NAME', type: 'VARCHAR(200)', nullable: true, primary_key: false, foreign_key: null, alias: '', description: 'Full display name of the user', decode: null },
+        { name: 'COMPANY_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_COMPANY', column: 'COMPANY_ID' }, alias: '', description: 'Home company of this user', decode: null },
         { name: 'SUPERVISOR_USER_ID', type: 'INTEGER', nullable: true, primary_key: false, foreign_key: { table: 'ADM_USER_DATA', column: 'USER_ID' }, alias: '', description: "This user's supervisor (self-referencing hierarchy)", decode: null },
         { name: 'IS_ACTIVE', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether the user account is active', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },
         { name: 'LOGIN_ALLOWED', type: 'NUMBER(1)', nullable: false, primary_key: false, foreign_key: null, alias: '', description: 'Whether this user is permitted to log in (login allowed)', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },

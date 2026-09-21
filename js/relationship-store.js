@@ -18,5 +18,5 @@
   }
   var API = { createRelationshipStore: createRelationshipStore, createEffectiveEngine: createEffectiveEngine };
   if (typeof module === 'object' && module.exports) module.exports = API;
-  if (typeof root !== 'undefined') root.APSQL_RELATIONSHIPS = API;
+  if (typeof root !== 'undefined') root.APSQL_RELATIONSHIP = API;
 })(typeof window !== 'undefined' ? window : this);

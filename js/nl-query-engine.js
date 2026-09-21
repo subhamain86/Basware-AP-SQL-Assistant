@@ -18,24 +18,15 @@
     tableNames.forEach(function (tname) {
       var table = engine.getTable(tname); if (!table) return;
       table.columns.forEach(function (c) {
-        var score = 0; var namePhrase = normalizeSpaces(c.name); if (namePhrase && containsPhrase(textLower, namePhrase)) score += 5;
-        if (c.alias) { var aliasPhrase = normalizeSpaces(c.alias); if (aliasPhrase && containsPhrase(textLower, aliasPhrase)) score += 4; }
-        if (score >= 2.5) { var entry = { table: tname, column: c.name }; if (c.alias) entry.alias = c.alias; out.push(entry); }
+        var phrases = [normalizeSpaces(c.name)]; if (c.alias) phrases.push(normalizeSpaces(c.alias));
+        for (var p = 0; p < phrases.length; p++) { if (phrases[p] && containsPhrase(textLower, phrases[p])) { out.push({ table: tname, column: c.name }); break; } }
       });
     });
     return out;
   }
-  function findColumnByPhrase(engine, tableNames, phrase) {
-    var best = null;
-    tableNames.forEach(function (tname) { var table = engine.getTable(tname); if (!table || best) return; table.columns.forEach(function (col) { if (best) return; var namePhrase = normalizeSpaces(col.name); var aliasPhrase = col.alias ? normalizeSpaces(col.alias) : ''; if (namePhrase === phrase || aliasPhrase === phrase) best = { table: tname, column: col.name }; }); });
-    if (best) return best;
-    tableNames.forEach(function (tname) { var table = engine.getTable(tname); if (!table || best) return; table.columns.forEach(function (col) { if (best) return; var namePhrase = normalizeSpaces(col.name); var aliasPhrase = col.alias ? normalizeSpaces(col.alias) : ''; if ((namePhrase && phrase.indexOf(namePhrase) !== -1) || (aliasPhrase && phrase.indexOf(aliasPhrase) !== -1)) best = { table: tname, column: col.name }; }); });
-    return best;
-  }
-  var VALUE_RE = "(\"[^\"]*\"|'[^']*'|-?\\d+\\.\\d+|-?\\d+|[A-Za-z][A-Za-z0-9_\\-]*)";
-  function cleanValue(raw) {
-    if (raw == null) return '';
-    var v = String(raw).trim();
+  var VALUE_RE = '([\\w .,\\-\\/]+?)';
+  function cleanValue(v) {
+    v = String(v || '').trim();
     if ((v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') || (v.charAt(0) === "'" && v.charAt(v.length - 1) === "'")) v = v.slice(1, -1);
     return v.replace(/[.,;]+$/, '');
   }
@@ -82,6 +73,16 @@
     var out = []; var m;
     while ((m = re.exec(textLower))) { var phrase = normalizeSpaces(m[1]); var col = findColumnByPhrase(engine, tableNames, phrase); if (!col) continue; var tail = textLower.slice(m.index, m.index + m[0].length + 24); var direction = /descending|desc\b|newest|highest|largest|most recent/.test(tail) ? 'DESC' : 'ASC'; out.push({ table: col.table, column: col.column, direction: direction }); }
     return out;
+  }
+  function findColumnByPhrase(engine, tableNames, phrase) {
+    for (var i = 0; i < tableNames.length; i++) {
+      var table = engine.getTable(tableNames[i]); if (!table) continue;
+      for (var j = 0; j < table.columns.length; j++) {
+        var c = table.columns[j]; var phrases = [normalizeSpaces(c.name)]; if (c.alias) phrases.push(normalizeSpaces(c.alias));
+        if (phrases.indexOf(phrase) !== -1) return { table: tableNames[i], column: c.name };
+      }
+    }
+    return null;
   }
   function matchLimit(text) { var m = String(text || '').toLowerCase().match(/\b(?:top|first|only)\s+(\d+)\b/); return m ? parseInt(m[1], 10) : null; }
   function matchDistinct(text) { return /\b(distinct|unique|no duplicates|without duplicates|remove duplicates|deduplicated?)\b/i.test(String(text || '')); }
