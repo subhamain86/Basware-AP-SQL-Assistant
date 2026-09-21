@@ -1,9 +1,7 @@
 (function (root) {
   'use strict';
   var DATATYPE = (typeof module === 'object' && module.exports) ? require('./datatype-engine.js') : root.APSQL_DATATYPE;
-
   var DIALECTS = ['Oracle', 'SQL Server', 'PostgreSQL', 'MySQL', 'Generic'];
-
   function levenshtein(a, b) {
     a = String(a || ''); b = String(b || '');
     var m = a.length, n = b.length;
@@ -42,7 +40,6 @@
   function quoteIdentifierVariants(name) {
     return new RegExp('(["\'\\[`]?)\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b\\1', 'g');
   }
-
   var RULE_CASE_ELSE_DATATYPE = {
     id: 'case-else-datatype',
     matchError: /inconsistent datatype|conversion failed|cannot convert|type mismatch|invalid.*use of|ORA-00932/i,
@@ -79,7 +76,6 @@
       };
     }
   };
-
   var RULE_WHERE_DATATYPE = {
     id: 'where-comparison-datatype',
     matchError: /inconsistent datatype|conversion failed|cannot convert|type mismatch|incorrect syntax near|operator does not exist|ORA-00932/i,
@@ -113,7 +109,6 @@
       };
     }
   };
-
   var RULE_INVALID_COLUMN = {
     id: 'invalid-column',
     matchError: /invalid identifier|invalid column name|column .* does not exist|unknown column|ORA-00904/i,
@@ -137,7 +132,6 @@
       };
     }
   };
-
   var RULE_INVALID_TABLE = {
     id: 'invalid-table',
     matchError: /table or view does not exist|invalid object name|relation .* does not exist|doesn.t exist|ORA-00942/i,
@@ -160,7 +154,6 @@
       };
     }
   };
-
   var AGG_FUNCS = /^(COUNT|SUM|AVG|MIN|MAX)\s*\(/i;
   var RULE_GROUP_BY = {
     id: 'group-by-missing-column',
@@ -205,7 +198,6 @@
     if (current.trim()) parts.push(current);
     return parts;
   }
-
   var RULE_DATE_FORMAT = {
     id: 'date-format',
     matchError: /does not match the format string|literal does not match|conversion failed when converting date|invalid datetime format|date\/time field value out of range|ORA-01861|ORA-01858/i,
@@ -238,7 +230,6 @@
       };
     }
   };
-
   var RULE_NULL_COMPARISON = {
     id: 'null-comparison',
     matchError: /null/i, alwaysTry: true,
@@ -255,7 +246,6 @@
       };
     }
   };
-
   var RULE_TRAILING_COMMA = {
     id: 'trailing-comma',
     matchError: /sql command not properly ended|incorrect syntax near|syntax error at or near|you have an error in your sql syntax|ORA-00933|ORA-00936/i, alwaysTry: true,
@@ -272,7 +262,6 @@
       };
     }
   };
-
   var NULLFN_BY_DIALECT = { 'Oracle': 'NVL', 'SQL Server': 'ISNULL', 'PostgreSQL': 'COALESCE', 'MySQL': 'IFNULL', 'Generic': 'COALESCE' };
   var ALL_NULLFNS = ['NVL', 'ISNULL', 'IFNULL', 'COALESCE'];
   var RULE_NULLFN_DIALECT = {
@@ -304,7 +293,6 @@
       };
     }
   };
-
   var RULE_JOIN_RELATIONSHIP = {
     id: 'join-relationship',
     matchError: /invalid.*join|ambiguous column|join condition|on clause/i,
@@ -330,9 +318,7 @@
       };
     }
   };
-
   var RULES = [RULE_CASE_ELSE_DATATYPE, RULE_WHERE_DATATYPE, RULE_INVALID_COLUMN, RULE_INVALID_TABLE, RULE_GROUP_BY, RULE_DATE_FORMAT, RULE_JOIN_RELATIONSHIP, RULE_NULL_COMPARISON, RULE_TRAILING_COMMA, RULE_NULLFN_DIALECT];
-
   function detectDialectFromError(errorText) {
     var t = String(errorText || '');
     if (/ORA-\d{5}/i.test(t)) return 'Oracle';
@@ -341,17 +327,14 @@
     if (/You have an error in your SQL syntax|MySQL server version/i.test(t)) return 'MySQL';
     return null;
   }
-
   function rectify(sql, errorText, engine, dialect) {
     sql = String(sql || '');
     errorText = String(errorText || '');
     dialect = DIALECTS.indexOf(dialect) !== -1 ? dialect : 'Generic';
     var ctx = { engine: engine, dialect: dialect, errorText: errorText, tables: extractTables(sql) };
-
     if (!sql.trim()) {
       return { correctedSql: sql, changed: false, errorIdentified: 'No SQL was supplied to analyze.', correctionApplied: 'Please paste the SQL query that produced the error in Box 2, then try again.', changes: [], ruleId: null };
     }
-
     var matched = RULES.filter(function (r) { return r.matchError && r.matchError.test(errorText); });
     for (var i = 0; i < matched.length; i++) {
       var res = matched[i].apply(sql, ctx);
@@ -369,7 +352,6 @@
       changes: [], ruleId: null
     };
   }
-
   var API = { rectify: rectify, detectDialectFromError: detectDialectFromError, levenshtein: levenshtein, findClosestName: findClosestName, extractTables: extractTables, DIALECTS: DIALECTS, RULES: RULES };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_ERROR_RECTIFIER = API;

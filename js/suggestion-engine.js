@@ -1,6 +1,5 @@
 (function (root) {
   'use strict';
-
   var RULES = [
     { match: function (m) { return /Table "[^"]*" does not exist in the active schema/.test(m); },
       suggest: 'Double-check the table name — open the "Pick Tables" search box and confirm it matches exactly, or browse Used Schema to see every available table.' },
@@ -33,7 +32,6 @@
     { match: function (m) { return /No column was specified/.test(m); },
       suggest: 'Make sure every filter row has a column chosen — an empty column selector will block the query from being built.' }
   ];
-
   function buildSuggestions(message) {
     var text = String(message || '');
     var out = [];
@@ -41,7 +39,6 @@
     if (!out.length) out.push('Review your table and column selections and filters, then try building the query again. If the problem continues, check Used Schema to confirm the tables/columns you need actually exist.');
     return out;
   }
-
   var API = { buildSuggestions: buildSuggestions };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_SUGGEST = API;

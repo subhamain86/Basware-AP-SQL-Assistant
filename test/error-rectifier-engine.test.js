@@ -5,7 +5,6 @@ var SCHEMA_ENGINE = require(path.join(__dirname, '..', 'js', 'schema-engine.js')
 global.APSQL_DATATYPE = require(path.join(__dirname, '..', 'js', 'datatype-engine.js'));
 var ERR = require(path.join(__dirname, '..', 'js', 'error-rectifier-engine.js'));
 var engine = SCHEMA_ENGINE.createEngine(schema);
-
 test('exact spec scenario: ORA-00932 on LOGIN_TYPE CASE/ELSE, Oracle dialect', function () {
   var sql = "SELECT\n    LOGIN_TYPE,\n    CASE\n        WHEN LOGIN_TYPE = 0 THEN 'Forms'\n        WHEN LOGIN_TYPE = 1 THEN 'Windows Domain'\n        ELSE LOGIN_TYPE\n    END AS LOGIN_TYPE\nFROM ADM_USER_DATA;";
   var error = 'ORA-00932: inconsistent datatypes: expected CHAR got NUMBER';

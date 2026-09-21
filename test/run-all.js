@@ -3,7 +3,6 @@ var fs = require('fs');
 var path = require('path');
 var total = 0, passed = 0, failedList = [];
 var pendingPromises = [];
-
 global.test = function (name, fn) {
   total++;
   var result;
@@ -23,12 +22,9 @@ global.assertTrue = function (value, msg) { if (!value) throw new Error(msg || '
 global.assertFalse = function (value, msg) { if (value) throw new Error(msg || 'expected falsy value'); };
 global.assertIncludes = function (haystack, needle, msg) { if (String(haystack).indexOf(needle) === -1) throw new Error((msg ? msg + ' — ' : '') + 'expected to find "' + needle + '" in: ' + haystack); };
 global.assertThrows = function (fn, msg) { var threw = false; try { fn(); } catch (e) { threw = true; } if (!threw) throw new Error(msg || 'expected function to throw'); };
-
 if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webcrypto;
-
 var files = fs.readdirSync(__dirname).filter(function (f) { return f.endsWith('.test.js'); }).sort();
 files.forEach(function (f) { console.log('\n' + f); require(path.join(__dirname, f)); });
-
 Promise.all(pendingPromises).then(function () {
   console.log('\n' + '='.repeat(60));
   console.log(passed + '/' + total + ' tests passing');

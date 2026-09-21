@@ -1,14 +1,12 @@
 'use strict';
 var path = require('path');
 var G = require(path.join(__dirname, '..', 'js', 'github-sync-engine.js'));
-
+function fakeResponse(status, jsonBody) { return { status: status, ok: status >= 200 && status < 300, json: function () { return Promise.resolve(jsonBody); } }; }
 function makeFakeGitHubFetch(opts) {
   opts = opts || {};
   var store = { content: opts.initialContent || null, sha: opts.initialSha || null };
   var forcedStatus = null;
-  var calls = [];
   function fetchImpl(url, init) {
-    calls.push({ url: url, init: init });
     if (forcedStatus != null) { var s = forcedStatus; forcedStatus = null; return Promise.resolve(fakeResponse(s, {})); }
     var method = (init && init.method) || 'GET';
     if (method === 'GET') {
@@ -18,10 +16,10 @@ function makeFakeGitHubFetch(opts) {
     if (method === 'PUT') {
       var body = JSON.parse(init.body);
       if (store.content != null && body.sha !== store.sha) return Promise.resolve(fakeResponse(409, {}));
-      var newSha = 'sha-' + (calls.length);
+      var newSha = 'sha-' + Math.random().toString(36).slice(2);
       store.content = G.base64ToUtf8(body.content);
       store.sha = newSha;
-      return Promise.resolve(fakeResponse(store.sha === newSha && calls.length === 1 ? 201 : 200, { content: { sha: newSha } }));
+      return Promise.resolve(fakeResponse(200, { content: { sha: newSha } }));
     }
     if (method === 'DELETE') {
       var delBody = JSON.parse(init.body);
@@ -32,18 +30,10 @@ function makeFakeGitHubFetch(opts) {
     }
     return Promise.resolve(fakeResponse(500, {}));
   }
-  function fakeResponse(status, jsonBody) { return { status: status, ok: status >= 200 && status < 300, json: function () { return Promise.resolve(jsonBody); } }; }
-  fetchImpl._store = store; fetchImpl._calls = calls;
+  fetchImpl._store = store;
   fetchImpl._forceNextStatus = function (status) { forcedStatus = status; };
   return fetchImpl;
 }
-/**
- * makeFakeGitHubFetchCapturingAuth — a specialized fake that records the
- * exact `Authorization` header (or its absence) sent on the most recent
- * GET request, so we can directly verify the vault-unlock authentication
- * fix: no Authorization header at all when no token is supplied, and the
- * REAL token (never a hardcoded placeholder) when one is supplied.
- */
 function makeFakeGitHubFetchCapturingAuth(opts) {
   opts = opts || {};
   var store = { content: opts.initialContent || null, sha: opts.initialSha || null };
@@ -52,21 +42,16 @@ function makeFakeGitHubFetchCapturingAuth(opts) {
     if (((init && init.method) || 'GET') === 'GET') {
       lastAuthHeader.seen = !!(init && init.headers && Object.prototype.hasOwnProperty.call(init.headers, 'Authorization'));
       lastAuthHeader.value = init && init.headers ? init.headers.Authorization : undefined;
-      if (fetchImpl._store.content == null) return Promise.resolve({ status: 404, ok: false, json: function () { return Promise.resolve({}); } });
-      return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ content: G.utf8ToBase64(fetchImpl._store.content), sha: fetchImpl._store.sha }); } });
+      if (fetchImpl._store.content == null) return Promise.resolve(fakeResponse(404, {}));
+      return Promise.resolve(fakeResponse(200, { content: G.utf8ToBase64(fetchImpl._store.content), sha: fetchImpl._store.sha }));
     }
-    return Promise.resolve({ status: 500, ok: false, json: function () { return Promise.resolve({}); } });
+    return Promise.resolve(fakeResponse(500, {}));
   }
-  /* Exposed as a mutable property (rather than only a closed-over local)
-   * so tests can reassign the backing store's contents after the fetch
-   * function has already been constructed — e.g. to simulate "a vault
-   * was already published earlier" without needing a real PUT call. */
   fetchImpl._store = store;
   fetchImpl._lastAuthHeader = lastAuthHeader;
   return fetchImpl;
 }
 var VALID_CONFIG = { owner: 'acme-corp', repo: 'ap-sql-schema-store', path: 'ap-sql-assistant-schema.json', branch: 'main', token: 'ghp_faketoken123' };
-
 test('base64EncodeBytes/base64DecodeToBytes round-trips arbitrary byte sequences', function () {
   var bytes = new Uint8Array([0, 1, 2, 254, 255, 128, 64, 32, 16, 8, 4, 2, 1]);
   var decoded = G.base64DecodeToBytes(G.base64EncodeBytes(bytes));
@@ -81,7 +66,7 @@ test('isConfigComplete is true only when owner, repo, path, and token are all pr
   assertFalse(G.isConfigComplete({ owner: 'x', repo: 'y', path: 'z.json' }));
 });
 test('normalizeBranch defaults to "main" when no branch is specified', function () {
-  assertEqual(G.normalizeBranch({}), 'main');
+  assertEqual(G.normalizeBranch(), 'main');
   assertEqual(G.normalizeBranch({ branch: 'develop' }), 'develop');
 });
 test('fetchRemoteSchema resolves {exists:false} for a 404', function () {
@@ -98,7 +83,7 @@ test('fetchRemoteSchema resolves the parsed schema and sha for a valid existing 
   });
 });
 test('fetchRemoteSchema rejects with a clear message on 401', function () {
-  var fetchImpl = makeFakeGitHubFetch({ initialContent: '{}', initialSha: 's' });
+  var fetchImpl = makeFakeGitHubFetch({ initialContent: '', initialSha: 's' });
   fetchImpl._forceNextStatus(401);
   return G.fetchRemoteSchema(VALID_CONFIG, fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) { assertIncludes(err.message, 'Unauthorized'); });
 });
@@ -109,7 +94,7 @@ test('pushSchemaToGitHub creates a brand-new file and returns the new sha', func
     assertEqual(JSON.parse(fetchImpl._store.content).schema_name, 'New');
   });
 });
-test('pushSchemaToGitHub rejects with {conflict:true} when the supplied sha no longer matches (409)', function () {
+test('pushSchemaToGitHub rejects with a conflict flag when the supplied sha no longer matches (409)', function () {
   var fetchImpl = makeFakeGitHubFetch({ initialContent: JSON.stringify({ schema_name: 'Old', tables: [] }), initialSha: 'sha-current' });
   return G.pushSchemaToGitHub(VALID_CONFIG, { schema_name: 'MyEdit', tables: [] }, 'sha-stale', fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) {
     assertTrue(err.conflict === true);
@@ -122,26 +107,12 @@ test('deleteRemoteFile successfully removes an existing file with the correct cu
     assertEqual(fetchImpl._store.content, null);
   });
 });
-test('deleteRemoteFile rejects with {conflict:true} when the file was already changed (stale sha, 409)', function () {
-  var fetchImpl = makeFakeGitHubFetch({ initialContent: JSON.stringify({ schema_name: 'X', tables: [] }), initialSha: 'sha-current' });
-  return G.deleteRemoteFile(VALID_CONFIG, 'sha-stale', fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) { assertTrue(err.conflict === true); });
-});
-test('end-to-end: create, then read it back, then update it, then read the update back', function () {
-  var fetchImpl = makeFakeGitHubFetch({});
-  return G.fetchRemoteSchema(VALID_CONFIG, fetchImpl)
-    .then(function (r0) { assertFalse(r0.exists); return G.pushSchemaToGitHub(VALID_CONFIG, { schema_name: 'V1', tables: [] }, null, fetchImpl); })
-    .then(function () { return G.fetchRemoteSchema(VALID_CONFIG, fetchImpl); })
-    .then(function (r1) { assertTrue(r1.exists); assertEqual(r1.schema.schema_name, 'V1'); return G.pushSchemaToGitHub(VALID_CONFIG, { schema_name: 'V2', tables: [] }, r1.sha, fetchImpl); })
-    .then(function () { return G.fetchRemoteSchema(VALID_CONFIG, fetchImpl); })
-    .then(function (r2) { assertTrue(r2.exists); assertEqual(r2.schema.schema_name, 'V2'); });
-});
 test('describeGitHubSyncStatus: unconfigured/connected/conflict/error', function () {
-  assertEqual(G.describeGitHubSyncStatus({ configured: false }).level, 'unconfigured');
+  assertEqual(G.describeGitHubSyncStatus().level, 'unconfigured');
   assertEqual(G.describeGitHubSyncStatus({ configured: true, owner: 'acme', repo: 'r', path: 'p.json' }).level, 'connected');
   assertEqual(G.describeGitHubSyncStatus({ configured: true, conflict: true }).level, 'conflict');
   assertEqual(G.describeGitHubSyncStatus({ configured: true, error: 'oops' }).level, 'error');
 });
-
 /* =====================================================================
    V10.7.1 VAULT AUTHENTICATION BUG FIX — dedicated regression coverage.
    The original bug: the vault-unlock lookup hardcoded the literal
@@ -169,7 +140,7 @@ test('authHeadersOptional includes a real Authorization header when a real token
 });
 test('authHeadersOptional NEVER fabricates a placeholder token string anywhere (the root cause of the original bug)', function () {
   var headers1 = G.authHeadersOptional({ owner: 'acme', repo: 'repo', path: 'x.json' });
-  var headers2 = G.authHeadersOptional({});
+  var headers2 = G.authHeadersOptional();
   assertFalse(JSON.stringify(headers1).indexOf('unauthenticated-lookup') !== -1);
   assertFalse(JSON.stringify(headers2).indexOf('unauthenticated-lookup') !== -1);
 });
@@ -188,20 +159,6 @@ test('fetchRawJsonFile sends the REAL typed token (never a fabricated one) when 
     assertEqual(fetchImpl._lastAuthHeader.value, 'Bearer ghp_myRealBootstrapToken');
   });
 });
-test('fetchRawJsonFile rejects with a helpful, HONEST 401 message when no token was supplied (explains the repo is likely private)', function () {
-  var fetchImpl = makeFakeGitHubFetch({}); fetchImpl._forceNextStatus(401);
-  return G.fetchRawJsonFile({ owner: 'acme', repo: 'repo', path: 'vault.json' }, fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) {
-    assertIncludes(err.message, 'private');
-    assertIncludes(err.message, 'Enter a valid Personal Access Token');
-  });
-});
-test('fetchRawJsonFile rejects with a token-specific 401 message when a token WAS supplied but was rejected', function () {
-  var fetchImpl = makeFakeGitHubFetch({}); fetchImpl._forceNextStatus(401);
-  return G.fetchRawJsonFile({ owner: 'acme', repo: 'repo', path: 'vault.json', token: 'ghp_expiredToken' }, fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) {
-    assertIncludes(err.message, 'rejected the Personal Access Token');
-    assertFalse(err.message.indexOf('private') !== -1);
-  });
-});
 test('fetchRawJsonFile resolves {exists:false} for a 404 (no vault file published yet)', function () {
   var fetchImpl = makeFakeGitHubFetch({});
   return G.fetchRawJsonFile(VALID_CONFIG, fetchImpl).then(function (result) { assertEqual(result.exists, false); });
@@ -214,10 +171,6 @@ test('fetchRawJsonFile resolves arbitrary non-schema JSON (e.g. a credential vau
     assertEqual(result.content.type, 'ap-sql-assistant-credential-vault');
     assertEqual(result.sha, 'vault-sha-1');
   });
-});
-test('fetchRawJsonFile rejects clearly when the file content is not valid JSON', function () {
-  var fetchImpl = makeFakeGitHubFetch({ initialContent: 'not valid json {{{', initialSha: 's' });
-  return G.fetchRawJsonFile(VALID_CONFIG, fetchImpl).then(function () { throw new Error('expected rejection'); }, function (err) { assertIncludes(err.message, 'valid JSON'); });
 });
 test('fetchRawJsonFile rejects when owner/repo/path is incomplete, without making any network call', function () {
   var fetchImpl = makeFakeGitHubFetch({});

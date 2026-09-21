@@ -1,17 +1,14 @@
 (function (root) {
   'use strict';
-
   function isFileSystemAccessSupported(win) {
     win = win || (typeof window !== 'undefined' ? window : {});
     return typeof win.showSaveFilePicker === 'function' && typeof win.showOpenFilePicker === 'function';
   }
-
   function createHandleStore(idbFactory) {
     idbFactory = idbFactory || (typeof indexedDB !== 'undefined' ? indexedDB : null);
     var DB_NAME = 'ap_sql_sync_v1';
     var STORE_NAME = 'handles';
     var HANDLE_KEY = 'linkedSchemaFile';
-
     function openDb() {
       return new Promise(function (resolve, reject) {
         if (!idbFactory) { reject(new Error('IndexedDB is not available in this browser.')); return; }
@@ -53,7 +50,6 @@
     }
     return { saveHandle: saveHandle, loadHandle: loadHandle, clearHandle: clearHandle };
   }
-
   function verifyPermission(handle, mode) {
     mode = mode || 'readwrite';
     var opts = { mode: mode };
@@ -66,7 +62,6 @@
     mode = mode || 'readwrite';
     return handle.queryPermission({ mode: mode }).then(function (status) { return status === 'granted'; });
   }
-
   function readSchemaFromHandle(handle) {
     return handle.getFile().then(function (file) {
       return file.text().then(function (text) {
@@ -83,7 +78,6 @@
       return writable.write(JSON.stringify(schemaObj, null, 2)).then(function () { return writable.close(); });
     });
   }
-
   function describeSyncStatus(state) {
     state = state || {};
     if (!state.supported) return { level: 'unsupported', text: 'This browser does not support linking a shared schema file (this needs Chrome, Edge, or another Chromium-based browser). The schema will stay saved only in this browser, as in previous versions.' };
@@ -92,7 +86,6 @@
     if (!state.linked) return { level: 'unlinked', text: 'Not linked to a shared file yet. The schema is currently saved only in this browser. Link a file in a shared location (SharePoint, OneDrive, or a network drive) to sync it across browsers, devices, and users.' };
     return { level: 'linked', text: 'Linked to "' + state.fileName + '". Every Apply / Delete / Save Relationship action also updates this shared file, and this browser automatically checks it for updates made elsewhere.' };
   }
-
   var API = {
     isFileSystemAccessSupported: isFileSystemAccessSupported,
     createHandleStore: createHandleStore,

@@ -4,12 +4,10 @@ if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webc
 var SCHEMA_TOOLS = require(path.join(__dirname, '..', 'js', 'schema-tools.js'));
 global.APSQL_SCHEMA_TOOLS = SCHEMA_TOOLS;
 var PWM = require(path.join(__dirname, '..', 'js', 'password-manager-engine.js'));
-
 function makeFakeStorage() {
   var data = {};
   return { getItem: function (k) { return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; }, setItem: function (k, v) { data[k] = String(v); }, removeItem: function (k) { delete data[k]; } };
 }
-
 test('a fresh password manager (no prior change) accepts the ORIGINAL hardcoded password — full backward compatibility', function () {
   var pm = PWM.createPasswordManager(makeFakeStorage());
   return pm.verifyCurrentPassword('P@assw0rd').then(function (ok) { assertTrue(ok); });
@@ -26,7 +24,6 @@ test('getCurrentHash returns the original hardcoded hash before any change', fun
   var pm = PWM.createPasswordManager(makeFakeStorage());
   assertEqual(pm.getCurrentHash(), SCHEMA_TOOLS.HARDCODED_PASSWORD_SHA256);
 });
-
 test('changePassword rejects when the supplied CURRENT password is wrong, and does not alter the active password', function () {
   var storage = makeFakeStorage();
   var pm = PWM.createPasswordManager(storage);
@@ -88,7 +85,6 @@ test('the new password is chained correctly: after one change, a SECOND change r
     return pm.verifyCurrentPassword('SecondNewPass1');
   }).then(function (works) { assertTrue(works); });
 });
-
 test('the changed password never appears in plain text anywhere in storage — only its SHA-256 hash is persisted', function () {
   var storage = makeFakeStorage();
   var pm = PWM.createPasswordManager(storage);
@@ -99,7 +95,6 @@ test('the changed password never appears in plain text anywhere in storage — o
     assertEqual(stored.length, 64);
   });
 });
-
 test('resetToDefault removes any custom password, reverting to accepting the original hardcoded password again', function () {
   var pm = PWM.createPasswordManager(makeFakeStorage());
   return pm.changePassword('P@assw0rd', 'TempPass123', 'TempPass123').then(function () {
@@ -108,12 +103,10 @@ test('resetToDefault removes any custom password, reverting to accepting the ori
     return pm.verifyCurrentPassword('P@assw0rd');
   }).then(function (works) { assertTrue(works); });
 });
-
 test('a password manager with no storage implementation at all still falls back correctly to the hardcoded default', function () {
   var pm = PWM.createPasswordManager(null);
   return pm.verifyCurrentPassword('P@assw0rd').then(function (ok) { assertTrue(ok); });
 });
-
 test('two separate browsers (two separate storage instances) are entirely independent: changing the password in one does not affect the other', function () {
   var pmBrowserA = PWM.createPasswordManager(makeFakeStorage());
   var pmBrowserB = PWM.createPasswordManager(makeFakeStorage());

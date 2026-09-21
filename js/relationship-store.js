@@ -1,10 +1,8 @@
 (function (root) {
   'use strict';
-
   function createRelationshipStore() {
     var manual = {};
     function key(a, b) { return [String(a).toUpperCase(), String(b).toUpperCase()].sort().join('__'); }
-
     function setManualRelationship(fromTable, fromColumn, toTable, toColumn) {
       manual[key(fromTable, toTable)] = {
         fromTable: String(fromTable).toUpperCase(), fromColumn: String(fromColumn).toUpperCase(),
@@ -16,7 +14,6 @@
     function clearManualRelationship(a, b) { delete manual[key(a, b)]; }
     function clearAll() { manual = {}; }
     function listManualRelationships() { return Object.keys(manual).map(function (k) { return manual[k]; }); }
-
     return {
       setManualRelationship: setManualRelationship,
       getManualRelationship: getManualRelationship,
@@ -26,7 +23,6 @@
       listManualRelationships: listManualRelationships
     };
   }
-
   function createEffectiveEngine(baseEngine, relationshipStore) {
     var wrapped = {};
     Object.keys(baseEngine).forEach(function (k) { wrapped[k] = baseEngine[k]; });
@@ -37,7 +33,6 @@
     };
     return wrapped;
   }
-
   var API = { createRelationshipStore: createRelationshipStore, createEffectiveEngine: createEffectiveEngine };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_RELATIONSHIPS = API;

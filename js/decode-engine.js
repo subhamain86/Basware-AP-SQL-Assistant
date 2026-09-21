@@ -1,7 +1,6 @@
 (function (root) {
   'use strict';
   var DATATYPE = (typeof module === 'object' && module.exports) ? require('./datatype-engine.js') : root.APSQL_DATATYPE;
-
   function createDecodeStore() {
     var manual = {};
     function key(table, column) { return String(table).toUpperCase() + '.' + String(column).toUpperCase(); }

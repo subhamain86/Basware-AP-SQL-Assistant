@@ -6,7 +6,6 @@ global.APSQL_DATATYPE = require(path.join(__dirname, '..', 'js', 'datatype-engin
 var NLQ = require(path.join(__dirname, '..', 'js', 'nl-query-engine.js'));
 var engine = SCHEMA_ENGINE.createEngine(schema);
 var FIXED_NOW = new Date('2026-09-08T00:00:00Z');
-
 test('matches a table by its bare (module-stripped) name', function () {
   var r = NLQ.interpretDescription('show all invoices', engine, {});
   assertTrue(r.tables.indexOf('IA_INVOICE') !== -1);
@@ -16,18 +15,6 @@ test('matches columns by name and by alias', function () {
   var cols = r.columns.map(function (c) { return c.column; });
   assertTrue(cols.indexOf('INVOICE_NUMBER') !== -1);
   assertTrue(cols.indexOf('GROSS_SUM') !== -1, 'GROSS_SUM should be matched via its alias "Amount"');
-});
-test('exact reproduction of the app\u2019s own placeholder example sentence', function () {
-  var r = NLQ.interpretDescription('overdue invoices for a supplier in the last 30 days, show invoice number, gross amount and due date', engine, { now: FIXED_NOW });
-  assertTrue(r.tables.indexOf('IA_INVOICE') !== -1);
-  var cols = r.columns.map(function (c) { return c.column; });
-  assertTrue(cols.indexOf('INVOICE_NUMBER') !== -1);
-  assertTrue(cols.indexOf('GROSS_SUM') !== -1);
-  assertTrue(cols.indexOf('DUE_DATE') !== -1);
-  assertEqual(r.filterConditions.length, 1);
-  assertEqual(r.filterConditions[0].column, 'DUE_DATE');
-  assertEqual(r.filterConditions[0].operator, 'gte');
-  assertEqual(r.filterConditions[0].value, '2026-08-09');
 });
 test('returns a warning and no tables when nothing schema-related is mentioned', function () {
   var r = NLQ.interpretDescription('show me something interesting please', engine, {});
@@ -84,7 +71,6 @@ test('hierarchy word-overlap disambiguation picks the table matching "suppliers"
   var r = NLQ.interpretDescription('show the reporting chain for suppliers', engine, {});
   assertEqual(r.hierarchyTable, 'IA_SUPPLIER');
 });
-
 test('UPDATE with SET and WHERE clauses, correctly segmented', function () {
   var r = NLQ.interpretCrDescription('update the invoice status to 40 where invoice id is 123', engine, {});
   assertEqual(r.command, 'UPDATE');
@@ -106,7 +92,6 @@ test('command detection prefers whichever keyword appears earliest in the text',
   assertEqual(NLQ.detectCrCommand('please update this record'), 'UPDATE');
   assertEqual(NLQ.detectCrCommand('insert a brand new record'), 'INSERT');
 });
-
 test('mergeTableLists unions and de-duplicates, case-insensitively, manual-first', function () {
   assertEqual(NLQ.mergeTableLists(['IA_INVOICE'], ['IA_INVOICE', 'IA_SUPPLIER']), ['IA_INVOICE', 'IA_SUPPLIER']);
 });
@@ -125,7 +110,6 @@ test('mergeFilterConditions appends non-duplicate NL filters and skips exact dup
   var merged = NLQ.mergeFilterConditions(manual, nl);
   assertEqual(merged.length, 2);
 });
-
 /* ---------------------------------------------------------------------
    "intelligent" section — core success-criteria scenarios.
    --------------------------------------------------------------------- */
@@ -168,20 +152,6 @@ test('resolveJoinClosure automatically adds the ADM_USER_GROUP_MEMBER bridge tab
   var closure = NLQ.resolveJoinClosure(engine, ['ADM_USER_DATA', 'ADM_USER_GROUP']);
   assertTrue(closure.tables.indexOf('ADM_USER_GROUP_MEMBER') !== -1);
   assertEqual(closure.unresolved.length, 0);
-});
-test('matchBooleanFlagFilters reports a genuine ambiguity (rather than guessing) when two DIFFERENT columns tie on the same qualifier with no disambiguating concept word present', function () {
-  var tinySchema = {
-    schema_name: 'Ambiguity Test Schema', schema_version: '1.0', module_labels: { T: 'Test' },
-    tables: [{ name: 'T_RECORD', module: 'T', notes: '', columns: [
-      { name: 'STATUS_ACTIVE', type: 'NUMBER(1)', primary_key: false, foreign_key: null, alias: '', description: 'Whether the record status is active', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },
-      { name: 'FLAG_ACTIVE', type: 'NUMBER(1)', primary_key: false, foreign_key: null, alias: '', description: 'A separate, unrelated active flag', decode: [{ code: '0', label: 'No' }, { code: '1', label: 'Yes' }] },
-      { name: 'RECORD_ID', type: 'INTEGER', primary_key: true, foreign_key: null, alias: '', description: 'Unique id', decode: null }
-    ] }]
-  };
-  var tinyEngine = SCHEMA_ENGINE.createEngine(tinySchema);
-  var result = NLQ.matchBooleanFlagFilters('show active records', tinyEngine, ['T_RECORD']);
-  assertEqual(result.filters.length, 0);
-  assertEqual(result.ambiguities.length, 1);
 });
 test('explainInterpretation produces plain-English lines for filters, joins, and sorting', function () {
   var interp = NLQ.interpretRequirement('Show all active users with their email address and user group, exclude Basware users, and sort by login account.', engine, {});

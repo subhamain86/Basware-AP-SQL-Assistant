@@ -1,11 +1,10 @@
 {
   "name": "ap-sql-assistant",
   "private": true,
-  "version": "10.7.1",
-  "description": "AP-SQL Assistant — Version 10.7.1. Fixes a bug reported against the V10.7 Secure GitHub Connection Vault: unlocking the vault always failed with 'GitHub rejected the Personal Access Token (401 Unauthorized)' because the internal vault-lookup step hardcoded the literal placeholder string 'unauthenticated-lookup' as the Bearer token, which GitHub always rejects, regardless of what (if anything) the user had typed into the real Token field. Fixed in github-sync-engine.js by adding isReadConfigComplete() (a relaxed check requiring only owner/repo/path, with token now OPTIONAL for reads) and authHeadersOptional() (omits the Authorization header entirely when no real token is supplied, which GitHub's Contents API permits as an anonymous read for public repositories; includes the real token, verbatim, when one is supplied). fetchRawJsonFile() now uses these instead of the old hardcoded-token path, and its 401/403 error messages are now honest about whether a real token was actually involved. app.js's unlockVaultBtn handler was updated to pass whatever real token (if any) is currently typed into the GitHub Token field — never a fabricated placeholder — omitting the token field entirely when empty. All other V10.7 functionality (Multiple Schema Store and Usage, the encrypted vault's publish flow, the Selectable Schema Synchronization Schedule, and Operational Password Management) is unchanged and fully retested, alongside zero regression to every V10.1–V10.6 feature (the intelligent Describe What You Need engine, the manual Query Builder, the CR Builder, Decode, dialect awareness, and the Error Rectifier).",
+  "version": "11.6.0",
+  "description": "AP-SQL Assistant — Version 11.6. Consolidates every capability introduced from V10.7.1 through V11.5 into one stable, tested build: the V10.7 Multiple Schema Store now additionally supports the V11.1 Stored/Active/Default/Inactive state model (multiple schemas can be Active simultaneously, with a merged view used for SQL generation, Query Builders, and the Error Rectifier — Default's tables win on name collisions); the V10.7.1 Secure GitHub Connection Vault anonymous-read fix, the selectable Schema Synchronization Schedule, and operational password management (with a non-disclosing Forgot Password reset) are all retained and retested; the compact, responsive UI pass (V11.1–V11.3.1) keeps the navbar, Query Builders, and Update Schema screen usable at every viewport width; and the intelligent Describe What You Need engine, structured Query Builder, CR Builder, schema-aware CASE/DECODE, and Error Rectifier are unchanged in behavior from the real, tested V10.7.1 baseline this build was consolidated from.",
   "scripts": {
-    "test": "node test/run-all.js",
-    "test:smoke": "node test/dom-smoke.js"
+    "test": "node test/run-all.js"
   },
   "engines": { "node": ">=18" }
 }

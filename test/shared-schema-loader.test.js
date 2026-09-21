@@ -1,7 +1,6 @@
 'use strict';
 var path = require('path');
 var S = require(path.join(__dirname, '..', 'js', 'shared-schema-loader.js'));
-
 function fakeFetch(status, bodyText, opts) {
   opts = opts || {};
   return function () {
@@ -9,7 +8,6 @@ function fakeFetch(status, bodyText, opts) {
     return Promise.resolve({ status: status, ok: status >= 200 && status < 300, text: function () { return Promise.resolve(bodyText); } });
   };
 }
-
 test('buildFetchUrl uses the default path when none is supplied', function () {
   assertIncludes(S.buildFetchUrl(), 'schema/shared-schema.json');
 });

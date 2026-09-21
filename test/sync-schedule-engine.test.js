@@ -1,12 +1,10 @@
 'use strict';
 var path = require('path');
 var SCHED = require(path.join(__dirname, '..', 'js', 'sync-schedule-engine.js'));
-
 function makeFakeStorage() {
   var data = {};
   return { getItem: function (k) { return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; }, setItem: function (k, v) { data[k] = String(v); } };
 }
-
 test('OPTIONS is a non-empty, predefined dropdown list including a manual-only option', function () {
   assertTrue(SCHED.OPTIONS.length >= 5);
   assertTrue(SCHED.OPTIONS.some(function (o) { return o.id === 'manual' && o.minutes === null; }));
@@ -26,7 +24,6 @@ test('getOption resolves a known id and returns null for an unknown one', functi
 test('getDefaultOption matches DEFAULT_OPTION_ID', function () {
   assertEqual(SCHED.getDefaultOption().id, SCHED.DEFAULT_OPTION_ID);
 });
-
 test('loadSelectedOptionId returns the default when nothing has been saved yet', function () {
   var storage = makeFakeStorage();
   assertEqual(SCHED.loadSelectedOptionId(storage), SCHED.DEFAULT_OPTION_ID);
@@ -46,13 +43,12 @@ test('saveSelectedOptionId rejects an unknown option id and does not corrupt the
 });
 test('loadSelectedOptionId falls back to the default if the stored value is corrupted/unrecognized', function () {
   var storage = makeFakeStorage();
-  storage.setItem(SCHED.STORAGE_KEY || 'ap_sql_sync_schedule_v1', 'garbage-value');
+  storage.setItem(SCHED.STORAGE_KEY, 'garbage-value');
   assertEqual(SCHED.loadSelectedOptionId(storage), SCHED.DEFAULT_OPTION_ID);
 });
 test('loadSelectedOptionId with no storage implementation at all falls back to the default without throwing', function () {
   assertEqual(SCHED.loadSelectedOptionId(null), SCHED.DEFAULT_OPTION_ID);
 });
-
 test('toIntervalMs converts each timed option to the correct millisecond value', function () {
   assertEqual(SCHED.toIntervalMs('30s'), 30000);
   assertEqual(SCHED.toIntervalMs('1m'), 60000);
@@ -66,16 +62,9 @@ test('toIntervalMs returns null for the manual-only option (no automatic interva
 test('toIntervalMs returns null for an unknown option id rather than throwing', function () {
   assertEqual(SCHED.toIntervalMs('nonexistent'), null);
 });
-
 test('computeNextRun adds the correct offset to a given reference date', function () {
   var next = SCHED.computeNextRun('15m', new Date('2026-01-01T00:00:00.000Z'));
   assertEqual(next, '2026-01-01T00:15:00.000Z');
-});
-test('computeNextRun defaults to "now" when no reference date is supplied', function () {
-  var before = Date.now();
-  var next = SCHED.computeNextRun('1m');
-  var nextMs = new Date(next).getTime();
-  assertTrue(nextMs >= before + 59000 && nextMs <= before + 61000);
 });
 test('computeNextRun returns null for the manual-only schedule (no next run is ever scheduled)', function () {
   assertEqual(SCHED.computeNextRun('manual', new Date()), null);

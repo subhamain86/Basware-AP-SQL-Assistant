@@ -1,88 +1,86 @@
-# AP-SQL Assistant — Version 11.5
-**Full Functionality Consolidation, Advanced SQL Engine & Production-Ready UI**
+# AP-SQL Assistant — Version 11.6
 
-AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema(s) as its single source of truth.
+AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema(s) as its single source of truth. No production database connection is ever required or made; the app only *generates* SQL for you to review and run through your own approved channels.
 
-> ⚠️ **Generated SQL only.** This application never connects to, or executes SQL against, a production database.
+> ⚠️ **Generated SQL only** — this application does not execute database changes.
 
-## What V11.5 is
+## What V11.6 is
 
-V11.5 consolidates every working capability shipped from V5.x through V11.4 into one stable, complete build, restores anything that had regressed along the way, and adds:
+This build is a **consolidation, stabilization, and enhancement release**, not a rewrite. Per the master upgrade directive, every version from **V10.7.1 through V11.5 is treated as one cumulative set of incremental requirements for a single application** — nothing that worked before was removed or replaced merely to simplify the implementation. Concretely:
 
-1. **A rebuilt, schema-first Natural Language → SQL engine** (`js/nl-query-engine.js` + `js/conversation-engine.js` + `js/sql-engine.js` + `js/validation-engine.js`) that follows the pipeline: Intent Detection → Entity Identification → Active Schema Analysis → Table/Column Resolution → Relationship Resolution → Filter Resolution → Aggregation/Grouping Resolution → Query Plan → SQL Generation → Validation → Self-Correction → Final SQL.
-2. **Conversational query refinement** — follow-up instructions ("only show the last 3 months", "add supplier name", "sort by highest amount") progressively refine the same query instead of starting over.
-3. **Expanded SQL coverage**: SELECT/DISTINCT, WHERE (AND/OR/NOT, nested), ORDER BY, GROUP BY/HAVING, all five aggregate functions, INNER/LEFT/RIGHT/FULL/CROSS joins auto-resolved from schema relationships, subqueries, EXISTS/NOT EXISTS, IN/NOT IN, BETWEEN, LIKE/NOT LIKE, NULL handling, CASE/DECODE, named CTEs, recursive CTEs (hierarchy walks), window/ranking functions, UNION/UNION ALL/INTERSECT/EXCEPT (MINUS on Oracle), Top-N, duplicate detection, and dialect-aware limiting (TOP / LIMIT / FETCH FIRST).
-4. **Multiple Schema Architecture**, fully consolidated: Stored / Active / Default / Inactive states, a merged view of every Active schema (Default wins on name collisions) used everywhere SQL is generated, and safeguards so the Default schema can never be silently deactivated.
-5. **A compact, responsive Bootstrap 5 UI** across every page, with a navbar and Guided Walkthrough that always stay within the screen at any width.
+- **V10.7.1 baseline (unchanged behavior, retested):** the intelligent Describe What You Need engine (both the base V10.1–V10.5 matcher and the V10.6 "intelligent" engine with boolean-flag disambiguation, exclusion/membership/date-range filters, aggregation + GROUP BY/HAVING inference, join-closure resolution, and ambiguity detection), the structured Read Only Query Builder, the CR Builder with mandatory WHERE protection, schema-aware CASE/DECODE with dialect-correct ELSE conversion, the rule-based Error Rectifier, Live Shared Schema, Cross-Device Schema Sync (File System Access API), and GitHub-Hosted Schema Sync — **including the V10.7.1 fix** that made the Secure GitHub Connection Vault's unlock step use a real/omitted token instead of a hardcoded placeholder (previously always 401'd).
+- **V10.7 — Multiple Schema Store:** many named schemas can be stored, added, renamed, and deleted independently; each tracks its own sync status in isolation.
+- **V11.1 — additive multi-schema state model:** every stored schema now also has a **Stored / Active / Default / Inactive** state. Multiple schemas can be **Active** at once (a merged view of their tables is used for SQL generation, both Query Builders, and the Error Rectifier — the **Default** schema's tables win on name collisions). Exactly one schema is always the **Default** (the sync target); it is always Active and can't be deactivated directly — change the Default first. The original V10.7.1 single-schema API (`getActiveId`/`getActiveSchema`/`setActiveId`) is preserved byte-for-byte in behavior and now simply resolves to the Default/merged-Active view, so no existing call site changed.
+- **V10.8 — Guided Walkthrough**, **V11.1 UI rectification**, **V11.3 compact UI**, **V11.3.1 navbar-fit hardening:** the shared responsive/compact CSS pass (scrollable table/column panels, a navbar that never overflows at any width, `overflow-wrap: anywhere` on SQL/JSON output) is carried forward.
+- **Operational password:** unchanged mechanism — SHA-256 hashed, default `P@assw0rd`, changeable (requires the current password), and a **Forgot Password** reset that restores the default without ever displaying it.
+- **V11.6 (this build):** every one of the above is verified together in a single, consolidated codebase and test suite, with the version number and About panel updated accordingly.
 
 ## Getting started
 
-Open `index.html` directly in a modern browser (Chrome/Edge/Firefox) — everything runs client-side; no server or build step is required. Some features (GitHub sync, the Live Shared Schema check, and the shared/linked-file options) require the app to be served over `http://` rather than opened via `file://`, because browsers block same-origin `fetch()` of local files under `file://`. A simple way to do that locally:
+Open `index.html` directly in a modern browser (Chrome/Edge recommended for the Cross-Device Schema Sync file-linking feature — every other feature works in any modern browser). No build step or server is required. Some features (GitHub sync, the Live Shared Schema check) require the app to be served over `http://` rather than opened via `file://`:
 
 ```bash
 npx http-server .
 ```
 
-or push the folder to GitHub Pages using the included workflow (see below).
+or push this folder to GitHub Pages using the included workflow.
 
 ### Default administrator password
 
-Update Schema, manual CASE/DECODE approval, and every other admin-gated action share **one** operational password, stored only as a SHA-256 hash (never in plaintext, never logged):
+Update Schema and every other admin-gated action share one operational password, stored only as a SHA-256 hash (never in plain text, never logged, never exposed in the UI):
 
 ```
 P@assw0rd
 ```
 
-Change it any time from **Update Schema → Operational Password**. If it's forgotten, use **Forgot password? Reset to default** on the locked Update Schema screen — this restores `P@assw0rd` without ever displaying it, and never deletes any stored schema.
+Change it any time from **Update Schema → Operational Password**. If it's forgotten, use **Forgot password? Reset to default** — this restores `P@assw0rd` without ever displaying it, and never deletes any stored schema.
 
 ## Project structure
 
 ```
 ap-sql-assistant/
-├── index.html                     # Application shell — every page as an .app-view
-├── css/styles.css                 # Compact, responsive, overflow-safe Bootstrap-based styling
+├── index.html                     # Application shell — every view as a .app-view section
+├── css/styles.css                 # Compact, responsive styling (V11.1–V11.3.1 rectification pass)
 ├── js/
-│   ├── schema-tools.js            # Hashing, schema validation, sample-format generation, CSV helpers
-│   ├── schema-engine.js           # Table/column/relationship lookups over a single schema object
-│   ├── schema-store-engine.js     # Stored/Active/Default/Inactive schema state + merged-schema builder
-│   ├── relationship-store.js      # Manual relationship overrides (used when the schema lacks one)
-│   ├── datatype-engine.js         # Dialect-aware casting / literal formatting
-│   ├── decode-engine.js           # Schema-first CASE/DECODE resolution + manual-definition safeguards
-│   ├── filter-engine.js           # WHERE clause / filter-condition building
-│   ├── sql-engine.js              # Read-only SELECT/WITH SQL generation (joins, CTEs, windows, sets…)
-│   ├── cr-engine.js                # INSERT/UPDATE/DELETE text with mandatory WHERE protection
-│   ├── nl-query-engine.js         # Natural-language → query plan (schema-grounded, no hallucination)
-│   ├── conversation-engine.js     # Conversational follow-up refinement of the last query plan
-│   ├── validation-engine.js       # Pre-display SQL validation + bounded self-correction
-│   ├── error-rectifier-engine.js  # Schema-aware error-driven SQL correction
-│   ├── optimize-engine.js         # Plain-language query explanation + optimization hints
-│   ├── password-manager-engine.js # Centralized, SHA-256-hashed operational password
+│   ├── schema-tools.js            # SHA-256 hashing, schema validation/diff/merge, sample & export blobs (JSON/CSV/DOCX/XLSX/DOC)
+│   ├── schema-engine.js           # Core schema lookups (tables, columns, relationships, self-references)
+│   ├── schema-store-engine.js     # V10.7 multi-schema store + V11.1 Stored/Active/Default/Inactive state model
+│   ├── relationship-store.js      # Manual table relationship overrides (session-scoped, or saved permanently)
+│   ├── datatype-engine.js         # Dialect-aware datatype classification / CASE-ELSE conversion rules
+│   ├── decode-engine.js           # Schema-first CASE/DECODE resolution (schema-defined wins over manual)
+│   ├── filter-engine.js           # WHERE condition building incl. IN/NOT IN, BETWEEN, LIKE family
+│   ├── validation-engine.js       # Pre-generation validation of SELECT/CR requests against the active schema
+│   ├── sql-engine.js              # Read-only SELECT/WITH SQL generation (joins, EXISTS, scalar subqueries, recursive hierarchy)
+│   ├── cr-engine.js                # INSERT/UPDATE/DELETE text generation with mandatory WHERE protection
+│   ├── nl-query-engine.js         # Natural-language interpretation (base + "intelligent" V10.6 engine)
+│   ├── error-rectifier-engine.js  # Rule-based, schema- and dialect-aware SQL error correction
+│   ├── optimize-engine.js         # Redundant-DISTINCT removal + plain-language optimization recommendations
+│   ├── suggestion-engine.js       # Suggested fixes for rejected/ambiguous requests
+│   ├── password-manager-engine.js # SHA-256-hashed operational password, change + reset-to-default
 │   ├── credential-vault-engine.js # AES-256-GCM + PBKDF2 (210,000 iterations) GitHub token vault
-│   ├── github-sync-engine.js      # GitHub schema sync (anonymous read, authenticated publish)
-│   ├── schema-sync-engine.js      # Cross-device linked-file sync (File System Access API)
-│   ├── shared-schema-loader.js    # "Live Shared Schema" zero-setup check on load
+│   ├── github-sync-engine.js      # GitHub schema sync — anonymous read (V10.7.1 fix) + authenticated write
+│   ├── schema-sync-engine.js      # Cross-device linked-file sync (File System Access API + IndexedDB)
+│   ├── shared-schema-loader.js    # "Live Shared Schema" zero-setup check on every page load
 │   ├── sync-schedule-engine.js    # Predefined synchronization schedule options
-│   ├── suggestion-engine.js       # Suggested fixes for unresolved/ambiguous requests
 │   └── app.js                     # UI wiring for every page
 ├── schema/schema-sample.js        # Embedded default schema (replace via Update Schema at any time)
-├── test/smoke-test.js             # Node-based smoke tests for every engine (59 checks)
-└── .github/workflows/deploy-pages.yml   # GitHub Pages deployment workflow
+├── test/                          # 279 Node-based smoke tests across every engine
+└── .github/workflows/deploy-pages.yml
 ```
 
 ## Running tests
 
 ```bash
-node test/smoke-test.js
+node test/run-all.js
 ```
 
-59 checks covering schema validation, CSV round-tripping, single- and multi-table SQL generation, joins, aggregation/GROUP BY/HAVING, CTEs, window functions, EXISTS filters, recursive hierarchy walks, set operations, SQL validation/self-correction, CR INSERT/UPDATE/DELETE with WHERE protection, the error rectifier, natural-language interpretation, conversational refinement, decode conflict protection, the GitHub anonymous-read fix, the Stored/Active/Default/Inactive schema-state model, the sync schedule, the encrypted credential vault, and the password manager (including the Forgot Password recovery path). All 59 pass on this build.
+279 checks covering schema lookups/relationships, filter/WHERE building (including IN/NOT IN), CASE/DECODE resolution and dialect-aware ELSE conversion, SQL generation (joins, EXISTS, scalar subqueries, recursive hierarchies, GROUP BY/HAVING, aggregates), CR INSERT/UPDATE/DELETE with WHERE protection, the rule-based Error Rectifier (10 correction rules), the natural-language engine (both the base matcher and the intelligent V10.6 engine — boolean-flag disambiguation, exclusion/membership/date-range filters, join-closure resolution, ambiguity detection, a synthetic 300-table performance check), schema import/export/diff/merge, the V10.7/V11.1 Stored/Active/Default/Inactive schema-state model, the encrypted credential vault (including tamper detection), the V10.7.1 GitHub anonymous-read fix (end-to-end regression test), the synchronization schedule, and the operational password manager (including the Forgot Password recovery path). **All 279 pass on this build.**
 
 ## Security notes
 
 - The application performs **no execution** of SQL against any database — only generation, for manual review through your own approved change process.
-- GitHub Personal Access Tokens are only ever stored **encrypted** (AES-256-GCM, PBKDF2-derived key, 210,000 iterations) in the Secure GitHub Connection Vault — never in plaintext, and reading a public schema file never requires a token.
+- GitHub Personal Access Tokens are only ever stored **encrypted** (AES-256-GCM, PBKDF2-derived key, 210,000 iterations) in the Secure GitHub Connection Vault — never in plaintext; reading a public schema file never requires a token.
 - The operational/admin password is stored locally only as a SHA-256 hash; it is never displayed, logged, or recoverable in plaintext — only resettable to the documented default.
-- The Read Only Query Builder rejects INSERT/UPDATE/DELETE/MERGE/DROP/ALTER/TRUNCATE/CREATE/GRANT/REVOKE if they ever appear in generated SQL.
 - CR UPDATE/DELETE without a WHERE condition is blocked unless explicitly overridden and acknowledged in the UI.
 
 ## Author

@@ -3,7 +3,6 @@
   var FILTER = (typeof module === 'object' && module.exports) ? require('./filter-engine.js') : root.APSQL_FILTER;
   var DECODE = (typeof module === 'object' && module.exports) ? require('./decode-engine.js') : root.APSQL_DECODE;
   var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
-
   function limitClause(dialect, n) {
     switch (dialect) { case 'SQL Server': return { top: 'TOP ' + n, tail: '' }; case 'Oracle': return { top: '', tail: 'FETCH FIRST ' + n + ' ROWS ONLY' }; default: return { top: '', tail: 'LIMIT ' + n }; }
   }

@@ -3,7 +3,6 @@
   var FILTER = (typeof module === 'object' && module.exports) ? require('./filter-engine.js') : root.APSQL_FILTER;
   var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
   var SAFETY_BANNER = 'Generated SQL only \u2013 this application does not execute database changes.';
-
   function sqlLiteralForColumn(engine, table, columnName, rawValue) {
     var col = engine.getColumn(table, columnName);
     var isNumericType = col && /^(INT|NUMBER|NUMERIC|DECIMAL|FLOAT|DOUBLE|BIGINT|SMALLINT)/i.test(col.type || '');

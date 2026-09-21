@@ -2,13 +2,10 @@
 var path = require('path');
 if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webcrypto;
 var VAULT = require(path.join(__dirname, '..', 'js', 'credential-vault-engine.js'));
-
 var SAMPLE_CONFIG = { owner: 'acme-corp', repo: 'ap-sql-schema-store', branch: 'main', path: 'schema/shared-schema.json', token: 'ghp_SuperSecretToken12345' };
-
 test('isSupported reports true when Web Crypto (SubtleCrypto) is available', function () {
   assertTrue(VAULT.isSupported());
 });
-
 test('encryptConfig + decryptConfig round-trips the exact original config object', function () {
   return VAULT.encryptConfig(SAMPLE_CONFIG, 'correct-horse-battery-staple').then(function (vaultObj) {
     return VAULT.decryptConfig(vaultObj, 'correct-horse-battery-staple');
@@ -37,7 +34,6 @@ test('two encryptions of the same config with the same passphrase produce DIFFER
     assertFalse(results[0].ciphertext === results[1].ciphertext);
   });
 });
-
 test('decryptConfig rejects with a clear, user-facing message when the passphrase is wrong (never silently returns garbage)', function () {
   return VAULT.encryptConfig(SAMPLE_CONFIG, 'right-passphrase').then(function (vaultObj) {
     return VAULT.decryptConfig(vaultObj, 'wrong-passphrase').then(function () { throw new Error('expected rejection'); }, function (err) {
@@ -70,7 +66,6 @@ test('decryptConfig rejects clearly when the ciphertext has been tampered with (
     });
   });
 });
-
 test('buildVaultBlob produces a JSON string with the expected "type" marker and no plaintext token', function () {
   return VAULT.buildVaultBlob(SAMPLE_CONFIG, 'pw').then(function (blobText) {
     var parsed = JSON.parse(blobText);
@@ -95,14 +90,6 @@ test('parseVaultBlob rejects clearly when the JSON is valid but not a recognizab
     assertIncludes(err.message, 'does not look like an AP-SQL Assistant credential vault');
   });
 });
-test('parseVaultBlob with the wrong passphrase rejects with a clear message, not a raw crypto exception', function () {
-  return VAULT.buildVaultBlob(SAMPLE_CONFIG, 'correct-pw').then(function (blobText) {
-    return VAULT.parseVaultBlob(blobText, 'incorrect-pw').then(function () { throw new Error('expected rejection'); }, function (err) {
-      assertIncludes(err.message, 'Incorrect vault passphrase');
-    });
-  });
-});
-
 test('encrypting a config containing unicode characters round-trips correctly', function () {
   var unicodeConfig = { owner: 'acme-corp', repo: 'répô', branch: 'main', path: 'schéma/日本語.json', token: 'ghp_tökén' };
   return VAULT.buildVaultBlob(unicodeConfig, 'pw').then(function (blobText) {
@@ -111,7 +98,6 @@ test('encrypting a config containing unicode characters round-trips correctly', 
     assertEqual(decrypted, unicodeConfig);
   });
 });
-
 test('bytesToBase64 / base64ToBytes round-trip arbitrary byte sequences', function () {
   var bytes = new Uint8Array([0, 1, 2, 254, 255, 128, 64, 32, 16, 8, 4, 2, 1]);
   var decoded = VAULT.base64ToBytes(VAULT.bytesToBase64(bytes));

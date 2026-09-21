@@ -4,6 +4,7 @@ if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webc
 var TOOLS = require(path.join(__dirname, '..', 'js', 'schema-tools.js'));
 var schema = require(path.join(__dirname, '..', 'schema', 'schema-sample.js'));
 test('verifyPassword rejects wrong password', function () { return TOOLS.verifyPassword('wrong').then(function (ok) { assertFalse(ok); }); });
+test('verifyPassword accepts the documented default password', function () { return TOOLS.verifyPassword('P@assw0rd').then(function (ok) { assertTrue(ok); }); });
 test('sha256Fallback stable 64-char hex', function () { var h = TOOLS.sha256Fallback('hello'); assertEqual(h.length, 64); assertTrue(/^[0-9a-f]{64}$/.test(h)); });
 test('parseCsvText handles quotes/commas', function () { assertEqual(TOOLS.parseCsvText('A,B\n1,"a, b"')[1][1], 'a, b'); });
 test('csvToTables rejects short file', function () { assertThrows(function () { TOOLS.csvToTables('OnlyHeader'); }); });
@@ -37,4 +38,7 @@ test('saveRelationshipToSchema never mutates the schema it was given', function 
 test('saveRelationshipToSchema throws clear errors for unknown table/column', function () {
   assertThrows(function () { TOOLS.saveRelationshipToSchema(schema, 'NOPE_TABLE', 'X', 'IA_INVOICE', 'INVOICE_ID'); });
   assertThrows(function () { TOOLS.saveRelationshipToSchema(schema, 'OM_ORDER', 'NOPE_COLUMN', 'IA_INVOICE', 'INVOICE_ID'); });
+});
+test('HARDCODED_PASSWORD_SHA256 matches the SHA-256 hash of the documented default password', function () {
+  return TOOLS.sha256Hex('P@assw0rd').then(function (h) { assertEqual(h, TOOLS.HARDCODED_PASSWORD_SHA256); });
 });

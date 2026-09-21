@@ -1,14 +1,12 @@
 'use strict';
 var path = require('path');
 var F = require(path.join(__dirname, '..', 'js', 'filter-engine.js'));
-
 test('OPERATORS includes the "Is one of" and "Is not one of" entries, each marked multi:true', function () {
   var inOp = F.getOperator('in'); var notInOp = F.getOperator('not_in');
   assertTrue(inOp !== null); assertEqual(inOp.label, 'Is one of'); assertTrue(inOp.multi === true); assertEqual(inOp.arity, 1);
   assertTrue(notInOp !== null); assertEqual(notInOp.label, 'Is not one of'); assertTrue(notInOp.multi === true); assertEqual(notInOp.arity, 1);
 });
 test('getOperator returns null for an unknown id', function () { assertEqual(F.getOperator('nope'), null); });
-
 test('splitMultiValues splits a comma-separated numeric list, trimming whitespace', function () {
   assertEqual(F.splitMultiValues('10, 20, 40'), ['10', '20', '40']);
 });
@@ -24,7 +22,6 @@ test('splitMultiValues passes through an already-split array, trimming each item
 test('splitMultiValues returns an empty array for null/undefined/empty input', function () {
   assertEqual(F.splitMultiValues(null), []); assertEqual(F.splitMultiValues(undefined), []); assertEqual(F.splitMultiValues(''), []);
 });
-
 test('buildConditionSql: "in" with a numeric comma-separated value produces IN (...) with unquoted numeric literals', function () {
   var errors = [];
   var sql = F.buildConditionSql({ table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '10, 20, 40' }, 'Generic', errors);
@@ -45,7 +42,6 @@ test('buildConditionSql: "in" with no usable values produces a clear validation 
   assertEqual(sql, null);
   assertIncludes(errors.join(' '), 'needs at least one value');
 });
-
 test('buildWhereSql: an "in" condition combined with a normal eq condition via AND', function () {
   var fg = { conditions: [
     { table: 'IA_INVOICE', column: 'COMPANY_ID', operator: 'eq', value: '100', join: 'AND' },
@@ -55,14 +51,12 @@ test('buildWhereSql: an "in" condition combined with a normal eq condition via A
   assertEqual(built.sql, 'IA_INVOICE.COMPANY_ID = 100 AND IA_INVOICE.STATUS IN (10, 40)');
   assertEqual(built.errors.length, 0);
 });
-
 test('every pre-existing operator behaves correctly', function () {
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'eq', value: '5' }, 'Generic', []), 'T.C = 5');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'between', value: '1', value2: '10' }, 'Generic', []), 'T.C BETWEEN 1 AND 10');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'is_null' }, 'Generic', []), 'T.C IS NULL');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'contains', value: "O'Brien" }, 'Generic', []), "T.C LIKE '%O''Brien%'");
 });
-
 test('newCondition defaults to the "eq" operator and duplicateCondition assigns a fresh id', function () {
   var c1 = F.newCondition({ table: 'T', column: 'C' });
   assertEqual(c1.operator, 'eq');

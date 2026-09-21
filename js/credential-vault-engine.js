@@ -1,46 +1,22 @@
 /**
  * credential-vault-engine.js — AP-SQL Assistant V10.7
- * ---------------------------------------------------------------------------
- * Implements passphrase-based encryption of the GitHub connection
- * configuration (owner/repo/branch/path/token) using the browser's native
- * Web Crypto API (AES-256-GCM with a PBKDF2-derived key), so that:
- *   - The token is never written to the repository, localStorage, or any
- *     generated file in plain text.
- *   - An encrypted "vault" blob can be safely committed to the project
- *     repository itself (the same public location the Live Shared Schema
- *     already uses), and any authorized user on any machine can recover
- *     the full GitHub connection by supplying the shared passphrase —
- *     without re-typing the token, repo, or path by hand.
+ * Passphrase-based encryption of the GitHub connection configuration
+ * (owner/repo/branch/path/token) using the browser's native Web Crypto API
+ * (AES-256-GCM with a PBKDF2-derived key), so the token is never written to
+ * the repository, localStorage, or any file in plain text.
  *
- * IMPORTANT — HONEST SECURITY DISCLOSURE (this is a static, serverless,
- * client-side-only application with no backend secret store):
- *   Because this app has no server component, the SAME browser JavaScript
- *   that reads the encrypted vault must also decrypt it locally in order
- *   to make authenticated GitHub API calls. This means:
- *     1. The encryption here is a genuine, real cryptographic barrier
- *        against casual exposure (the token is never sitting in plain
- *        text in the repo, in localStorage, in the UI, or in any log —
- *        someone who only sees the vault file sees random-looking bytes).
- *     2. It is NOT a barrier against a determined attacker who has both
- *        (a) the encrypted vault contents AND (b) the passphrase — since
- *        anyone with both can decrypt it exactly as the app does. This is
- *        unavoidable in a pure static-hosting architecture with no
- *        server-side secret; it is the same fundamental limitation as
- *        any "encrypted at rest, decrypted client-side" design.
- *   The passphrase itself is therefore the real access-control boundary
- *   and must be communicated to authorized users out-of-band (e.g. the
- *   same way the existing Update Schema operational password already is)
- *   — it is intentionally NEVER stored anywhere alongside the vault.
- * ---------------------------------------------------------------------------
+ * HONEST SECURITY DISCLOSURE: this is a static, serverless, client-side-only
+ * application with no backend secret store. The passphrase itself is the
+ * real access-control boundary and must be communicated to authorized users
+ * out-of-band (the same way the Update Schema operational password is) —
+ * it is intentionally NEVER stored anywhere alongside the vault.
  */
 (function (root) {
   'use strict';
-
   var PBKDF2_ITERATIONS = 210000;
   var SALT_BYTES = 16;
   var IV_BYTES = 12;
   var VAULT_FORMAT_VERSION = 1;
-
   function getSubtle() {
     if (typeof crypto !== 'undefined' && crypto.subtle) return crypto.subtle;
     return null;
@@ -59,15 +35,7 @@
     if (typeof atob !== 'undefined') { var bin = atob(b64); var out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
     return new Uint8Array(Buffer.from(b64, 'base64'));
   }
-
-  /**
-   * isSupported() — Web Crypto's SubtleCrypto (AES-GCM + PBKDF2) is
-   * available in every modern browser (Chrome, Edge, Firefox, Safari) —
-   * unlike the Chromium-only File System Access API — so this feature has
-   * broad cross-browser reach.
-   */
   function isSupported() { return !!getSubtle(); }
-
   function deriveKey(passphrase, saltBytes) {
     var subtle = getSubtle();
     if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
@@ -79,15 +47,6 @@
       );
     });
   }
-
-  /**
-   * encryptConfig(config, passphrase) — encrypts an arbitrary JSON-
-   * serializable config object (e.g. { owner, repo, branch, path, token })
-   * with AES-256-GCM under a key derived from `passphrase` via PBKDF2.
-   * Returns a plain object { v, salt, iv, ciphertext } (all base64 except
-   * `v`, the format version number) suitable for JSON.stringify-ing
-   * directly into a vault file.
-   */
   function encryptConfig(config, passphrase) {
     var subtle = getSubtle();
     if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
@@ -107,14 +66,6 @@
       });
     });
   }
-
-  /**
-   * decryptConfig(vaultObj, passphrase) — reverses encryptConfig(). Rejects
-   * with a clear, user-facing error (never a raw crypto exception) when the
-   * passphrase is wrong or the vault is corrupted — AES-GCM's built-in
-   * authentication tag means a wrong passphrase reliably fails decryption
-   * rather than silently returning garbage.
-   */
   function decryptConfig(vaultObj, passphrase) {
     var subtle = getSubtle();
     if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
@@ -136,28 +87,17 @@
       });
     });
   }
-
-  /**
-   * buildVaultBlob(config, passphrase) — convenience wrapper producing a
-   * ready-to-store JSON string (pretty-printed) for the vault file.
-   */
   function buildVaultBlob(config, passphrase) {
     return encryptConfig(config, passphrase).then(function (vaultObj) {
       return JSON.stringify(Object.assign({ type: 'ap-sql-assistant-credential-vault' }, vaultObj), null, 2);
     });
   }
-  /**
-   * parseVaultBlob(jsonText, passphrase) — parses a vault JSON string and
-   * decrypts it in one step. Rejects with a clear message if the text is
-   * not valid JSON, is not a recognizable vault, or the passphrase is wrong.
-   */
   function parseVaultBlob(jsonText, passphrase) {
     var parsed;
     try { parsed = JSON.parse(jsonText); } catch (e) { return Promise.reject(new Error('The credential vault file does not contain valid JSON.')); }
     if (!parsed || parsed.type !== 'ap-sql-assistant-credential-vault') return Promise.reject(new Error('This file does not look like an AP-SQL Assistant credential vault.'));
     return decryptConfig(parsed, passphrase);
   }
-
   var API = {
     PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION,
     isSupported: isSupported, deriveKey: deriveKey,

@@ -3,7 +3,6 @@ var path = require('path');
 var schema = require(path.join(__dirname, '..', 'schema', 'schema-sample.js'));
 var SCHEMA_ENGINE = require(path.join(__dirname, '..', 'js', 'schema-engine.js'));
 var engine = SCHEMA_ENGINE.createEngine(schema);
-
 test('getAllTables returns every table in the schema', function () { assertEqual(engine.getAllTables().length, schema.tables.length); });
 test('getTable finds a table by exact name', function () { assertEqual(engine.getTable('IA_INVOICE').name, 'IA_INVOICE'); });
 test('getTable is case-insensitive', function () { assertEqual(engine.getTable('ia_invoice').name, 'IA_INVOICE'); });
