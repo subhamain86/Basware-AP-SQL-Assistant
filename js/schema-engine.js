@@ -34,7 +34,7 @@
       tables.forEach(function (t) { moduleSet[t.module] = true; colCount += (t.columns || []).length; });
       return { schemaName: schema.schema_name || '', schemaVersion: schema.schema_version || '', moduleCount: Object.keys(moduleSet).length, tableCount: tables.length, columnCount: colCount, lastUpdated: schema.last_updated || '' };
     }
-    return { getTable: getTable, getAllTables: getAllTables, getModuleLabels: getModuleLabels, tableExists: tableExists, getColumn: getColumn, columnExists: columnExists, getValueMap: getValueMap, findRelationship: findRelationship, getSelfReferencingEdges: getSelfReferencingEdges, getStatus: getStatus };
+    return { getTable: getTable, getAllTables: getAllTables, getModuleLabels: getModuleLabels, tableExists: tableExists, getColumn: getColumn, columnExists: columnExists, getValueMap: getValueMap, findRelationship: findRelationship, getSelfReferencingEdges: getSelfReferencingEdges, getStatus: getStatus, rawSchema: function () { return schema; } };
   }
   var API = { createEngine: createEngine };
   if (typeof module === 'object' && module.exports) module.exports = API;

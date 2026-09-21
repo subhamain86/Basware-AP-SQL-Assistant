@@ -10,12 +10,6 @@
     if (!engine.columnExists(tableName, columnName)) { errors.push('Column "' + columnName + '" does not exist on table "' + tableName + '" in the active schema.'); return false; }
     return true;
   }
-  function validateRelationship(engine, tableA, tableB, errors) {
-    if (tableA === tableB) return true;
-    var rel = engine.findRelationship(tableA, tableB);
-    if (!rel) { errors.push('No relationship was found between "' + tableA + '" and "' + tableB + '" in the active schema.'); return false; }
-    return true;
-  }
   function validateFilterGroup(engine, filterGroup, baseTables, errors) {
     if (!filterGroup || !Array.isArray(filterGroup.conditions)) return true;
     var ok = true;
@@ -53,7 +47,7 @@
     else { errors.push('Unknown command type "' + request.command + '".'); }
     return { valid: errors.length === 0, errors: errors, warnings: warnings };
   }
-  var API = { validateTableRef: validateTableRef, validateColumnRef: validateColumnRef, validateRelationship: validateRelationship, validateFilterGroup: validateFilterGroup, validateSelectRequest: validateSelectRequest, validateCrRequest: validateCrRequest };
+  var API = { validateTableRef: validateTableRef, validateColumnRef: validateColumnRef, validateFilterGroup: validateFilterGroup, validateSelectRequest: validateSelectRequest, validateCrRequest: validateCrRequest };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_VALIDATE = API;
 })(typeof window !== 'undefined' ? window : this);

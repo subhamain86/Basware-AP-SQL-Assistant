@@ -8,8 +8,7 @@
     function hasManualRelationship(a, b) { return !!manual[key(a, b)]; }
     function clearManualRelationship(a, b) { delete manual[key(a, b)]; }
     function clearAll() { manual = {}; }
-    function listManualRelationships() { return Object.keys(manual).map(function (k) { return manual[k]; }); }
-    return { setManualRelationship: setManualRelationship, getManualRelationship: getManualRelationship, hasManualRelationship: hasManualRelationship, clearManualRelationship: clearManualRelationship, clearAll: clearAll, listManualRelationships: listManualRelationships };
+    return { setManualRelationship: setManualRelationship, getManualRelationship: getManualRelationship, hasManualRelationship: hasManualRelationship, clearManualRelationship: clearManualRelationship, clearAll: clearAll };
   }
   function createEffectiveEngine(baseEngine, relationshipStore) {
     var wrapped = {};

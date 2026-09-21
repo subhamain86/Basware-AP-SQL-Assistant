@@ -12,7 +12,7 @@
     if (!hasBasePk) return null;
     var rewritten = sql.replace(/(SELECT\s+(?:TOP\s+\d+\s+)?)DISTINCT\s+/i, '$1');
     if (rewritten === sql) return null;
-    return { sql: rewritten, note: 'Removed DISTINCT \u2014 the primary key of ' + baseTable + ' is already included in the result, so every row is already guaranteed to be unique.' };
+    return { sql: rewritten, note: 'Removed DISTINCT — the primary key of ' + baseTable + ' is already included in the result, so every row is already guaranteed to be unique.' };
   }
   function collectIndexCandidates(engine, result) {
     var found = {};
@@ -25,11 +25,11 @@
     if (distinctFix) { optimizedSql = distinctFix.sql; changesApplied.push(distinctFix.note); }
     var selectLike = isSelectLike(result); var hierarchy = isHierarchyWalk(result);
     var hasWhere = /\bWHERE\b/i.test(optimizedSql); var hasLimit = /\b(TOP\s+\d+|LIMIT\s+\d+|FETCH FIRST\s+\d+)/i.test(optimizedSql); var hasGroupBy = /\bGROUP BY\b/i.test(optimizedSql);
-    if (selectLike && !hierarchy && !hasWhere && !hasGroupBy) recommendations.push('This query has no WHERE condition, so it will return every row in ' + (result.tablesUsed ? result.tablesUsed.join(', ') : 'the table') + '. Consider adding a filter if you only need a subset of records.');
-    if (/LIKE\s+'%[^']/i.test(optimizedSql)) recommendations.push('One or more "Contains"/"Ends with" filters use a leading wildcard (LIKE \'%...\'), which usually cannot use a database index efficiently. Use "Starts with" instead if possible.');
-    if (selectLike && !hierarchy && !hasLimit && !hasGroupBy && !hasWhere) recommendations.push('No result limit is set on this broad query. Consider adding a Result Limit in Advanced Options, especially while testing.');
+    if (selectLike && !hierarchy && !hasWhere && !hasGroupBy) recommendations.push('This query has no WHERE condition, so it will return every row. Consider adding a filter if you only need a subset of records.');
+    if (/LIKE\s+'%[^']/i.test(optimizedSql)) recommendations.push('One or more filters use a leading wildcard (LIKE \'%...\'), which usually cannot use a database index efficiently.');
+    if (selectLike && !hierarchy && !hasLimit && !hasGroupBy && !hasWhere) recommendations.push('No result limit is set on this broad query. Consider adding a Result Limit, especially while testing.');
     var indexCandidates = collectIndexCandidates(engine, result);
-    if (indexCandidates.length) recommendations.push('For best performance, confirm these columns are indexed in the database: ' + indexCandidates.join(', ') + '.');
+    if (indexCandidates.length) recommendations.push('For best performance, confirm these columns are indexed: ' + indexCandidates.join(', ') + '.');
     return { optimizedSql: optimizedSql, changesApplied: changesApplied, recommendations: recommendations, hasChanges: changesApplied.length > 0 };
   }
   var API = { optimizeSql: optimizeSql };

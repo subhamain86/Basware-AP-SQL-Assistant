@@ -22,6 +22,9 @@
     if (String(rel.fromTable).toUpperCase() === String(relatedTable).toUpperCase()) return { related: { table: rel.fromTable, column: rel.fromColumn }, base: { table: rel.toTable, column: rel.toColumn } };
     return { related: { table: rel.toTable, column: rel.toColumn }, base: { table: rel.fromTable, column: rel.fromColumn } };
   }
+  // Schema-aware column display: for decode-enabled columns, this ALWAYS re-checks the
+  // active schema (via DECODE.resolveDecode -> engine.getValueMap) before falling back to
+  // any session-only manual decode, so SQL generation is driven by the governed schema.
   function resolveColumnDisplay(engine, decodeStore, col, dialect) {
     if (col.aggregate) { var target = (col.column === '*' || !col.column) ? '*' : (col.table + '.' + col.column); var expr = col.aggregate + '(' + (col.distinct ? 'DISTINCT ' : '') + target + ')'; return expr + (col.alias ? (' AS ' + col.alias) : ''); }
     var base = col.table + '.' + col.column;
@@ -44,19 +47,6 @@
     if (joinPlan.errors.length) return { status: 'rejected', message: joinPlan.errors.join(' '), unresolvedTables: joinPlan.unresolved };
     var columns = options.selectedColumns && options.selectedColumns.length ? options.selectedColumns : tables.map(function (t) { var tbl = engine.getTable(t); return { table: t, column: tbl.columns[0].name, alias: '' }; });
     var selectList = columns.map(function (c) { return resolveColumnDisplay(engine, decodeStore, c, dialect); });
-    var filtersAppliedEarly = []; var usedScalarAliases = {};
-    function addScalarSubquery(sub) {
-      var scalarSides = relatedTableSides(engine, tables[0], sub.relatedTable);
-      if (!scalarSides) return 'No relationship was found between "' + tables[0] + '" and "' + sub.relatedTable + '" for the related count/total.';
-      var aggFunc = sub.aggFunc || 'COUNT'; var scalarAlias = sub.alias || (sub.relatedTable + '_' + aggFunc.toLowerCase());
-      if (usedScalarAliases[scalarAlias]) { var n = 2; while (usedScalarAliases[scalarAlias + n]) n++; scalarAlias = scalarAlias + n; }
-      usedScalarAliases[scalarAlias] = true;
-      selectList.push('(SELECT ' + aggFunc + '(*) FROM ' + scalarSides.related.table + ' WHERE ' + scalarSides.related.table + '.' + scalarSides.related.column + ' = ' + scalarSides.base.table + '.' + scalarSides.base.column + ') AS ' + scalarAlias);
-      filtersAppliedEarly.push('Added ' + aggFunc + ' from ' + sub.relatedTable);
-      return null;
-    }
-    if (options.scalarSubquery && options.scalarSubquery.relatedTable) { var scalarErr = addScalarSubquery(options.scalarSubquery); if (scalarErr) return { status: 'rejected', message: scalarErr }; }
-    if (Array.isArray(options.scalarSubqueries)) { for (var si = 0; si < options.scalarSubqueries.length; si++) { var scalarErr2 = addScalarSubquery(options.scalarSubqueries[si]); if (scalarErr2) return { status: 'rejected', message: scalarErr2 }; } }
     var lines = []; var distinctKw = options.distinct ? 'DISTINCT ' : '';
     var limitInfo = options.limit ? limitClause(dialect, options.limit) : { top: '', tail: '' };
     lines.push('SELECT ' + (limitInfo.top ? limitInfo.top + ' ' : '') + distinctKw + selectList.join(', '));
@@ -72,9 +62,7 @@
       filtersApplied.push((ex.negate ? 'Only rows without a match in ' : 'Only rows with a match in ') + ex.relatedTable);
       return null;
     }
-    if (options.existsFilter && options.existsFilter.relatedTable) { var existsErr = addExistsFilter(options.existsFilter); if (existsErr) return { status: 'rejected', message: existsErr }; }
-    if (Array.isArray(options.existsFilters)) { for (var ei = 0; ei < options.existsFilters.length; ei++) { var existsErr2 = addExistsFilter(options.existsFilters[ei]); if (existsErr2) return { status: 'rejected', message: existsErr2 }; } }
-    filtersApplied = filtersApplied.concat(filtersAppliedEarly);
+    if (Array.isArray(options.existsFilters)) { for (var ei = 0; ei < options.existsFilters.length; ei++) { var e2 = addExistsFilter(options.existsFilters[ei]); if (e2) return { status: 'rejected', message: e2 }; } }
     if (whereParts.length) lines.push('WHERE ' + whereParts.join(' AND '));
     if (options.groupBy && options.groupBy.length) { lines.push('GROUP BY ' + options.groupBy.join(', ')); filtersApplied.push('Grouped by ' + options.groupBy.join(', ')); if (options.having) { lines.push('HAVING ' + options.having); filtersApplied.push('Having: ' + options.having); } }
     if (options.orderBy) { lines.push('ORDER BY ' + options.orderBy); filtersApplied.push('Sorted by ' + options.orderBy); }

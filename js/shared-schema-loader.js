@@ -22,8 +22,8 @@
     state = state || {};
     if (!state.checked) return { level: 'checking', text: 'Checking for a shared schema at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '"…' };
     if (state.error) return { level: 'error', text: 'Could not check for a shared schema: ' + state.error };
-    if (!state.found) return { level: 'notfound', text: 'No shared schema was found at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '" (relative to this page). Using the schema already saved in this browser instead. If your organization publishes a shared schema at this location, every device and browser will automatically pick it up from here — no setup needed.' };
-    return { level: 'live', text: 'Using the live shared schema published at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '". This works automatically on every device and browser that opens this app — no setup needed.' };
+    if (!state.found) return { level: 'notfound', text: 'No shared schema was found at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '". Using the schema already saved in this browser instead.' };
+    return { level: 'live', text: 'Using the live shared schema published at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '".' };
   }
   var API = { DEFAULT_SHARED_SCHEMA_PATH: DEFAULT_SHARED_SCHEMA_PATH, buildFetchUrl: buildFetchUrl, fetchSharedSchema: fetchSharedSchema, describeSharedSchemaStatus: describeSharedSchemaStatus };
   if (typeof module === 'object' && module.exports) module.exports = API;

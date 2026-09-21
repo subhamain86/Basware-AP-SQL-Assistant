@@ -37,13 +37,7 @@
     });
   }
   function buildVaultBlob(config, passphrase) { return encryptConfig(config, passphrase).then(function (vaultObj) { return JSON.stringify(Object.assign({ type: 'ap-sql-assistant-credential-vault' }, vaultObj), null, 2); }); }
-  function parseVaultBlob(jsonText, passphrase) {
-    var parsed;
-    try { parsed = JSON.parse(jsonText); } catch (e) { return Promise.reject(new Error('The credential vault file does not contain valid JSON.')); }
-    if (!parsed || parsed.type !== 'ap-sql-assistant-credential-vault') return Promise.reject(new Error('This file does not look like an AP-SQL Assistant credential vault.'));
-    return decryptConfig(parsed, passphrase);
-  }
-  var API = { PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION, isSupported: isSupported, deriveKey: deriveKey, encryptConfig: encryptConfig, decryptConfig: decryptConfig, buildVaultBlob: buildVaultBlob, parseVaultBlob: parseVaultBlob, bytesToBase64: bytesToBase64, base64ToBytes: base64ToBytes };
+  var API = { PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION, isSupported: isSupported, deriveKey: deriveKey, encryptConfig: encryptConfig, decryptConfig: decryptConfig, buildVaultBlob: buildVaultBlob, bytesToBase64: bytesToBase64, base64ToBytes: base64ToBytes };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_VAULT = API;
 })(typeof window !== 'undefined' ? window : this);

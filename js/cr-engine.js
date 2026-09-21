@@ -2,7 +2,7 @@
   'use strict';
   var FILTER = (typeof module === 'object' && module.exports) ? require('./filter-engine.js') : root.APSQL_FILTER;
   var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
-  var SAFETY_BANNER = 'Generated SQL only \u2013 this application does not execute database changes.';
+  var SAFETY_BANNER = 'Generated SQL only – this application does not execute database changes.';
   function sqlLiteralForColumn(engine, table, columnName, rawValue) {
     var col = engine.getColumn(table, columnName);
     var isNumericType = col && /^(INT|NUMBER|NUMERIC|DECIMAL|FLOAT|DOUBLE|BIGINT|SMALLINT)/i.test(col.type || '');
@@ -44,22 +44,11 @@
     }
     return { status: 'ok', command: 'DELETE', sql: lines.join('\n') + ';', table: request.table, warnings: check.warnings, tablesUsed: [request.table], filtersApplied: filtersApplied, columnsUsed: [] };
   }
-  function buildSelectPreview(engine, request, dialect) {
-    var check = VALIDATE.validateCrRequest(engine, { command: 'SELECT', table: request.table, filterGroup: request.filterGroup });
-    if (!check.valid) return { status: 'rejected', message: check.errors.join(' ') };
-    var lines = ['SELECT *', 'FROM ' + request.table]; var filtersApplied = [];
-    if (request.filterGroup && request.filterGroup.conditions && request.filterGroup.conditions.length) {
-      var built = FILTER.buildWhereSql(request.filterGroup, dialect);
-      if (built.errors.length) return { status: 'rejected', message: built.errors.join(' ') };
-      if (built.sql) { lines.push('WHERE ' + built.sql); filtersApplied.push('WHERE: ' + built.plainEnglish); }
-    }
-    return { status: 'ok', command: 'SELECT', sql: lines.join('\n') + ';', table: request.table, warnings: [], tablesUsed: [request.table], filtersApplied: filtersApplied, columnsUsed: [], isPreview: true };
-  }
   function buildCrQuery(engine, request, dialect) {
     dialect = dialect || 'Generic';
-    switch (request.command) { case 'INSERT': return buildInsert(engine, request); case 'UPDATE': return buildUpdate(engine, request, dialect); case 'DELETE': return buildDelete(engine, request, dialect); case 'SELECT': return buildSelectPreview(engine, request, dialect); default: return { status: 'rejected', message: 'Please choose a query type (INSERT, UPDATE, or DELETE).' }; }
+    switch (request.command) { case 'INSERT': return buildInsert(engine, request); case 'UPDATE': return buildUpdate(engine, request, dialect); case 'DELETE': return buildDelete(engine, request, dialect); default: return { status: 'rejected', message: 'Please choose a query type (INSERT, UPDATE, or DELETE).' }; }
   }
-  var API = { SAFETY_BANNER: SAFETY_BANNER, buildCrQuery: buildCrQuery, buildInsert: buildInsert, buildUpdate: buildUpdate, buildDelete: buildDelete, buildSelectPreview: buildSelectPreview };
+  var API = { SAFETY_BANNER: SAFETY_BANNER, buildCrQuery: buildCrQuery, buildInsert: buildInsert, buildUpdate: buildUpdate, buildDelete: buildDelete };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_CR = API;
 })(typeof window !== 'undefined' ? window : this);

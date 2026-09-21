@@ -3,7 +3,7 @@
   var schema = {
     schema_name: 'AP-SQL Assistant Embedded Schema',
     schema_version: '7.1',
-    last_updated: '2026-09-09',
+    last_updated: '2026-09-21',
     source_documents: ['Embedded sample — replace via Schema > Update Schema'],
     module_labels: { IA: 'Invoice Automation', OM: 'Order Management', PP: 'Purchase Process', PE: 'Payment Execution', ADM: 'Administration' },
     tables: [
