@@ -1,115 +1,169 @@
-/* credential-vault-engine.js — Secure GitHub Connection Vault.
-   Encrypts the GitHub owner/repo/path/token using AES-256-GCM with a key derived via
-   PBKDF2 (210,000 iterations) from the operational password, so the token is never
-   stored or transmitted in plaintext. Works in-browser (Web Crypto) and in Node (for
-   smoke tests) via the `crypto` module fallback. */
+/**
+ * credential-vault-engine.js — AP-SQL Assistant V10.7
+ * ---------------------------------------------------------------------------
+ * Implements passphrase-based encryption of the GitHub connection
+ * configuration (owner/repo/branch/path/token) using the browser's native
+ * Web Crypto API (AES-256-GCM with a PBKDF2-derived key), so that:
+ *   - The token is never written to the repository, localStorage, or any
+ *     generated file in plain text.
+ *   - An encrypted "vault" blob can be safely committed to the project
+ *     repository itself (the same public location the Live Shared Schema
+ *     already uses), and any authorized user on any machine can recover
+ *     the full GitHub connection by supplying the shared passphrase —
+ *     without re-typing the token, repo, or path by hand.
+ *
+ * IMPORTANT — HONEST SECURITY DISCLOSURE (this is a static, serverless,
+ * client-side-only application with no backend secret store):
+ *   Because this app has no server component, the SAME browser JavaScript
+ *   that reads the encrypted vault must also decrypt it locally in order
+ *   to make authenticated GitHub API calls. This means:
+ *     1. The encryption here is a genuine, real cryptographic barrier
+ *        against casual exposure (the token is never sitting in plain
+ *        text in the repo, in localStorage, in the UI, or in any log —
+ *        someone who only sees the vault file sees random-looking bytes).
+ *     2. It is NOT a barrier against a determined attacker who has both
+ *        (a) the encrypted vault contents AND (b) the passphrase — since
+ *        anyone with both can decrypt it exactly as the app does. This is
+ *        unavoidable in a pure static-hosting architecture with no
+ *        server-side secret; it is the same fundamental limitation as
+ *        any "encrypted at rest, decrypted client-side" design.
+ *   The passphrase itself is therefore the real access-control boundary
+ *   and must be communicated to authorized users out-of-band (e.g. the
+ *   same way the existing Update Schema operational password already is)
+ *   — it is intentionally NEVER stored anywhere alongside the vault.
+ * ---------------------------------------------------------------------------
+ */
 (function (root) {
   'use strict';
 
   var PBKDF2_ITERATIONS = 210000;
+  var SALT_BYTES = 16;
+  var IV_BYTES = 12;
+  var VAULT_FORMAT_VERSION = 1;
 
-  function hasWebCrypto() { return typeof crypto !== 'undefined' && crypto.subtle && typeof TextEncoder !== 'undefined'; }
+  function getSubtle() {
+    if (typeof crypto !== 'undefined' && crypto.subtle) return crypto.subtle;
+    return null;
+  }
+  function getRandomBytes(n) {
+    var arr = new Uint8Array(n);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(arr);
+    else { for (var i = 0; i < n; i++) arr[i] = Math.floor(Math.random() * 256); }
+    return arr;
+  }
+  function bytesToBase64(bytes) {
+    var bin = ''; for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return (typeof btoa !== 'undefined') ? btoa(bin) : Buffer.from(bytes).toString('base64');
+  }
+  function base64ToBytes(b64) {
+    if (typeof atob !== 'undefined') { var bin = atob(b64); var out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+    return new Uint8Array(Buffer.from(b64, 'base64'));
+  }
 
-  function toBase64(buf) {
-    var bytes = new Uint8Array(buf);
-    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
-    var bin = ''; bytes.forEach(function (b) { bin += String.fromCharCode(b); });
-    return btoa(bin);
-  }
-  function fromBase64(str) {
-    if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(str, 'base64'));
-    var bin = atob(str); var bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-  }
-  function randomBytes(n) {
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) return crypto.getRandomValues(new Uint8Array(n));
-    var nodeCrypto = require('crypto');
-    return new Uint8Array(nodeCrypto.randomBytes(n));
-  }
+  /**
+   * isSupported() — Web Crypto's SubtleCrypto (AES-GCM + PBKDF2) is
+   * available in every modern browser (Chrome, Edge, Firefox, Safari) —
+   * unlike the Chromium-only File System Access API — so this feature has
+   * broad cross-browser reach.
+   */
+  function isSupported() { return !!getSubtle(); }
 
-  // ---- Web Crypto implementation ----
-  function webEncrypt(plaintextObj, password) {
+  function deriveKey(passphrase, saltBytes) {
+    var subtle = getSubtle();
+    if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
     var enc = new TextEncoder();
-    var salt = randomBytes(16);
-    var iv = randomBytes(12);
-    return crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']).then(function (baseKey) {
-      return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-        baseKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+    return subtle.importKey('raw', enc.encode(String(passphrase || '')), { name: 'PBKDF2' }, false, ['deriveKey']).then(function (keyMaterial) {
+      return subtle.deriveKey(
+        { name: 'PBKDF2', salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+        keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
       );
-    }).then(function (key) {
-      var data = enc.encode(JSON.stringify(plaintextObj));
-      return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, data);
-    }).then(function (cipherBuf) {
-      return {
-        v: 1, kdf: 'PBKDF2', iterations: PBKDF2_ITERATIONS, alg: 'AES-256-GCM',
-        salt: toBase64(salt), iv: toBase64(iv), ciphertext: toBase64(cipherBuf)
-      };
     });
   }
 
-  function webDecrypt(vault, password) {
-    var dec = new TextDecoder();
-    var salt = fromBase64(vault.salt), iv = fromBase64(vault.iv), ct = fromBase64(vault.ciphertext);
-    return crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveKey']).then(function (baseKey) {
-      return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: salt, iterations: vault.iterations || PBKDF2_ITERATIONS, hash: 'SHA-256' },
-        baseKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
-      );
-    }).then(function (key) {
-      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ct);
-    }).then(function (plainBuf) {
-      return JSON.parse(dec.decode(plainBuf));
+  /**
+   * encryptConfig(config, passphrase) — encrypts an arbitrary JSON-
+   * serializable config object (e.g. { owner, repo, branch, path, token })
+   * with AES-256-GCM under a key derived from `passphrase` via PBKDF2.
+   * Returns a plain object { v, salt, iv, ciphertext } (all base64 except
+   * `v`, the format version number) suitable for JSON.stringify-ing
+   * directly into a vault file.
+   */
+  function encryptConfig(config, passphrase) {
+    var subtle = getSubtle();
+    if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
+    if (!passphrase) return Promise.reject(new Error('A vault passphrase is required to encrypt the configuration.'));
+    var salt = getRandomBytes(SALT_BYTES);
+    var iv = getRandomBytes(IV_BYTES);
+    return deriveKey(passphrase, salt).then(function (key) {
+      var enc = new TextEncoder();
+      var plaintext = enc.encode(JSON.stringify(config));
+      return subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, plaintext).then(function (cipherBuf) {
+        return {
+          v: VAULT_FORMAT_VERSION,
+          salt: bytesToBase64(salt),
+          iv: bytesToBase64(iv),
+          ciphertext: bytesToBase64(new Uint8Array(cipherBuf))
+        };
+      });
     });
   }
 
-  // ---- Node fallback (used only by smoke tests) ----
-  function nodeEncrypt(plaintextObj, password) {
-    var nodeCrypto = require('crypto');
-    var salt = nodeCrypto.randomBytes(16);
-    var iv = nodeCrypto.randomBytes(12);
-    var key = nodeCrypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
-    var cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
-    var enc = Buffer.concat([cipher.update(JSON.stringify(plaintextObj), 'utf8'), cipher.final()]);
-    var tag = cipher.getAuthTag();
-    return Promise.resolve({
-      v: 1, kdf: 'PBKDF2', iterations: PBKDF2_ITERATIONS, alg: 'AES-256-GCM',
-      salt: salt.toString('base64'), iv: iv.toString('base64'), ciphertext: Buffer.concat([enc, tag]).toString('base64')
+  /**
+   * decryptConfig(vaultObj, passphrase) — reverses encryptConfig(). Rejects
+   * with a clear, user-facing error (never a raw crypto exception) when the
+   * passphrase is wrong or the vault is corrupted — AES-GCM's built-in
+   * authentication tag means a wrong passphrase reliably fails decryption
+   * rather than silently returning garbage.
+   */
+  function decryptConfig(vaultObj, passphrase) {
+    var subtle = getSubtle();
+    if (!subtle) return Promise.reject(new Error('This browser does not support the Web Crypto API required for secure credential storage.'));
+    if (!vaultObj || !vaultObj.salt || !vaultObj.iv || !vaultObj.ciphertext) return Promise.reject(new Error('This does not look like a valid encrypted credential vault.'));
+    if (!passphrase) return Promise.reject(new Error('The vault passphrase is required to unlock this configuration.'));
+    var salt, iv, ciphertext;
+    try {
+      salt = base64ToBytes(vaultObj.salt);
+      iv = base64ToBytes(vaultObj.iv);
+      ciphertext = base64ToBytes(vaultObj.ciphertext);
+    } catch (e) { return Promise.reject(new Error('The credential vault is corrupted and could not be read.')); }
+    return deriveKey(passphrase, salt).then(function (key) {
+      return subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function (plainBuf) {
+        var dec = new TextDecoder();
+        var text = dec.decode(plainBuf);
+        try { return JSON.parse(text); } catch (e) { throw new Error('The credential vault is corrupted and could not be read.'); }
+      }).catch(function () {
+        throw new Error('Incorrect vault passphrase, or the credential vault is corrupted.');
+      });
     });
   }
-  function nodeDecrypt(vault, password) {
-    var nodeCrypto = require('crypto');
-    var salt = Buffer.from(vault.salt, 'base64');
-    var iv = Buffer.from(vault.iv, 'base64');
-    var raw = Buffer.from(vault.ciphertext, 'base64');
-    var tag = raw.slice(raw.length - 16);
-    var data = raw.slice(0, raw.length - 16);
-    var key = nodeCrypto.pbkdf2Sync(password, salt, vault.iterations || PBKDF2_ITERATIONS, 32, 'sha256');
-    var decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    var dec = Buffer.concat([decipher.update(data), decipher.final()]);
-    return Promise.resolve(JSON.parse(dec.toString('utf8')));
-  }
 
-  function encryptVault(plaintextObj, password) {
-    return hasWebCrypto() ? webEncrypt(plaintextObj, password) : nodeEncrypt(plaintextObj, password);
+  /**
+   * buildVaultBlob(config, passphrase) — convenience wrapper producing a
+   * ready-to-store JSON string (pretty-printed) for the vault file.
+   */
+  function buildVaultBlob(config, passphrase) {
+    return encryptConfig(config, passphrase).then(function (vaultObj) {
+      return JSON.stringify(Object.assign({ type: 'ap-sql-assistant-credential-vault' }, vaultObj), null, 2);
+    });
   }
-  function decryptVault(vault, password) {
-    if (!vault || !vault.ciphertext || !vault.salt || !vault.iv) {
-      return Promise.reject(new Error('This does not look like a valid encrypted credential vault.'));
-    }
-    var p = hasWebCrypto() ? webDecrypt(vault, password) : nodeDecrypt(vault, password);
-    return p.catch(function () { throw new Error('Unable to unlock the vault. The password may be wrong, or the vault file may be corrupted.'); });
-  }
-
-  function isVaultShape(obj) {
-    return !!(obj && obj.v && obj.alg === 'AES-256-GCM' && obj.salt && obj.iv && obj.ciphertext);
+  /**
+   * parseVaultBlob(jsonText, passphrase) — parses a vault JSON string and
+   * decrypts it in one step. Rejects with a clear message if the text is
+   * not valid JSON, is not a recognizable vault, or the passphrase is wrong.
+   */
+  function parseVaultBlob(jsonText, passphrase) {
+    var parsed;
+    try { parsed = JSON.parse(jsonText); } catch (e) { return Promise.reject(new Error('The credential vault file does not contain valid JSON.')); }
+    if (!parsed || parsed.type !== 'ap-sql-assistant-credential-vault') return Promise.reject(new Error('This file does not look like an AP-SQL Assistant credential vault.'));
+    return decryptConfig(parsed, passphrase);
   }
 
   var API = {
-    PBKDF2_ITERATIONS: PBKDF2_ITERATIONS,
-    encryptVault: encryptVault, decryptVault: decryptVault, isVaultShape: isVaultShape
+    PBKDF2_ITERATIONS: PBKDF2_ITERATIONS, VAULT_FORMAT_VERSION: VAULT_FORMAT_VERSION,
+    isSupported: isSupported, deriveKey: deriveKey,
+    encryptConfig: encryptConfig, decryptConfig: decryptConfig,
+    buildVaultBlob: buildVaultBlob, parseVaultBlob: parseVaultBlob,
+    bytesToBase64: bytesToBase64, base64ToBytes: base64ToBytes
   };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_VAULT = API;

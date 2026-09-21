@@ -1,109 +1,67 @@
-/* validation-engine.js — validates generated SQL before it is shown to the user, and
-   attempts a bounded self-correction pass when something is wrong (spec section 14). */
 (function (root) {
   'use strict';
-
-  var FORBIDDEN_READONLY = ['INSERT', 'UPDATE', 'DELETE', 'MERGE', 'DROP', 'ALTER', 'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE'];
-
-  function up(s) { return String(s == null ? '' : s).toUpperCase(); }
-
-  function balancedParens(sql) {
-    var depth = 0;
-    for (var i = 0; i < sql.length; i++) {
-      if (sql[i] === '(') depth++;
-      if (sql[i] === ')') depth--;
-      if (depth < 0) return false;
-    }
-    return depth === 0;
+  function validateTableRef(engine, tableName, errors) {
+    if (!tableName) { errors.push('No table was specified.'); return false; }
+    if (!engine.tableExists(tableName)) { errors.push('Table "' + tableName + '" does not exist in the active schema.'); return false; }
+    return true;
   }
-
-  function extractIdentifierTokens(sql) {
-    return (sql.match(/[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?/g) || []);
+  function validateColumnRef(engine, tableName, columnName, errors) {
+    if (!columnName) { errors.push('No column was specified for table "' + tableName + '".'); return false; }
+    if (!engine.columnExists(tableName, columnName)) { errors.push('Column "' + columnName + '" does not exist on table "' + tableName + '" in the active schema.'); return false; }
+    return true;
   }
-
-  // Read-only guard: reject if the SQL contains a data-changing / DDL statement.
-  function assertReadOnly(sql) {
-    var upperSql = up(sql);
-    var offenders = FORBIDDEN_READONLY.filter(function (kw) {
-      return new RegExp('(^|\\s|;)' + kw + '(\\s|\\()').test(upperSql);
-    });
-    return { ok: offenders.length === 0, offenders: offenders };
+  function validateRelationship(engine, tableA, tableB, errors) {
+    if (tableA === tableB) return true;
+    var rel = engine.findRelationship(tableA, tableB);
+    if (!rel) { errors.push('No relationship was found between "' + tableA + '" and "' + tableB + '" in the active schema.'); return false; }
+    return true;
   }
-
-  // Validates that every TABLE / TABLE.COLUMN mentioned in the SQL corresponds to
-  // something in the active schema (best-effort: uses word-boundary matching, so it can
-  // still catch obviously hallucinated names without needing a full SQL parser).
-  function validateAgainstSchema(sql, engine, tablesUsed) {
-    var errors = [];
-    var warnings = [];
-    if (!balancedParens(sql)) errors.push('Unbalanced parentheses in generated SQL.');
-
-    var knownTables = {};
-    engine.getAllTables().forEach(function (t) { knownTables[up(t.name)] = t; });
-
-    (tablesUsed || []).forEach(function (tn) {
-      if (!knownTables[up(tn)]) errors.push('SQL references table "' + tn + '" which does not exist in the active schema.');
-    });
-
-    // Alias.column sanity check against the tables actually used
-    var aliasColPattern = /\b([a-zA-Z][a-zA-Z0-9_]{0,6})\.([A-Za-z_][A-Za-z0-9_]*)\b/g;
-    var m;
-    var validColumnNames = {};
-    (tablesUsed || []).forEach(function (tn) {
-      var t = knownTables[up(tn)];
-      if (!t) return;
-      (t.columns || []).forEach(function (c) { validColumnNames[up(c.name)] = true; });
-    });
-    while ((m = aliasColPattern.exec(sql))) {
-      var colName = m[2];
-      if (/^(AS|ON|AND|OR|SELECT|FROM|WHERE|JOIN)$/i.test(colName)) continue;
-      if (Object.keys(validColumnNames).length && !validColumnNames[up(colName)]) {
-        warnings.push('Column reference "' + m[0] + '" was not recognized in the active schema and may be ambiguous or incorrect.');
+  function validateFilterGroup(engine, filterGroup, baseTables, errors) {
+    if (!filterGroup || !Array.isArray(filterGroup.conditions)) return true;
+    var ok = true;
+    filterGroup.conditions.forEach(function (cond) {
+      var t = cond.table || baseTables[0];
+      if (!validateTableRef(engine, t, errors)) { ok = false; return; }
+      if (!validateColumnRef(engine, t, cond.column, errors)) { ok = false; return; }
+      if (baseTables.indexOf(t) === -1) {
+        var relatedToAny = baseTables.some(function (bt) { return !!engine.findRelationship(bt, t); });
+        if (!relatedToAny) { errors.push('Filter column "' + cond.column + '" is on table "' + t + '", which is not related to the selected table(s).'); ok = false; }
       }
-    }
-
-    var readOnly = assertReadOnly(sql);
-    if (!readOnly.ok) errors.push('Generated SQL contains a disallowed statement type for a read-only query: ' + readOnly.offenders.join(', ') + '.');
-
+    });
+    return ok;
+  }
+  function validateSelectRequest(engine, request) {
+    var errors = []; var tables = request.tables || [];
+    if (!tables.length) errors.push('At least one table must be selected (or determined from your description).');
+    tables.forEach(function (t) { validateTableRef(engine, t, errors); });
+    (request.columns || []).forEach(function (c) {
+      if (!validateTableRef(engine, c.table, errors)) return;
+      if (c.aggregate && c.column === '*') return;
+      validateColumnRef(engine, c.table, c.column, errors);
+    });
+    validateFilterGroup(engine, request.filterGroup, tables, errors);
+    return { valid: errors.length === 0, errors: errors };
+  }
+  function validateCrRequest(engine, request) {
+    var errors = [], warnings = [];
+    if (!validateTableRef(engine, request.table, errors)) return { valid: false, errors: errors, warnings: warnings };
+    if (request.command === 'INSERT') {
+      if (!Array.isArray(request.columns) || request.columns.length === 0) errors.push('At least one column must be selected for INSERT.');
+      else request.columns.forEach(function (c) { validateColumnRef(engine, request.table, c.name, errors); if (c.value === '' || c.value == null) warnings.push('Column "' + c.name + '" has no value provided.'); });
+    } else if (request.command === 'UPDATE') {
+      if (!Array.isArray(request.updates) || request.updates.length === 0) errors.push('At least one column to update must be selected for UPDATE.');
+      else request.updates.forEach(function (u) { validateColumnRef(engine, request.table, u.column, errors); });
+      if (!request.allowNoWhere && (!request.filterGroup || !request.filterGroup.conditions || request.filterGroup.conditions.length === 0)) errors.push('A WHERE condition is required to identify which records should be updated or deleted.');
+      validateFilterGroup(engine, request.filterGroup, [request.table], errors);
+    } else if (request.command === 'DELETE') {
+      if (!request.allowNoWhere && (!request.filterGroup || !request.filterGroup.conditions || request.filterGroup.conditions.length === 0)) errors.push('A WHERE condition is required to identify which records should be updated or deleted.');
+      validateFilterGroup(engine, request.filterGroup, [request.table], errors);
+    } else if (request.command === 'SELECT') {
+      validateFilterGroup(engine, request.filterGroup, [request.table], errors);
+    } else { errors.push('Unknown command type "' + request.command + '".'); }
     return { valid: errors.length === 0, errors: errors, warnings: warnings };
   }
-
-  // Bounded self-correction: given a failed sql-engine result and the plan/options that
-  // produced it, try a small number of automatic fixes and re-validate. Returns the best
-  // available result plus a log of what was attempted.
-  function selfCorrect(generateFn, requirement, options, engine, decodeStore, relationshipEngine, maxAttempts) {
-    maxAttempts = maxAttempts || 3;
-    var attempts = [];
-    var currentOptions = JSON.parse(JSON.stringify(options));
-    for (var i = 0; i < maxAttempts; i++) {
-      var result = generateFn(requirement, currentOptions, engine, decodeStore, relationshipEngine);
-      if (result.status === 'ok') {
-        var v = validateAgainstSchema(result.sql, engine, result.tablesUsed);
-        if (v.valid) {
-          result.validation = v;
-          result.attempts = attempts.length;
-          return result;
-        }
-        attempts.push({ attempt: i + 1, sql: result.sql, errors: v.errors });
-        // Simple corrective strategy: drop unresolved-looking selected columns and retry.
-        if (currentOptions.selectedColumns && currentOptions.selectedColumns.length > 0) {
-          currentOptions.selectedColumns = currentOptions.selectedColumns.slice(0, -1);
-          continue;
-        }
-        break;
-      } else {
-        attempts.push({ attempt: i + 1, errors: result.errors });
-        break;
-      }
-    }
-    return { status: 'error', errors: ['Automatic validation/self-correction could not produce a valid query.'], attempts: attempts };
-  }
-
-  var API = {
-    balancedParens: balancedParens, extractIdentifierTokens: extractIdentifierTokens,
-    assertReadOnly: assertReadOnly, validateAgainstSchema: validateAgainstSchema, selfCorrect: selfCorrect,
-    FORBIDDEN_READONLY: FORBIDDEN_READONLY
-  };
+  var API = { validateTableRef: validateTableRef, validateColumnRef: validateColumnRef, validateRelationship: validateRelationship, validateFilterGroup: validateFilterGroup, validateSelectRequest: validateSelectRequest, validateCrRequest: validateCrRequest };
   if (typeof module === 'object' && module.exports) module.exports = API;
-  if (typeof root !== 'undefined') root.APSQL_VALIDATION = API;
+  if (typeof root !== 'undefined') root.APSQL_VALIDATE = API;
 })(typeof window !== 'undefined' ? window : this);

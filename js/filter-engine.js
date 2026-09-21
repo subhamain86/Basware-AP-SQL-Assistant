@@ -1,74 +1,79 @@
-/* filter-engine.js — builds WHERE clause fragments from structured filter conditions.
-   Supports: =, <>, >, >=, <, <=, IN, NOT IN, BETWEEN, LIKE, NOT LIKE, IS NULL, IS NOT NULL,
-   nested AND/OR groups, data-type-aware operand formatting. */
 (function (root) {
   'use strict';
+  var OPERATORS = [
+    { id: 'eq', label: 'Equals', arity: 1 }, { id: 'neq', label: 'Does not equal', arity: 1 },
+    { id: 'contains', label: 'Contains', arity: 1 }, { id: 'not_contains', label: 'Does not contain', arity: 1 },
+    { id: 'starts_with', label: 'Starts with', arity: 1 }, { id: 'ends_with', label: 'Ends with', arity: 1 },
+    { id: 'gt', label: 'Greater than', arity: 1 }, { id: 'lt', label: 'Less than', arity: 1 },
+    { id: 'gte', label: 'Greater than or equal to', arity: 1 }, { id: 'lte', label: 'Less than or equal to', arity: 1 },
+    { id: 'between', label: 'Between', arity: 2 },
+    { id: 'in', label: 'Is one of', arity: 1, multi: true }, { id: 'not_in', label: 'Is not one of', arity: 1, multi: true },
+    { id: 'is_null', label: 'Is NULL', arity: 0 }, { id: 'is_not_null', label: 'Is not NULL', arity: 0 },
+    { id: 'is_empty', label: 'Is empty', arity: 0 }, { id: 'is_not_empty', label: 'Is not empty', arity: 0 }
+  ];
+  function getOperator(id) { for (var i = 0; i < OPERATORS.length; i++) if (OPERATORS[i].id === id) return OPERATORS[i]; return null; }
+  function isNumericLiteral(v) { return /^-?\d+(\.\d+)?$/.test(String(v).trim()); }
+  function sqlLiteral(value) { if (value === null || value === undefined || value === '') return "''"; if (isNumericLiteral(value)) return String(value).trim(); return "'" + String(value).replace(/'/g, "''") + "'"; }
+  function qualify(condition) { return condition.table ? (condition.table + '.' + condition.column) : condition.column; }
 
-  var DATATYPE = (typeof module === 'object' && module.exports) ? require('./datatype-engine.js') : root.APSQL_DATATYPE;
-
-  function newCondition(opts) {
-    return {
-      table: opts.table, column: opts.column, operator: opts.operator || 'eq',
-      value: opts.value, value2: opts.value2, columnType: opts.columnType || null
-    };
+  function splitMultiValues(raw) {
+    if (raw == null) return [];
+    if (Array.isArray(raw)) return raw.map(function (v) { return String(v).trim(); }).filter(function (v) { return v.length > 0; });
+    return String(raw).split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; }).map(function (s) {
+      if ((s.charAt(0) === '"' && s.charAt(s.length - 1) === '"' && s.length >= 2) || (s.charAt(0) === "'" && s.charAt(s.length - 1) === "'" && s.length >= 2)) return s.slice(1, -1);
+      return s;
+    });
   }
 
-  function newGroup(logic, items) { return { logic: logic || 'AND', items: items || [] }; } // items: conditions or nested groups
-  function isGroup(x) { return x && Array.isArray(x.items); }
-
-  var OP_MAP = {
-    eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=',
-    like: 'LIKE', notlike: 'NOT LIKE'
-  };
-
-  function formatValue(val, columnType) {
-    return DATATYPE.formatLiteral(val, columnType);
-  }
-
-  function buildCondition(c, resolveColumnExpr) {
-    var expr = resolveColumnExpr ? resolveColumnExpr(c.table, c.column) : (c.table + '.' + c.column);
-    var op = c.operator;
-    if (op === 'isnull') return expr + ' IS NULL';
-    if (op === 'isnotnull') return expr + ' IS NOT NULL';
-    if (op === 'in' || op === 'notin') {
-      var list = String(c.value || '').split(',').map(function (v) { return v.trim(); }).filter(function (v) { return v !== ''; });
-      var formatted = list.map(function (v) { return formatValue(v, c.columnType); }).join(', ');
-      return expr + (op === 'in' ? ' IN (' : ' NOT IN (') + formatted + ')';
+  function buildConditionSql(condition, dialect, errors) {
+    var op = getOperator(condition.operator);
+    if (!op) { if (errors) errors.push('Unknown filter condition "' + condition.operator + '".'); return null; }
+    var col = qualify(condition);
+    if (!condition.column) { if (errors) errors.push('A filter condition is missing a column.'); return null; }
+    switch (op.id) {
+      case 'eq': return col + ' = ' + sqlLiteral(condition.value);
+      case 'neq': return col + ' <> ' + sqlLiteral(condition.value);
+      case 'gt': return col + ' > ' + sqlLiteral(condition.value);
+      case 'lt': return col + ' < ' + sqlLiteral(condition.value);
+      case 'gte': return col + ' >= ' + sqlLiteral(condition.value);
+      case 'lte': return col + ' <= ' + sqlLiteral(condition.value);
+      case 'contains': return col + " LIKE '%" + String(condition.value || '').replace(/'/g, "''") + "%'";
+      case 'not_contains': return col + " NOT LIKE '%" + String(condition.value || '').replace(/'/g, "''") + "%'";
+      case 'starts_with': return col + " LIKE '" + String(condition.value || '').replace(/'/g, "''") + "%'";
+      case 'ends_with': return col + " LIKE '%" + String(condition.value || '').replace(/'/g, "''") + "'";
+      case 'between':
+        if (condition.value === '' || condition.value == null || condition.value2 === '' || condition.value2 == null) { if (errors) errors.push('The "Between" condition on ' + col + ' needs both a from and a to value.'); return null; }
+        return col + ' BETWEEN ' + sqlLiteral(condition.value) + ' AND ' + sqlLiteral(condition.value2);
+      case 'in':
+      case 'not_in': {
+        var values = Array.isArray(condition.values) && condition.values.length ? splitMultiValues(condition.values) : splitMultiValues(condition.value);
+        if (!values.length) { if (errors) errors.push('The "Is one of" / "Is not one of" condition on ' + col + ' needs at least one value.'); return null; }
+        var literals = values.map(function (v) { return sqlLiteral(v); });
+        return col + (op.id === 'in' ? ' IN (' : ' NOT IN (') + literals.join(', ') + ')';
+      }
+      case 'is_null': return col + ' IS NULL';
+      case 'is_not_null': return col + ' IS NOT NULL';
+      case 'is_empty': return "(" + col + " IS NULL OR " + col + " = '')";
+      case 'is_not_empty': return "(" + col + " IS NOT NULL AND " + col + " <> '')";
+      default: return null;
     }
-    if (op === 'between') {
-      return expr + ' BETWEEN ' + formatValue(c.value, c.columnType) + ' AND ' + formatValue(c.value2, c.columnType);
-    }
-    if (op === 'like' || op === 'notlike') {
-      var likeVal = String(c.value);
-      if (likeVal.indexOf('%') === -1) likeVal = '%' + likeVal + '%';
-      return expr + ' ' + OP_MAP[op] + ' ' + formatValue(likeVal, 'VARCHAR');
-    }
-    var sqlOp = OP_MAP[op] || '=';
-    return expr + ' ' + sqlOp + ' ' + formatValue(c.value, c.columnType);
   }
-
-  function buildGroup(group, resolveColumnExpr) {
-    if (!group) return '';
-    if (!isGroup(group)) return buildCondition(group, resolveColumnExpr);
-    var parts = group.items.map(function (item) {
-      var s = isGroup(item) ? buildGroup(item, resolveColumnExpr) : buildCondition(item, resolveColumnExpr);
-      return isGroup(item) && item.items.length > 1 ? '(' + s + ')' : s;
-    }).filter(function (s) { return s && s.length; });
-    return parts.join(' ' + group.logic + ' ');
+  function buildWhereSql(filterGroup, dialect) {
+    var errors = [];
+    if (!filterGroup || !Array.isArray(filterGroup.conditions) || filterGroup.conditions.length === 0) return { sql: '', plainEnglish: '', errors: errors, isEmpty: true };
+    var parts = [], plainParts = [];
+    filterGroup.conditions.forEach(function (cond, idx) {
+      var fragment = buildConditionSql(cond, dialect, errors);
+      if (fragment == null) return;
+      var joiner = idx === 0 ? '' : (' ' + (cond.join === 'OR' ? 'OR' : 'AND') + ' ');
+      parts.push(joiner + fragment);
+      plainParts.push((idx === 0 ? '' : ((cond.join === 'OR' ? 'OR' : 'AND') + ' ')) + fragment);
+    });
+    return { sql: parts.join(''), plainEnglish: plainParts.join(' '), errors: errors, isEmpty: parts.length === 0 };
   }
-
-  // Legacy-friendly helper: a flat filterGroup = { conditions: [...], logic: 'AND' }
-  function buildFilterGroup(filterGroup, resolveColumnExpr) {
-    if (!filterGroup || !filterGroup.conditions || !filterGroup.conditions.length) return '';
-    var group = newGroup(filterGroup.logic || 'AND', filterGroup.conditions);
-    return buildGroup(group, resolveColumnExpr);
-  }
-
-  var API = {
-    newCondition: newCondition, newGroup: newGroup, isGroup: isGroup,
-    buildCondition: buildCondition, buildGroup: buildGroup, buildFilterGroup: buildFilterGroup,
-    OP_MAP: OP_MAP
-  };
+  function newCondition(overrides) { return Object.assign({ id: 'f' + Math.random().toString(36).slice(2, 10), table: '', column: '', operator: 'eq', value: '', value2: '', join: 'AND' }, overrides || {}); }
+  function duplicateCondition(condition) { var copy = newCondition(condition); copy.id = 'f' + Math.random().toString(36).slice(2, 10); return copy; }
+  var API = { OPERATORS: OPERATORS, getOperator: getOperator, buildConditionSql: buildConditionSql, buildWhereSql: buildWhereSql, newCondition: newCondition, duplicateCondition: duplicateCondition, sqlLiteral: sqlLiteral, splitMultiValues: splitMultiValues };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_FILTER = API;
 })(typeof window !== 'undefined' ? window : this);

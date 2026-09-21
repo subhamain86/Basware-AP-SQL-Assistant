@@ -1,15 +1,14 @@
-/* relationship-store.js — manual table relationship overrides used when the schema
-   doesn't have explicit metadata or a FK for a pair of tables the user needs joined. */
 (function (root) {
   'use strict';
 
   function createRelationshipStore() {
     var manual = {};
     function key(a, b) { return [String(a).toUpperCase(), String(b).toUpperCase()].sort().join('__'); }
+
     function setManualRelationship(fromTable, fromColumn, toTable, toColumn) {
       manual[key(fromTable, toTable)] = {
         fromTable: String(fromTable).toUpperCase(), fromColumn: String(fromColumn).toUpperCase(),
-        toTable: String(toTable).toUpperCase(), toColumn: String(toColumn).toUpperCase(), source: 'manual'
+        toTable: String(toTable).toUpperCase(), toColumn: String(toColumn).toUpperCase()
       };
     }
     function getManualRelationship(a, b) { return manual[key(a, b)] || null; }
@@ -17,14 +16,17 @@
     function clearManualRelationship(a, b) { delete manual[key(a, b)]; }
     function clearAll() { manual = {}; }
     function listManualRelationships() { return Object.keys(manual).map(function (k) { return manual[k]; }); }
+
     return {
-      setManualRelationship: setManualRelationship, getManualRelationship: getManualRelationship,
-      hasManualRelationship: hasManualRelationship, clearManualRelationship: clearManualRelationship,
-      clearAll: clearAll, listManualRelationships: listManualRelationships
+      setManualRelationship: setManualRelationship,
+      getManualRelationship: getManualRelationship,
+      hasManualRelationship: hasManualRelationship,
+      clearManualRelationship: clearManualRelationship,
+      clearAll: clearAll,
+      listManualRelationships: listManualRelationships
     };
   }
 
-  // Wraps a schema engine so findRelationship() also consults the manual store.
   function createEffectiveEngine(baseEngine, relationshipStore) {
     var wrapped = {};
     Object.keys(baseEngine).forEach(function (k) { wrapped[k] = baseEngine[k]; });
