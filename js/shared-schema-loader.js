@@ -1,31 +1,24 @@
+/* shared-schema-loader.js — "Live Shared Schema": on every page load, do a plain,
+   unauthenticated check for a schema file at a well-known relative path. If found,
+   every Query Builder automatically uses it (folded into the Default schema). */
 (function (root) {
   'use strict';
-  var DEFAULT_SHARED_SCHEMA_PATH = 'schema/shared-schema.json';
-  function buildFetchUrl(basePath) { var path = basePath || DEFAULT_SHARED_SCHEMA_PATH; var sep = path.indexOf('?') === -1 ? '?' : '&'; return path + sep + 't=' + Date.now(); }
-  function fetchSharedSchema(basePath, fetchImpl) {
+
+  var DEFAULT_PATH = 'schema/shared-schema.json';
+
+  function checkNow(path, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
-    var url = buildFetchUrl(basePath);
-    return fetchImpl(url, { cache: 'no-store' }).then(function (res) {
-      if (res.status === 404) return { found: false };
-      if (!res.ok) return Promise.reject(new Error('The shared schema file could not be read (HTTP ' + res.status + ').'));
-      return res.text().then(function (rawText) {
-        var parsed;
-        try { parsed = JSON.parse(rawText); } catch (e) { return Promise.reject(new Error('The shared schema file does not contain valid JSON.')); }
-        var tables = Array.isArray(parsed) ? parsed : parsed.tables;
-        if (!Array.isArray(tables)) return Promise.reject(new Error('The shared schema file does not look like a valid AP-SQL Assistant schema.'));
-        return { found: true, schema: parsed, rawText: rawText };
-      });
-    }, function (err) { return Promise.reject(new Error('Could not reach the shared schema file (' + (err && err.message ? err.message : 'network error') + ').')); });
+    path = path || DEFAULT_PATH;
+    if (!fetchImpl) return Promise.resolve({ found: false, reason: 'No fetch implementation available in this environment.' });
+    return fetchImpl(path, { cache: 'no-store' }).then(function (res) {
+      if (!res.ok) return { found: false, reason: 'No file found at ' + path + ' (HTTP ' + res.status + ').' };
+      return res.json().then(function (data) { return { found: true, schema: data, path: path }; });
+    }).catch(function (err) {
+      return { found: false, reason: 'Could not read ' + path + ': ' + (err && err.message ? err.message : 'unknown error') + '.' };
+    });
   }
-  function describeSharedSchemaStatus(state) {
-    state = state || {};
-    if (!state.checked) return { level: 'checking', text: 'Checking for a shared schema at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '"…' };
-    if (state.error) return { level: 'error', text: 'Could not check for a shared schema: ' + state.error };
-    if (!state.found) return { level: 'notfound', text: 'No shared schema was found at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '". Using the schema already saved in this browser instead.' };
-    return { level: 'live', text: 'Using the live shared schema published at "' + (state.path || DEFAULT_SHARED_SCHEMA_PATH) + '".' };
-  }
-  var API = { DEFAULT_SHARED_SCHEMA_PATH: DEFAULT_SHARED_SCHEMA_PATH, buildFetchUrl: buildFetchUrl, fetchSharedSchema: fetchSharedSchema, describeSharedSchemaStatus: describeSharedSchemaStatus };
+
+  var API = { DEFAULT_PATH: DEFAULT_PATH, checkNow: checkNow };
   if (typeof module === 'object' && module.exports) module.exports = API;
-  if (typeof root !== 'undefined') root.APSQL_SHARED_SCHEMA = API;
+  if (typeof root !== 'undefined') root.APSQL_SHARED_SCHEMA_LOADER = API;
 })(typeof window !== 'undefined' ? window : this);

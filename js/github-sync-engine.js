@@ -1,82 +1,75 @@
+/* github-sync-engine.js — GitHub-hosted schema sync (read + optional authenticated write).
+   Preserves the V10.7.1 "anonymous-read fix": reading a public schema file never requires
+   a token, so Live Shared Schema / GitHub Pages consumers work with zero setup. A token is
+   only required to *publish* (write) an update back to the repository. */
 (function (root) {
   'use strict';
-  var B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  function base64EncodeBytes(bytes) {
-    var out = ''; var i;
-    for (i = 0; i + 2 < bytes.length; i += 3) { var n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]; out += B64_CHARS[(n >>> 18) & 63] + B64_CHARS[(n >>> 12) & 63] + B64_CHARS[(n >>> 6) & 63] + B64_CHARS[n & 63]; }
-    var remaining = bytes.length - i;
-    if (remaining === 1) { var n1 = bytes[i] << 16; out += B64_CHARS[(n1 >>> 18) & 63] + B64_CHARS[(n1 >>> 12) & 63] + '=='; }
-    else if (remaining === 2) { var n2 = (bytes[i] << 16) | (bytes[i + 1] << 8); out += B64_CHARS[(n2 >>> 18) & 63] + B64_CHARS[(n2 >>> 12) & 63] + B64_CHARS[(n2 >>> 6) & 63] + '='; }
-    return out;
+
+  function isReadConfigComplete(cfg) { return !!(cfg && cfg.owner && cfg.repo && cfg.path); }
+
+  function authHeadersOptional(cfg) {
+    var headers = { Accept: 'application/vnd.github+json' };
+    if (cfg && cfg.token) headers.Authorization = 'Bearer ' + cfg.token;
+    return headers;
   }
-  function base64DecodeToBytes(b64) {
-    var clean = String(b64 || '').replace(/[\r\n\s]/g, ''); var lookup = {};
-    for (var i = 0; i < B64_CHARS.length; i++) lookup[B64_CHARS[i]] = i;
-    var cleanNoPad = clean.replace(/=+$/, ''); var byteLen = Math.floor((cleanNoPad.length * 6) / 8);
-    var bytes = new Uint8Array(byteLen); var bitBuffer = 0, bitCount = 0, byteIdx = 0;
-    for (var j = 0; j < cleanNoPad.length; j++) { var val = lookup[cleanNoPad[j]]; if (val === undefined) continue; bitBuffer = (bitBuffer << 6) | val; bitCount += 6; if (bitCount >= 8) { bitCount -= 8; bytes[byteIdx++] = (bitBuffer >>> bitCount) & 0xFF; } }
-    return bytes;
+
+  function rawUrl(cfg) {
+    var branch = cfg.branch || 'main';
+    return 'https://raw.githubusercontent.com/' + cfg.owner + '/' + cfg.repo + '/' + branch + '/' + cfg.path;
   }
-  function utf8ToBase64(str) { return base64EncodeBytes(new TextEncoder().encode(String(str))); }
-  function base64ToUtf8(b64) { return new TextDecoder().decode(base64DecodeToBytes(b64)); }
-  var CONFIG_STORAGE_KEY = 'ap_sql_github_sync_v1';
-  function createConfigStore(storageImpl) {
-    storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
-    function saveConfig(config) { if (!storageImpl) return; storageImpl.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config)); }
-    function loadConfig() { if (!storageImpl) return null; var raw = storageImpl.getItem(CONFIG_STORAGE_KEY); if (!raw) return null; try { return JSON.parse(raw); } catch (e) { return null; } }
-    function clearConfig() { if (!storageImpl) return; if (typeof storageImpl.removeItem === 'function') storageImpl.removeItem(CONFIG_STORAGE_KEY); else storageImpl.setItem(CONFIG_STORAGE_KEY, ''); }
-    return { saveConfig: saveConfig, loadConfig: loadConfig, clearConfig: clearConfig };
+  function contentsApiUrl(cfg) {
+    return 'https://api.github.com/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path + (cfg.branch ? '?ref=' + cfg.branch : '');
   }
-  function isConfigComplete(config) { return !!(config && config.owner && config.repo && config.path && config.token); }
-  function isReadConfigComplete(config) { return !!(config && config.owner && config.repo && config.path); }
-  function normalizeBranch(config) { return (config && config.branch) ? config.branch : 'main'; }
-  function buildContentsUrl(config) { var branch = normalizeBranch(config); return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) + '/contents/' + config.path.split('/').map(encodeURIComponent).join('/') + '?ref=' + encodeURIComponent(branch); }
-  function buildContentsWriteUrl(config) { return 'https://api.github.com/repos/' + encodeURIComponent(config.owner) + '/' + encodeURIComponent(config.repo) + '/contents/' + config.path.split('/').map(encodeURIComponent).join('/'); }
-  function authHeaders(config) { return { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }; }
-  function authHeadersOptional(config) { var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }; if (config && config.token) headers.Authorization = 'Bearer ' + config.token; return headers; }
-  function fetchRemoteSchema(config, fetchImpl) {
+
+  // Anonymous, unauthenticated read of the raw file — works even with no token configured.
+  function fetchSchemaAnonymous(cfg, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
-    if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured (owner, repo, path, and token are all required).'));
-    return fetchImpl(buildContentsUrl(config), { headers: authHeaders(config) }).then(function (res) {
-      if (res.status === 404) return { exists: false };
-      if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it has not expired.'));
-      if (res.status === 403) return Promise.reject(new Error('GitHub denied access to this repository (403 Forbidden).'));
-      if (!res.ok) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ') while reading the schema file.'));
-      return res.json().then(function (body) {
-        if (Array.isArray(body)) return Promise.reject(new Error('The configured path points to a folder, not a file.'));
-        var decoded;
-        try { decoded = base64ToUtf8(body.content); } catch (e) { return Promise.reject(new Error('Could not decode the contents of the linked schema file.')); }
-        var parsed;
-        try { parsed = JSON.parse(decoded); } catch (e) { return Promise.reject(new Error('The linked schema file does not contain valid JSON.')); }
-        var tables = Array.isArray(parsed) ? parsed : parsed.tables;
-        if (!Array.isArray(tables)) return Promise.reject(new Error('The linked file does not look like a valid AP-SQL Assistant schema.'));
-        return { exists: true, schema: parsed, sha: body.sha };
+    if (!fetchImpl) return Promise.reject(new Error('No fetch implementation available.'));
+    if (!isReadConfigComplete(cfg)) return Promise.reject(new Error('GitHub sync is not fully configured (owner/repo/path required).'));
+    return fetchImpl(rawUrl(cfg), { headers: authHeadersOptional({}) }).then(function (res) {
+      if (!res.ok) throw new Error('GitHub returned ' + res.status + ' while fetching the schema file.');
+      return res.json();
+    });
+  }
+
+  // Authenticated write — requires a valid Personal Access Token with repo contents:write scope.
+  function publishSchema(cfg, schemaObj, fetchImpl) {
+    fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!fetchImpl) return Promise.reject(new Error('No fetch implementation available.'));
+    if (!cfg.token) return Promise.reject(new Error('A Personal Access Token is required to publish (write) to GitHub.'));
+    var body = JSON.stringify(schemaObj, null, 2);
+    var b64 = (typeof Buffer !== 'undefined') ? Buffer.from(body, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(body)));
+    // Look up current file SHA first (required by the Contents API for updates).
+    return fetchImpl(contentsApiUrl(cfg), { headers: authHeadersOptional(cfg) }).then(function (res) {
+      return res.ok ? res.json() : null;
+    }).then(function (existing) {
+      var payload = {
+        message: 'Update schema via AP-SQL Assistant',
+        content: b64,
+        branch: cfg.branch || 'main'
+      };
+      if (existing && existing.sha) payload.sha = existing.sha;
+      return fetchImpl(contentsApiUrl(cfg), {
+        method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeadersOptional(cfg)),
+        body: JSON.stringify(payload)
       });
-    }, function () { return Promise.reject(new Error('Could not reach GitHub (network error).')); });
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (errBody) {
+          var msg = (errBody && errBody.message) || (res.status + ' ' + res.statusText);
+          if (res.status === 401) throw new Error('GitHub rejected the Personal Access Token (401 Unauthorized). Double-check the token and that it hasn\u2019t expired.');
+          throw new Error('GitHub publish failed: ' + msg);
+        });
+      }
+      return res.json();
+    });
   }
-  function pushSchemaToGitHub(config, schemaObj, sha, fetchImpl) {
-    fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!fetchImpl) return Promise.reject(new Error('The fetch API is not available in this environment.'));
-    if (!isConfigComplete(config)) return Promise.reject(new Error('GitHub sync is not fully configured.'));
-    var body = { message: 'Update AP-SQL Assistant schema (' + new Date().toISOString() + ')', content: utf8ToBase64(JSON.stringify(schemaObj, null, 2)), branch: normalizeBranch(config) };
-    if (sha) body.sha = sha;
-    return fetchImpl(buildContentsWriteUrl(config), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders(config)), body: JSON.stringify(body) }).then(function (res) {
-      if (res.status === 409) { var err = new Error('Someone else updated the shared schema file since this browser last checked it.'); err.conflict = true; return Promise.reject(err); }
-      if (res.status === 401) return Promise.reject(new Error('GitHub rejected the Personal Access Token (401 Unauthorized).'));
-      if (res.status === 403) return Promise.reject(new Error('GitHub denied this write (403 Forbidden).'));
-      if (res.status !== 200 && res.status !== 201) return Promise.reject(new Error('GitHub returned an unexpected error (HTTP ' + res.status + ').'));
-      return res.json().then(function (respBody) { return { sha: respBody.content && respBody.content.sha }; });
-    }, function () { return Promise.reject(new Error('Could not reach GitHub (network error).')); });
-  }
-  function describeGitHubSyncStatus(state) {
-    state = state || {};
-    if (state.error) return { level: 'error', text: state.error };
-    if (!state.configured) return { level: 'unconfigured', text: 'Not set up yet. Enter your repository details and a Personal Access Token, then click Connect to start syncing the schema through GitHub.' };
-    if (state.conflict) return { level: 'conflict', text: 'Someone else updated the shared schema file on GitHub since this browser last checked it. Click "Sync Now" to fetch the latest version.' };
-    return { level: 'connected', text: 'Connected to ' + state.owner + '/' + state.repo + ' — ' + state.path + ' (branch: ' + (state.branch || 'main') + ').' };
-  }
-  var API = { base64EncodeBytes: base64EncodeBytes, base64DecodeToBytes: base64DecodeToBytes, utf8ToBase64: utf8ToBase64, base64ToUtf8: base64ToUtf8, createConfigStore: createConfigStore, isConfigComplete: isConfigComplete, isReadConfigComplete: isReadConfigComplete, normalizeBranch: normalizeBranch, buildContentsUrl: buildContentsUrl, buildContentsWriteUrl: buildContentsWriteUrl, authHeaders: authHeaders, authHeadersOptional: authHeadersOptional, fetchRemoteSchema: fetchRemoteSchema, pushSchemaToGitHub: pushSchemaToGitHub, describeGitHubSyncStatus: describeGitHubSyncStatus };
+
+  var API = {
+    isReadConfigComplete: isReadConfigComplete, authHeadersOptional: authHeadersOptional,
+    rawUrl: rawUrl, contentsApiUrl: contentsApiUrl,
+    fetchSchemaAnonymous: fetchSchemaAnonymous, publishSchema: publishSchema
+  };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_GITHUB_SYNC = API;
 })(typeof window !== 'undefined' ? window : this);

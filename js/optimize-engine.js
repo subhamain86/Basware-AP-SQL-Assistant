@@ -1,38 +1,33 @@
+/* optimize-engine.js — plain-language query explanation + light optimization hints. */
 (function (root) {
   'use strict';
-  function isSelectLike(result) { return !result.command || result.command === 'SELECT'; }
-  function isHierarchyWalk(result) { return (result.assumptions || []).some(function (a) { return /hierarchy/i.test(a); }); }
-  function tryRemoveRedundantDistinct(engine, result) {
-    var sql = result.sql || '';
-    if (!isSelectLike(result)) return null;
-    if (!/\bDISTINCT\b/i.test(sql)) return null;
-    if (!result.tablesUsed || !result.tablesUsed.length) return null;
-    var baseTable = result.tablesUsed[0];
-    var hasBasePk = (result.columnsUsed || []).some(function (c) { if (String(c.table).toUpperCase() !== String(baseTable).toUpperCase()) return false; var col = engine.getColumn(c.table, c.column); return !!(col && col.primary_key); });
-    if (!hasBasePk) return null;
-    var rewritten = sql.replace(/(SELECT\s+(?:TOP\s+\d+\s+)?)DISTINCT\s+/i, '$1');
-    if (rewritten === sql) return null;
-    return { sql: rewritten, note: 'Removed DISTINCT — the primary key of ' + baseTable + ' is already included in the result, so every row is already guaranteed to be unique.' };
+
+  function explainQuery(genResult, engine) {
+    if (!genResult || genResult.status !== 'ok') return '';
+    var parts = [];
+    var tables = genResult.tablesUsed || [];
+    if (tables.length === 1) parts.push('Reads from ' + tables[0] + '.');
+    else if (tables.length > 1) parts.push('Combines ' + tables.join(', ') + ' using ' + (genResult.joins || []).length + ' join(s).');
+    if (/DISTINCT/.test(genResult.sql)) parts.push('Removes duplicate rows.');
+    if (/GROUP BY/.test(genResult.sql)) parts.push('Groups results and aggregates values per group.');
+    if (/CASE/.test(genResult.sql)) parts.push('Translates coded values into readable labels.');
+    if (/ORDER BY/.test(genResult.sql)) parts.push('Sorts the result set.');
+    if (/LIMIT|TOP|FETCH FIRST/.test(genResult.sql)) parts.push('Limits the number of rows returned.');
+    if (/EXISTS/.test(genResult.sql)) parts.push('Filters based on related records in another table.');
+    if ((genResult.warnings || []).length) parts.push('Note: ' + genResult.warnings.join(' '));
+    return parts.join(' ');
   }
-  function collectIndexCandidates(engine, result) {
-    var found = {};
-    (result.filtersApplied || []).forEach(function (line) { var re = /([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/g; var m; while ((m = re.exec(line))) { var t = m[1], c = m[2]; var col = engine.getColumn(t, c); if (col && !col.primary_key) found[t + '.' + c] = true; } });
-    return Object.keys(found);
+
+  function optimizationHints(sql) {
+    var hints = [];
+    if (/SELECT DISTINCT \*/i.test(sql)) hints.push('Selecting DISTINCT * across a join can be expensive; consider selecting only the columns you need.');
+    if (/SELECT \*/i.test(sql) && /JOIN/i.test(sql)) hints.push('SELECT * across joined tables returns every column from every table — list only the columns you need for clearer, faster results.');
+    var whereMissing = !/WHERE/i.test(sql) && /JOIN|FROM/i.test(sql);
+    if (whereMissing) hints.push('No WHERE clause was used — this returns every row. Add a filter if you only need a subset.');
+    return hints;
   }
-  function optimizeSql(engine, result) {
-    var optimizedSql = result.sql || ''; var changesApplied = []; var recommendations = [];
-    var distinctFix = tryRemoveRedundantDistinct(engine, result);
-    if (distinctFix) { optimizedSql = distinctFix.sql; changesApplied.push(distinctFix.note); }
-    var selectLike = isSelectLike(result); var hierarchy = isHierarchyWalk(result);
-    var hasWhere = /\bWHERE\b/i.test(optimizedSql); var hasLimit = /\b(TOP\s+\d+|LIMIT\s+\d+|FETCH FIRST\s+\d+)/i.test(optimizedSql); var hasGroupBy = /\bGROUP BY\b/i.test(optimizedSql);
-    if (selectLike && !hierarchy && !hasWhere && !hasGroupBy) recommendations.push('This query has no WHERE condition, so it will return every row. Consider adding a filter if you only need a subset of records.');
-    if (/LIKE\s+'%[^']/i.test(optimizedSql)) recommendations.push('One or more filters use a leading wildcard (LIKE \'%...\'), which usually cannot use a database index efficiently.');
-    if (selectLike && !hierarchy && !hasLimit && !hasGroupBy && !hasWhere) recommendations.push('No result limit is set on this broad query. Consider adding a Result Limit, especially while testing.');
-    var indexCandidates = collectIndexCandidates(engine, result);
-    if (indexCandidates.length) recommendations.push('For best performance, confirm these columns are indexed: ' + indexCandidates.join(', ') + '.');
-    return { optimizedSql: optimizedSql, changesApplied: changesApplied, recommendations: recommendations, hasChanges: changesApplied.length > 0 };
-  }
-  var API = { optimizeSql: optimizeSql };
+
+  var API = { explainQuery: explainQuery, optimizationHints: optimizationHints };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_OPTIMIZE = API;
 })(typeof window !== 'undefined' ? window : this);

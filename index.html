@@ -2,375 +2,638 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AP-SQL Assistant · V11.4</title>
-<link rel="stylesheet" href="css/styles.css" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+<title>AP-SQL Assistant · Version 11.5</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
-<header class="app-header">
-  <h1>AP-SQL Assistant</h1>
-  <span class="version-badge">V11.4</span>
-  <div class="schema-pill" title="Currently selected (default) schema used for SQL generation and CASE/DECODE lookups">
-    <span>Active schema:</span> <strong id="hdrSchemaName">—</strong>
-    <span id="hdrSchemaTables" class="muted"></span>
+<!-- ============================= NAVBAR ============================= -->
+<nav class="navbar navbar-dark bg-dark fixed-top">
+  <div class="container-xl navbar-fit-container">
+    <button class="btn btn-outline-light navbar-hamburger" type="button" data-bs-toggle="offcanvas" data-bs-target="#appMenu" aria-controls="appMenu" aria-label="Open menu" id="btnHamburger">
+      <i class="bi bi-list fs-4"></i>
+    </button>
+    <a class="navbar-brand hero-brand-row text-truncate" href="#" data-nav="home">
+      <span class="app-logo-badge icon-badge badge-indigo"><i class="bi bi-diagram-3-fill"></i></span>
+      <span class="text-truncate"><strong>AP-SQL Assistant</strong> <span class="text-white-50 small d-none d-sm-inline">· V11.5</span></span>
+    </a>
+    <button class="btn btn-outline-light navbar-toggler-fit" type="button" data-bs-toggle="collapse" data-bs-target="#navbarFitCollapse" aria-controls="navbarFitCollapse" aria-label="Toggle navbar controls">
+      <i class="bi bi-three-dots"></i>
+    </button>
+    <div class="collapse" id="navbarFitCollapse">
+      <div class="navbar-sync-schedule">
+        <i class="bi bi-arrow-repeat navbar-sync-icon"></i>
+        <span class="navbar-sync-label">Schema Synchronization Schedule</span>
+        <select class="form-select form-select-sm" id="syncScheduleSelect" title="Schema Synchronization Schedule" aria-label="Schema Synchronization Schedule"></select>
+      </div>
+      <div class="navbar-actions">
+        <button class="btn btn-sm btn-outline-light" id="btnWalkthrough" type="button"><i class="bi bi-signpost-2"></i> <span class="d-none d-md-inline">Guided Walkthrough</span></button>
+        <span class="creator-signature-wrap d-none d-lg-inline-flex">
+          <span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span>
+        </span>
+      </div>
+    </div>
   </div>
-  <div class="spacer"></div>
-  <label style="margin:0; color:#fff; font-size:11px;">Dialect
-    <select id="globalDialect" style="width:auto; display:inline-block; margin-left:6px;">
-      <option>Generic</option>
-      <option>Oracle</option>
-      <option>SQL Server</option>
-      <option>PostgreSQL</option>
-      <option>MySQL</option>
-    </select>
-  </label>
-  <button class="btn btn-ghost" id="btnStartTour">🧭 Guided Walkthrough</button>
-</header>
-
-<nav class="tabbar" id="tabbar">
-  <button data-tab="readonly" class="active">Read Only Query Builder</button>
-  <button data-tab="crbuilder">CR Query Builder</button>
-  <button data-tab="rectifier">Error Rectifier</button>
-  <button data-tab="schema">Update Schema</button>
-  <button data-tab="sync">GitHub Sync &amp; Vault</button>
 </nav>
 
-<!-- ============================= READ ONLY QUERY BUILDER ============================= -->
-<section class="tabpanel active" id="tab-readonly">
-
-  <!-- 1. Describe What You Need -->
-  <div class="card" id="card-describe">
-    <div class="card-header"><span class="step-num">1</span> Describe What You Need
-      <span class="hint">Natural language → schema-aware SQL. No manual table/column selection required.</span>
-    </div>
-    <div class="card-body">
-      <textarea id="nlRequirement" rows="3" placeholder="e.g. Show all invoices approved in the last 30 days, sorted by highest amount, top 20"></textarea>
-      <div class="row mt8">
-        <button class="btn" id="btnBuildQuery">⚡ Build Query</button>
-        <button class="btn secondary" id="btnClearAll">Clear</button>
-        <span class="muted small" style="flex:2; align-self:center;">This fills in Select Table / Select Column / Filters below — you can still refine them manually before generating SQL.</span>
-      </div>
-      <div id="nlWarnings"></div>
-    </div>
+<!-- ============================= OFFCANVAS MENU ============================= -->
+<div class="offcanvas offcanvas-start" tabindex="-1" id="appMenu" aria-labelledby="appMenuLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="appMenuLabel"><i class="bi bi-diagram-3-fill me-1"></i> Menu</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
   </div>
+  <div class="offcanvas-body d-flex flex-column">
+    <a class="nav-link" href="#" data-nav="home"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-indigo"><i class="bi bi-house-door-fill"></i></span><span>Home</span></span></a>
 
-  <!-- 2. Generated SQL -->
-  <div class="card" id="card-generated-sql">
-    <div class="card-header"><span class="step-num">2</span> Generated SQL
-      <span class="hint">Validated against the active schema · self-corrected before display</span>
+    <div class="menu-submenu-toggle" data-toggle-submenu="qb"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-blue"><i class="bi bi-hammer"></i></span><span>Query Builder</span></span><i class="bi bi-chevron-right chevron"></i></div>
+    <div class="menu-submenu" id="submenu-qb">
+      <a class="nav-link" href="#" data-nav="readonly">Read Only Query Builder</a>
+      <a class="nav-link" href="#" data-nav="cr">Query Builder for CR</a>
     </div>
-    <div class="card-body">
-      <pre class="sql-output" id="sqlOutput">-- Your generated SQL will appear here.</pre>
-      <div class="row mt8">
-        <button class="btn secondary sm" id="btnCopySql">📋 Copy SQL</button>
-        <button class="btn secondary sm" id="btnOptimizeSql">⚙️ Optimize</button>
-        <button class="btn secondary sm" id="btnSendToRectifier">🛠 Send to Error Rectifier</button>
-      </div>
-      <div id="sqlMessages" class="mt8"></div>
-      <div id="sqlExplain" class="mt8"></div>
+
+    <div class="menu-submenu-toggle" data-toggle-submenu="schema"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-teal"><i class="bi bi-database-gear"></i></span><span>Schema</span></span><i class="bi bi-chevron-right chevron"></i></div>
+    <div class="menu-submenu" id="submenu-schema">
+      <a class="nav-link" href="#" data-nav="used-schema">Used Schema</a>
+      <a class="nav-link" href="#" data-nav="update-schema">Update Schema</a>
     </div>
-  </div>
 
-  <!-- 3. Manual Query Configuration -->
-  <div class="card" id="card-manual-config">
-    <div class="card-header"><span class="step-num">3</span> Manual Query Configuration
-      <span class="hint">Select Table | Select Column | Filters — stacks vertically on small screens</span>
+    <a class="nav-link" href="#" data-nav="rectifier"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-orange"><i class="bi bi-magic"></i></span><span>Error Rectifier</span></span></a>
+
+    <div class="menu-submenu-toggle" data-toggle-submenu="theme"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-purple"><i class="bi bi-palette-fill"></i></span><span>Theme</span></span><i class="bi bi-chevron-right chevron"></i></div>
+    <div class="menu-submenu" id="submenu-theme">
+      <a class="nav-link" href="#" data-theme-choice="system">System Default</a>
+      <a class="nav-link" href="#" data-theme-choice="light">Light</a>
+      <a class="nav-link" href="#" data-theme-choice="dark">Dark</a>
     </div>
-    <div class="card-body">
-      <div class="mqc-grid">
-        <!-- Select Table -->
-        <div class="mqc-card" id="mqc-table">
-          <div class="mqc-card-title">Select Table <span class="count" id="tableCount"></span></div>
-          <div class="mqc-search"><input type="search" id="tableSearch" placeholder="Search tables…" /></div>
-          <div class="mqc-scroll" id="tableList"></div>
-        </div>
-        <!-- Select Column -->
-        <div class="mqc-card" id="mqc-column">
-          <div class="mqc-card-title">Select Column <span class="count" id="columnCount"></span></div>
-          <div class="mqc-search"><input type="search" id="columnSearch" placeholder="Search columns…" /></div>
-          <div class="mqc-scroll" id="columnList"><div class="muted small" style="padding:10px;">Select one or more tables first.</div></div>
-        </div>
-        <!-- Filters -->
-        <div class="mqc-card" id="mqc-filters">
-          <div class="mqc-card-title">Filters <span class="count" id="filterCount"></span></div>
-          <div class="mqc-search"><button class="btn subtle sm" id="btnAddFilter">➕ Add filter</button></div>
-          <div class="mqc-scroll" id="filterList"><div class="muted small" style="padding:10px;">No filters added yet.</div></div>
-        </div>
-      </div>
 
-      <div class="mqc-footer-options">
-        <div class="row">
-          <div>
-            <label>Join type</label>
-            <select id="optJoinType"><option value="INNER">INNER JOIN</option><option value="LEFT">LEFT JOIN</option></select>
-          </div>
-          <div>
-            <label>Result limit</label>
-            <input type="number" id="optLimit" min="1" placeholder="e.g. 50" />
-          </div>
-          <div>
-            <label>Order by (e.g. TABLE.COLUMN DESC)</label>
-            <input type="text" id="optOrderBy" placeholder="TABLE.COLUMN ASC|DESC" />
-          </div>
-          <div>
-            <label class="inline"><input type="checkbox" id="optDistinct" /> DISTINCT</label>
-            <label class="inline"><input type="checkbox" id="optRecursive" /> Recursive hierarchy walk</label>
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label>Group by (comma separated TABLE.COLUMN)</label>
-            <input type="text" id="optGroupBy" placeholder="TABLE.COLUMN, TABLE.COLUMN2" />
-          </div>
-          <div>
-            <label>Having</label>
-            <input type="text" id="optHaving" placeholder="e.g. COUNT(*) &gt; 5" />
-          </div>
-          <div>
-            <label>Wrap as named view / CTE</label>
-            <input type="text" id="optViewName" placeholder="optional view name" />
-          </div>
-          <div style="display:flex; align-items:flex-end;">
-            <button class="btn" id="btnGenerateManual" style="width:100%;">Generate SQL from Manual Configuration</button>
-          </div>
-        </div>
-        <div id="existsFilterArea"></div>
-      </div>
+    <a class="nav-link" href="#" id="menuRestartWalkthrough"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-cyan"><i class="bi bi-signpost-2"></i></span><span>Restart Guided Walkthrough</span></span></a>
+    <a class="nav-link" href="#" data-nav="about"><span class="menu-item-label"><span class="icon-badge icon-badge-sm badge-gray"><i class="bi bi-info-circle-fill"></i></span><span>About</span></span></a>
+
+    <div class="mt-auto pt-3 text-center creator-signature-wrap d-lg-none">
+      <span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span>
     </div>
-  </div>
-
-</section>
-
-<!-- ============================= CR QUERY BUILDER ============================= -->
-<section class="tabpanel" id="tab-crbuilder">
-  <div class="card">
-    <div class="card-header">Change-Request (CR) Query Builder <span class="hint" id="crSafetyBanner"></span></div>
-    <div class="card-body">
-      <div class="row">
-        <div>
-          <label>Command</label>
-          <select id="crCommand"><option value="INSERT">INSERT</option><option value="UPDATE">UPDATE</option><option value="DELETE">DELETE</option></select>
-        </div>
-        <div>
-          <label>Table</label>
-          <select id="crTable"></select>
-        </div>
-        <div>
-          <label class="inline"><input type="checkbox" id="crAllowNoWhere" style="width:auto;" /> Explicitly allow no WHERE condition</label>
-        </div>
-      </div>
-      <div id="crColumnsArea" class="mt12"></div>
-      <div id="crFilterArea" class="mt12"></div>
-      <div class="row mt12">
-        <button class="btn" id="btnBuildCr">Generate CR SQL</button>
-      </div>
-      <div id="crMessages" class="mt8"></div>
-      <pre class="sql-output mt8" id="crOutput">-- Generated INSERT / UPDATE / DELETE SQL will appear here.</pre>
-    </div>
-  </div>
-</section>
-
-<!-- ============================= ERROR RECTIFIER ============================= -->
-<section class="tabpanel" id="tab-rectifier">
-  <div class="card">
-    <div class="card-header">Error Rectifier</div>
-    <div class="card-body">
-      <label>SQL that produced the error</label>
-      <textarea id="rectSql" rows="6"></textarea>
-      <label class="mt8">Database error message</label>
-      <textarea id="rectError" rows="3" placeholder="Paste the exact error returned by the database"></textarea>
-      <div class="row mt8">
-        <div>
-          <label>Dialect</label>
-          <select id="rectDialect"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
-        </div>
-        <div style="display:flex; align-items:flex-end; gap:8px;">
-          <button class="btn secondary sm" id="btnDetectDialect">Auto-detect dialect from error</button>
-          <button class="btn" id="btnRectify">Rectify</button>
-        </div>
-      </div>
-      <div id="rectResult" class="mt12"></div>
-    </div>
-  </div>
-</section>
-
-<!-- ============================= UPDATE SCHEMA ============================= -->
-<section class="tabpanel" id="tab-schema">
-  <div class="card">
-    <div class="card-header">Multiple Schema Store <span class="hint">Default = currently selected schema used for generation &amp; CASE/DECODE writes. Active = included when generating SQL.</span></div>
-    <div class="card-body" id="schemaEntries"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Add / Import Schema</div>
-    <div class="card-body">
-      <div class="row">
-        <div>
-          <label>Upload schema file (.csv or .json)</label>
-          <input type="file" id="schemaUploadFile" accept=".csv,.json" />
-        </div>
-        <div>
-          <label>New schema entry name</label>
-          <input type="text" id="schemaUploadName" placeholder="e.g. Client X Schema" />
-        </div>
-        <div style="display:flex; align-items:flex-end;">
-          <button class="btn" id="btnAddSchemaEntry">Add as new schema entry</button>
-        </div>
-      </div>
-      <div class="row mt8">
-        <div>
-          <label>Merge uploaded columns/tables into</label>
-          <select id="schemaMergeTarget"></select>
-        </div>
-        <div style="display:flex; align-items:flex-end;">
-          <button class="btn secondary" id="btnMergeSchemaEntry">Merge into selected schema</button>
-        </div>
-        <div style="display:flex; align-items:flex-end; gap:8px;">
-          <button class="btn secondary sm" id="btnDownloadSampleCsv">Download sample CSV template</button>
-          <button class="btn secondary sm" id="btnExportCurrentJson">Export default schema (JSON)</button>
-        </div>
-      </div>
-      <div id="schemaUploadMsgs" class="mt8"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Manual Relationship (Join Path) Override</div>
-    <div class="card-body">
-      <div class="row">
-        <input type="text" id="relFromTable" placeholder="From table" />
-        <input type="text" id="relFromColumn" placeholder="From column" />
-        <input type="text" id="relToTable" placeholder="To table" />
-        <input type="text" id="relToColumn" placeholder="To column" />
-        <button class="btn secondary" id="btnAddRelationship">Save relationship</button>
-      </div>
-      <p class="muted small">Used only when no relationship is documented in the schema — helps the join planner connect tables that share meaning but no formal foreign key.</p>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Schema Synchronization Schedule</div>
-    <div class="card-body">
-      <div class="row">
-        <div>
-          <label>Automatic GitHub sync frequency</label>
-          <select id="syncScheduleSelect"></select>
-        </div>
-        <div style="display:flex; align-items:flex-end;">
-          <button class="btn secondary" id="btnSaveSyncSchedule">Save schedule</button>
-        </div>
-      </div>
-      <p class="muted small" id="syncScheduleNote"></p>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Operational / Admin Password</div>
-    <div class="card-body">
-      <p class="muted small">This password gates schema changes made via Admin Approval (Manual CASE/DECODE Addition) and other administrative actions. Never displayed or stored in plaintext.</p>
-      <div class="row">
-        <input type="password" id="pwCurrent" placeholder="Current password" />
-        <input type="password" id="pwNew" placeholder="New password" />
-        <input type="password" id="pwConfirm" placeholder="Confirm new password" />
-        <button class="btn secondary" id="btnChangePassword">Change password</button>
-      </div>
-      <div id="pwMsgs" class="mt8"></div>
-    </div>
-  </div>
-</section>
-
-<!-- ============================= GITHUB SYNC & VAULT ============================= -->
-<section class="tabpanel" id="tab-sync">
-  <div class="card">
-    <div class="card-header">GitHub Schema Sync <span class="hint" id="githubStatusHint"></span></div>
-    <div class="card-body">
-      <div class="row">
-        <input type="text" id="ghOwner" placeholder="Owner / org" />
-        <input type="text" id="ghRepo" placeholder="Repository" />
-        <input type="text" id="ghBranch" placeholder="Branch (default: main)" />
-        <input type="text" id="ghPath" placeholder="File path e.g. schema/shared-schema.json" />
-      </div>
-      <div class="row mt8">
-        <input type="password" id="ghToken" placeholder="Personal Access Token (or unlock via vault below)" />
-        <button class="btn secondary" id="btnGhSaveConfig">Save configuration</button>
-        <button class="btn secondary" id="btnGhFetch">Fetch from GitHub</button>
-        <button class="btn" id="btnGhPush">Push current default schema to GitHub</button>
-      </div>
-      <div id="ghMsgs" class="mt8"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Secure GitHub Connection Vault <span class="hint">Encrypted with AES-GCM (PBKDF2, 210,000 iterations)</span></div>
-    <div class="card-body">
-      <p class="muted small">Store the GitHub configuration above (including the token) as an encrypted vault file, so it never needs to be typed in plaintext again on this device.</p>
-      <div class="row">
-        <input type="password" id="vaultPass1" placeholder="Vault passphrase" />
-        <button class="btn secondary" id="btnEncryptVault">Encrypt &amp; publish vault</button>
-      </div>
-      <div class="row mt8">
-        <input type="password" id="vaultPass2" placeholder="Vault passphrase" />
-        <button class="btn secondary" id="btnFetchUnlockVault">Fetch &amp; unlock vault</button>
-      </div>
-      <div id="vaultMsgs" class="mt8"></div>
-    </div>
-  </div>
-</section>
-
-<p class="footer-note">AP-SQL Assistant · V11.4 — Query Layout, CASE/DECODE Enhancement &amp; Schema-Aware Configuration</p>
-
-<!-- Decode / CASE modal -->
-<div class="modal-backdrop" id="decodeModalBackdrop">
-  <div class="modal">
-    <div class="modal-header"><h3 id="decodeModalTitle">CASE / DECODE</h3><button class="close" id="decodeModalClose">✕</button></div>
-    <div class="modal-body" id="decodeModalBody"></div>
-    <div class="modal-footer" id="decodeModalFooter"></div>
   </div>
 </div>
 
-<!-- Admin password modal -->
-<div class="modal-backdrop" id="pwModalBackdrop">
-  <div class="modal">
-    <div class="modal-header"><h3>Admin Approval Required</h3><button class="close" id="pwModalClose">✕</button></div>
+<!-- ============================= APP SHELL ============================= -->
+<main class="app-shell container-xl py-3">
+
+  <!-- ---------- HOME ---------- -->
+  <section class="app-view active" id="view-home">
+    <div class="hero-brand-row mb-2">
+      <span class="app-logo-badge app-logo-badge-lg icon-badge badge-indigo"><i class="bi bi-diagram-3-fill fs-3"></i></span>
+      <div>
+        <h1 class="h4 builder-heading mb-0">AP-SQL Assistant · Version 11.5</h1>
+        <div class="text-secondary small">Full functionality consolidation, advanced SQL engine &amp; production-ready UI</div>
+      </div>
+    </div>
+    <div class="card compact-card mb-3">
+      <div class="card-body">
+        <p class="mb-2">This assistant writes database queries for you — both <strong>read-only reports</strong> and <strong>Change Request SQL</strong> — using your organization's approved database schema(s) as its single source of truth. Describe what you need in plain language, or build a query manually; the app validates and self-corrects generated SQL before showing it to you, and never executes anything against a real database.</p>
+        <div id="homeSchemaSummary" class="small text-secondary"></div>
+      </div>
+    </div>
+
+    <h2 class="h6 mb-2"><span class="icon-badge badge-blue"><i class="bi bi-collection"></i></span>Try an example</h2>
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-md-4">
+        <div class="card compact-card h-100 qs-example-card" data-nav="readonly">
+          <div class="card-body">
+            <span class="qs-icon-badge badge-blue mb-2"><i class="bi bi-search"></i></span>
+            <h3 class="h6">Read Only Query Builder</h3>
+            <p class="small text-secondary mb-0">Describe what you need in plain language — tables, joins, filters and aggregations are found automatically.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div class="card compact-card h-100 qs-example-card" data-nav="cr">
+          <div class="card-body">
+            <span class="qs-icon-badge badge-orange mb-2"><i class="bi bi-pencil-square"></i></span>
+            <h3 class="h6">Query Builder for CR</h3>
+            <p class="small text-secondary mb-0">Draft INSERT / UPDATE / DELETE SQL text with mandatory WHERE protection.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div class="card compact-card h-100 qs-example-card" data-nav="rectifier">
+          <div class="card-body">
+            <span class="qs-icon-badge badge-purple mb-2"><i class="bi bi-magic"></i></span>
+            <h3 class="h6">Error Rectifier</h3>
+            <p class="small text-secondary mb-0">Paste a database error and the SQL that caused it, and get a corrected query with a plain-language explanation.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="h6 mb-2"><span class="icon-badge badge-teal"><i class="bi bi-diagram-3"></i></span>Areas covered by the active schema</h2>
+    <div id="homeSchemaAreas" class="d-flex flex-wrap gap-2 mb-2"></div>
+  </section>
+
+  <!-- ---------- READ ONLY QUERY BUILDER ---------- -->
+  <section class="app-view" id="view-readonly">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-blue"><i class="bi bi-search"></i></span>Read Only Query Builder</h1>
+
+    <div class="card compact-card mb-3" id="stepDescribe">
+      <div class="card-body">
+        <h2 class="h6"><span class="icon-badge icon-badge-sm badge-blue"><i class="bi bi-chat-left-text"></i></span>Describe What You Need</h2>
+        <p class="small text-secondary">Works from your description alone. Follow-up instructions (e.g. "only show the last 3 months", "add supplier name", "sort by highest amount") refine the same query.</p>
+        <div class="row g-2 align-items-start">
+          <div class="col-12 col-md-8">
+            <textarea class="form-control" id="describeInput" rows="2" placeholder='e.g. "Show all invoices processed in the last 30 days"'></textarea>
+          </div>
+          <div class="col-8 col-md-3">
+            <select class="form-select" id="describeDialect">
+              <option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option>
+            </select>
+          </div>
+          <div class="col-4 col-md-1 d-grid">
+            <button class="btn btn-primary" id="btnBuildQuery" title="Build Query"><i class="bi bi-play-fill"></i></button>
+          </div>
+        </div>
+        <div class="describe-action-row">
+          <span class="describe-hint">Conversation turns: <span id="describeTurnCount">0</span></span>
+          <div class="describe-action-buttons">
+            <button class="btn btn-sm btn-outline-secondary" id="btnRemoveDuplicates"><i class="bi bi-fingerprint"></i> Remove duplicates</button>
+            <button class="btn btn-sm btn-outline-secondary" id="btnStartOver"><i class="bi bi-arrow-counterclockwise"></i> Start Over</button>
+          </div>
+        </div>
+        <div id="describeInterpretation" class="description-interpretation-box"></div>
+      </div>
+    </div>
+
+    <div class="card compact-card mb-3" id="stepGeneratedSql">
+      <div class="card-body">
+        <h2 class="h6"><span class="icon-badge icon-badge-sm badge-green"><i class="bi bi-code-slash"></i></span>Generated SQL</h2>
+        <pre class="sql-output" id="roSqlOutput">-- Your generated SQL will appear here.</pre>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-primary" id="btnCopyRoSql"><i class="bi bi-clipboard"></i> Copy SQL</button>
+        </div>
+        <div id="roSqlExplanation" class="alert alert-light border mt-2 small mb-0"></div>
+        <div id="roSqlWarnings" class="mt-2"></div>
+      </div>
+    </div>
+
+    <div class="card compact-card" id="stepManualConfig">
+      <div class="card-body">
+        <h2 class="h6"><span class="icon-badge icon-badge-sm badge-indigo"><i class="bi bi-sliders"></i></span>Manual Query Configuration</h2>
+        <p class="small text-secondary">Optional — for precise manual control. Combine with the description above, or use on its own.</p>
+
+        <ul class="nav nav-tabs tab-action-bar" role="tablist" id="roConfigTabs">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#roTabTables" type="button">Select Table</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#roTabColumns" type="button">Select Column</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#roTabFilters" type="button">Filters</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#roTabAdvanced" type="button">Advanced Options</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#roTabSummary" type="button">Selected Requirements</button></li>
+        </ul>
+        <div class="tab-content tab-content-wrap">
+          <div class="tab-pane fade show active" id="roTabTables">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <input type="search" class="form-control form-control-sm w-auto flex-grow-1 me-2" id="roTableSearch" placeholder="Search tables...">
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" id="roTablesSelectAll">Select All</button>
+                <button class="btn btn-outline-secondary" id="roTablesClear">Clear</button>
+              </div>
+            </div>
+            <div class="scroll-panel" id="roTableList"></div>
+            <div class="small text-secondary mt-1"><span id="roTableCount">0</span> tables selected</div>
+          </div>
+          <div class="tab-pane fade" id="roTabColumns">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <input type="search" class="form-control form-control-sm w-auto flex-grow-1 me-2" id="roColumnSearch" placeholder="Search columns...">
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" id="roColumnsSelectAll">Select All</button>
+                <button class="btn btn-outline-secondary" id="roColumnsUnselectAll">Unselect All</button>
+              </div>
+            </div>
+            <div class="scroll-panel" id="roColumnList"></div>
+          </div>
+          <div class="tab-pane fade" id="roTabFilters">
+            <p class="small text-secondary">Conditions that determine which records appear in the result. Supports multiple filter conditions.</p>
+            <div id="roFilterRows"></div>
+            <div class="d-flex gap-2 mt-2">
+              <button class="btn btn-sm btn-outline-primary" id="roAddFilter"><i class="bi bi-plus-lg"></i> Add Filter</button>
+              <button class="btn btn-sm btn-outline-secondary" id="roClearFilters">Clear all filters</button>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="roTabAdvanced">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold">How should tables be connected?</label>
+                <select class="form-select form-select-sm" id="roJoinType">
+                  <option value="inner">Only show records that match in every table (INNER JOIN)</option>
+                  <option value="left">Also show records that don't have a match (LEFT JOIN)</option>
+                  <option value="right">RIGHT JOIN</option>
+                  <option value="full">FULL OUTER JOIN</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold">Limit the number of results</label>
+                <input type="number" min="1" class="form-control form-control-sm" id="roLimit" placeholder="e.g. 10">
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold">Order by</label>
+                <div id="roOrderByRows"></div>
+                <button class="btn btn-sm btn-outline-primary mt-1" id="roAddOrderBy"><i class="bi bi-plus-lg"></i> Add Sort Column</button>
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold">Group by / Having</label>
+                <div id="roGroupByRows"></div>
+                <button class="btn btn-sm btn-outline-primary mt-1" id="roAddGroupBy"><i class="bi bi-plus-lg"></i> Add Group Column</button>
+                <input type="text" class="form-control form-control-sm mt-1" id="roHaving" placeholder="HAVING condition, e.g. SUM(amount) > 1000">
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-semibold">Give this query a friendly name (CTE)</label>
+                <input type="text" class="form-control form-control-sm" id="roCteName" placeholder="e.g. recent_invoices">
+              </div>
+              <div class="col-12 col-md-6">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="roDistinct">
+                  <label class="form-check-label small" for="roDistinct">Remove duplicates (DISTINCT)</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <label class="form-label small fw-semibold">Power-user options (JSON) — window functions, EXISTS filters, related counts, recursive hierarchy, set operations</label>
+                <textarea class="form-control form-control-sm font-monospace" id="roAdvancedJson" rows="3" placeholder='{"windowFunctions":[],"existsFilters":[],"relatedCounts":[],"recursiveHierarchy":null,"setOperation":null}'></textarea>
+                <div class="form-text">Optional. Leave blank unless you need these advanced constructs — see the Guided Walkthrough for examples.</div>
+              </div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="roTabSummary">
+            <pre class="small" id="roSummaryJson">{}</pre>
+          </div>
+        </div>
+        <div class="d-grid mt-3">
+          <button class="btn btn-primary" id="btnBuildQueryManual"><i class="bi bi-hammer"></i> Build Query</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- CR QUERY BUILDER ---------- -->
+  <section class="app-view" id="view-cr">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-orange"><i class="bi bi-pencil-square"></i></span>Query Builder for CR</h1>
+    <div class="alert alert-warning cr-safety-banner"><i class="bi bi-exclamation-triangle-fill"></i> This builds INSERT / UPDATE / DELETE <strong>SQL text</strong> only, for review through your approved change process. AP-SQL Assistant never executes SQL against a database.</div>
+
+    <div class="card compact-card cr-query-type-card mb-3">
+      <div class="card-body">
+        <label class="form-label small fw-semibold mb-1">Command</label>
+        <div class="cr-command-selector" id="crCommandSelector">
+          <div class="cr-command-option active" data-command="INSERT">INSERT</div>
+          <div class="cr-command-option" data-command="UPDATE">UPDATE</div>
+          <div class="cr-command-option" data-command="DELETE">DELETE</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card compact-card mb-3">
+      <div class="card-body">
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-semibold">Table</label>
+            <select class="form-select" id="crTableSelect"></select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-semibold">SQL Dialect</label>
+            <select class="form-select" id="crDialect">
+              <option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card compact-card mb-3">
+      <div class="card-body">
+        <h2 class="h6" id="crFieldsHeading">Columns &amp; Values</h2>
+        <div id="crFieldRows"></div>
+        <button class="btn btn-sm btn-outline-primary mt-2" id="crAddField"><i class="bi bi-plus-lg"></i> Add Row</button>
+      </div>
+    </div>
+
+    <div class="card compact-card mb-3" id="crFilterCard">
+      <div class="card-body">
+        <h2 class="h6">WHERE Conditions <span class="badge text-bg-danger">Required for UPDATE/DELETE</span></h2>
+        <div id="crFilterRows"></div>
+        <button class="btn btn-sm btn-outline-primary mt-2" id="crAddFilter"><i class="bi bi-plus-lg"></i> Add Filter</button>
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" id="crExplicitOverride">
+          <label class="form-check-label small" for="crExplicitOverride">I understand this will affect every row — override the WHERE requirement</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-grid mb-3"><button class="btn btn-primary" id="btnBuildCr"><i class="bi bi-hammer"></i> Build Query</button></div>
+
+    <div class="card compact-card">
+      <div class="card-body">
+        <h2 class="h6">Generated CR SQL</h2>
+        <pre class="sql-output" id="crSqlOutput">-- Your generated SQL will appear here.</pre>
+        <button class="btn btn-sm btn-outline-primary mt-2" id="btnCopyCrSql"><i class="bi bi-clipboard"></i> Copy SQL</button>
+        <div id="crSqlWarnings" class="mt-2"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- USED SCHEMA ---------- -->
+  <section class="app-view" id="view-used-schema">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-teal"><i class="bi bi-diagram-3"></i></span>Used Schema</h1>
+    <p class="text-secondary small">Tick which stored schemas should be <strong>Active</strong> right now — changes apply immediately, no password required. The <strong>Default</strong> schema is always Active and can't be unticked here.</p>
+    <div class="card compact-card">
+      <div class="card-body">
+        <div id="usedSchemaList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- UPDATE SCHEMA ---------- -->
+  <section class="app-view" id="view-update-schema">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-purple"><i class="bi bi-shield-lock"></i></span>Update Schema</h1>
+    <p class="text-secondary small">This is a password-protected administrator action. It never connects to a production database.</p>
+
+    <div class="card compact-card" id="updateSchemaLock">
+      <div class="card-body">
+        <label class="form-label small fw-semibold">Operational Password</label>
+        <div class="input-group input-group-sm" style="max-width:320px">
+          <input type="password" class="form-control" id="updateSchemaPasswordInput" placeholder="Password">
+          <button class="btn btn-primary" id="btnUnlockUpdateSchema">Unlock</button>
+        </div>
+        <div class="invalid-feedback d-block" id="updateSchemaPasswordError" style="display:none !important"></div>
+        <button class="btn btn-link btn-sm p-0 mt-2" id="btnForgotPassword">Forgot password? Reset to default</button>
+      </div>
+    </div>
+
+    <div id="updateSchemaContent" style="display:none">
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-collection"></i> Manage Stored Schemas</h2>
+          <div id="manageSchemaList" class="mb-2"></div>
+          <div class="input-group input-group-sm" style="max-width:360px">
+            <input type="text" class="form-control" id="newSchemaName" placeholder="New schema name">
+            <button class="btn btn-outline-primary" id="btnAddNewSchema">Add New Schema</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6">
+          <div class="card compact-card h-100">
+            <div class="card-body">
+              <h2 class="h6">Select Default Schema</h2>
+              <div id="defaultSchemaChoices"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="card compact-card h-100">
+            <div class="card-body">
+              <h2 class="h6">Select Active Schemas</h2>
+              <div id="activeSchemaChoices"></div>
+              <button class="btn btn-sm btn-outline-primary mt-2" id="btnSaveActiveSelection">Save Active Schema Selection</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-upload"></i> Smart Schema Import Engine</h2>
+          <p class="small text-secondary">Editing schema: <strong id="workingWithSchemaName">—</strong></p>
+          <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-6">
+              <input type="file" class="form-control form-control-sm" id="schemaImportFile" accept=".json,.csv,.xlsx,.xls,.docx,.doc">
+            </div>
+            <div class="col-12 col-md-6 d-flex flex-wrap gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="btnProcessFile">Process File</button>
+              <button class="btn btn-sm btn-outline-secondary" id="btnViewExpectedStructure">View Expected Structure</button>
+            </div>
+          </div>
+          <div class="mt-2 d-flex flex-wrap gap-2">
+            <span class="small text-secondary align-self-center">Sample formats:</span>
+            <button class="btn btn-sm btn-outline-secondary" data-sample="json">Sample JSON</button>
+            <button class="btn btn-sm btn-outline-secondary" data-sample="csv">Sample CSV</button>
+            <button class="btn btn-sm btn-outline-secondary" data-sample="xlsx">Sample XLSX</button>
+            <button class="btn btn-sm btn-outline-secondary" data-sample="doc">Sample DOC</button>
+          </div>
+          <div id="schemaImportMessage" class="mt-2"></div>
+
+          <div id="schemaPreviewPanel" class="mt-3" style="display:none">
+            <h3 class="h6">Preview Changes</h3>
+            <div class="row g-2">
+              <div class="col-12 col-md-4"><strong class="small">Added tables</strong><ul class="small" id="previewAdded"></ul></div>
+              <div class="col-12 col-md-4"><strong class="small">Removed tables</strong><ul class="small" id="previewRemoved"></ul></div>
+              <div class="col-12 col-md-4"><strong class="small">Changed tables</strong><ul class="small" id="previewChanged"></ul></div>
+            </div>
+            <div class="d-flex gap-2 mt-2">
+              <button class="btn btn-sm btn-success" id="btnApplySchemaUpdate">Apply Schema Update</button>
+              <button class="btn btn-sm btn-outline-secondary" id="btnCancelSchemaUpdate">Cancel Update</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-download"></i> Download Current Schema</h2>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-outline-secondary" data-download="json">JSON</button>
+            <button class="btn btn-sm btn-outline-secondary" data-download="csv">CSV</button>
+            <button class="btn btn-sm btn-outline-secondary" data-download="xlsx">XLSX</button>
+            <button class="btn btn-sm btn-outline-secondary" data-download="doc">DOC</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-arrow-repeat"></i> Synchronization</h2>
+
+          <h3 class="h6 mt-2">Live Shared Schema</h3>
+          <div class="input-group input-group-sm mb-1" style="max-width:420px">
+            <span class="input-group-text">Path</span>
+            <input type="text" class="form-control" id="sharedSchemaPath" value="schema/shared-schema.json">
+            <button class="btn btn-outline-secondary" id="btnCheckSharedSchemaNow">Check Now</button>
+          </div>
+          <div id="sharedSchemaResult" class="small"></div>
+
+          <h3 class="h6 mt-3">Cross-Device Sync (Option A — linked file)</h3>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-outline-secondary" id="btnLinkFile">Link File</button>
+            <button class="btn btn-sm btn-outline-secondary" id="btnReadLinkedFile">Read Linked File</button>
+            <button class="btn btn-sm btn-outline-secondary" id="btnWriteLinkedFile">Publish Default Schema to Linked File</button>
+          </div>
+          <div id="linkedFileResult" class="small mt-1"></div>
+
+          <h3 class="h6 mt-3">GitHub-Hosted Schema Sync (Option B)</h3>
+          <div class="row g-2">
+            <div class="col-6 col-md-3"><input class="form-control form-control-sm" id="ghOwner" placeholder="owner"></div>
+            <div class="col-6 col-md-3"><input class="form-control form-control-sm" id="ghRepo" placeholder="repo"></div>
+            <div class="col-6 col-md-3"><input class="form-control form-control-sm" id="ghPath" placeholder="path/to/schema.json"></div>
+            <div class="col-6 col-md-3"><input class="form-control form-control-sm" id="ghBranch" placeholder="branch (default: main)"></div>
+          </div>
+          <div class="form-text">Your Personal Access Token is only ever stored encrypted, in the Secure GitHub Connection Vault below — never in plaintext.</div>
+          <div class="d-flex flex-wrap gap-2 mt-1">
+            <button class="btn btn-sm btn-outline-secondary" id="btnGithubFetch">Check / Fetch Now</button>
+          </div>
+          <div id="githubSyncResult" class="small mt-1"></div>
+
+          <h3 class="h6 mt-3">Secure GitHub Connection Vault</h3>
+          <div class="row g-2">
+            <div class="col-12 col-md-6"><input type="password" class="form-control form-control-sm" id="ghToken" placeholder="Personal Access Token"></div>
+            <div class="col-12 col-md-6"><input type="password" class="form-control form-control-sm" id="vaultPassword" placeholder="Vault password (your operational password)"></div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-2">
+            <button class="btn btn-sm btn-outline-primary" id="btnEncryptPublishVault">Encrypt &amp; Publish Vault</button>
+            <button class="btn btn-sm btn-outline-primary" id="btnFetchUnlockVault">Fetch &amp; Unlock Vault</button>
+          </div>
+          <div id="vaultResult" class="small mt-1"></div>
+        </div>
+      </div>
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-toggle-on"></i> Manual CASE/DECODE Approval Queue</h2>
+          <p class="small text-secondary">Pending manual definitions created from the Read Only Query Builder require approval here before they are written into the Default schema.</p>
+          <div id="decodeApprovalList" class="small text-secondary">No pending definitions.</div>
+        </div>
+      </div>
+
+      <div class="card compact-card mb-3">
+        <div class="card-body">
+          <h2 class="h6"><i class="bi bi-key"></i> Operational Password</h2>
+          <div class="row g-2">
+            <div class="col-12 col-md-4"><input type="password" class="form-control form-control-sm" id="pwCurrent" placeholder="Current password"></div>
+            <div class="col-12 col-md-4"><input type="password" class="form-control form-control-sm" id="pwNew" placeholder="New password"></div>
+            <div class="col-12 col-md-4"><input type="password" class="form-control form-control-sm" id="pwConfirm" placeholder="Confirm new password"></div>
+          </div>
+          <button class="btn btn-sm btn-outline-primary mt-2" id="btnChangePassword">Change Password</button>
+          <div id="pwChangeResult" class="small mt-1"></div>
+        </div>
+      </div>
+
+      <div class="card compact-card border-danger">
+        <div class="card-body">
+          <h2 class="h6 text-danger"><i class="bi bi-exclamation-octagon"></i> Danger Zone</h2>
+          <button class="btn btn-sm btn-outline-danger" id="btnDeleteSchemaContents">Delete This Schema's Contents</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ERROR RECTIFIER ---------- -->
+  <section class="app-view" id="view-rectifier">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-orange"><i class="bi bi-magic"></i></span>Error Rectifier</h1>
+    <div class="alert alert-light border small">SQL generated for review only. AP-SQL Assistant does not execute SQL against any database.</div>
+    <div class="card compact-card mb-3">
+      <div class="card-body">
+        <div class="row g-2">
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold">SQL Dialect</label>
+            <select class="form-select form-select-sm" id="rectifierDialect"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select>
+          </div>
+          <div class="col-12 col-md-9">
+            <label class="form-label small fw-semibold">SQL Error</label>
+            <textarea class="form-control form-control-sm" id="rectifierError" rows="2" placeholder="Paste the database error text here"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold">Current Query</label>
+            <textarea class="form-control font-monospace" id="rectifierSql" rows="4" placeholder="Paste the SQL that caused the error"></textarea>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-primary" id="btnRectify"><i class="bi bi-magic"></i> Rectify</button>
+          <button class="btn btn-outline-secondary" id="btnRectifierClear">Clear / Reset</button>
+        </div>
+      </div>
+    </div>
+    <div class="card compact-card">
+      <div class="card-body">
+        <h2 class="h6">Rectified SQL</h2>
+        <pre class="sql-output" id="rectifierOutput">-- Corrected SQL will appear here.</pre>
+        <button class="btn btn-sm btn-outline-primary mt-2" id="btnCopyRectifiedSql">Copy SQL</button>
+        <h3 class="h6 mt-3">Explanation</h3>
+        <div id="rectifierExplanation" class="small text-secondary"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ABOUT ---------- -->
+  <section class="app-view" id="view-about">
+    <h1 class="h4 builder-heading"><span class="icon-badge badge-gray"><i class="bi bi-info-circle"></i></span>About AP-SQL Assistant</h1>
+    <div class="card compact-card">
+      <div class="card-body">
+        <p>AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. Version 11.5 consolidates every working capability from V5.x through V11.4 into one stable build, adds an upgraded natural-language → schema-aware SQL generation engine with validation and self-correction, and delivers a compact, responsive Bootstrap UI across every page.</p>
+        <p class="mb-0 small text-secondary">No production database connection is ever made. The application only generates SQL text for you to review through your organization's own approved channels. Crafted by Subham Ain.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================= MODALS ============================= -->
+<div class="modal fade" id="confirmPasswordModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Confirm Password</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
-      <p class="small muted">Enter the operational password to approve and save this CASE/DECODE definition to the current schema.</p>
-      <input type="password" id="pwModalInput" placeholder="Operational password" />
-      <div id="pwModalMsg" class="mt8"></div>
+      <input type="password" class="form-control" id="confirmPasswordInput" placeholder="Operational password">
+      <div class="text-danger small mt-1" id="confirmPasswordError" style="display:none">Incorrect password.</div>
     </div>
-    <div class="modal-footer">
-      <button class="btn secondary" id="pwModalCancel">Cancel</button>
-      <button class="btn" id="pwModalApprove">Approve &amp; Save</button>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="confirmPasswordSubmit">Confirm</button></div>
+  </div></div>
+</div>
+
+<!-- Guided Walkthrough overlay -->
+<div id="walkthroughOverlay" class="walkthrough-overlay" style="display:none">
+  <div class="walkthrough-box" id="walkthroughBox">
+    <div class="d-flex justify-content-between align-items-start">
+      <h3 class="h6 mb-1" id="walkthroughTitle">Step</h3>
+      <button class="btn-close btn-sm" id="walkthroughClose"></button>
+    </div>
+    <p class="small mb-2" id="walkthroughText"></p>
+    <div class="d-flex justify-content-between align-items-center">
+      <span class="small text-secondary" id="walkthroughProgress"></span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" id="walkthroughPrev">Back</button>
+        <button class="btn btn-sm btn-primary" id="walkthroughNext">Next</button>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Guided walkthrough overlay -->
-<div id="tourScrim" class="tour-scrim" style="display:none;"></div>
-<div id="tourTooltip" class="tour-tooltip" style="display:none;"></div>
+<footer class="text-center py-3 small text-secondary">
+  <div class="creator-signature-wrap"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></div>
+  AP-SQL Assistant · Version 11.5 · Generated SQL only — no database execution.
+</footer>
 
-<!-- ===== Engine scripts (order matters: dependencies first) ===== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.7.2/mammoth.browser.min.js"></script>
+
 <script src="schema/schema-sample.js"></script>
 <script src="js/schema-tools.js"></script>
 <script src="js/schema-engine.js"></script>
-<script src="js/schema-store-engine.js"></script>
 <script src="js/relationship-store.js"></script>
 <script src="js/datatype-engine.js"></script>
 <script src="js/decode-engine.js"></script>
-<script src="js/decode-approval-engine.js"></script>
 <script src="js/filter-engine.js"></script>
-<script src="js/validation-engine.js"></script>
 <script src="js/sql-engine.js"></script>
 <script src="js/cr-engine.js"></script>
 <script src="js/nl-query-engine.js"></script>
-<script src="js/optimize-engine.js"></script>
+<script src="js/conversation-engine.js"></script>
+<script src="js/validation-engine.js"></script>
 <script src="js/error-rectifier-engine.js"></script>
-<script src="js/suggestion-engine.js"></script>
+<script src="js/optimize-engine.js"></script>
 <script src="js/password-manager-engine.js"></script>
 <script src="js/credential-vault-engine.js"></script>
 <script src="js/github-sync-engine.js"></script>
-<script src="js/shared-schema-loader.js"></script>
+<script src="js/schema-sync-engine.js"></script>
 <script src="js/sync-schedule-engine.js"></script>
+<script src="js/suggestion-engine.js"></script>
+<script src="js/shared-schema-loader.js"></script>
+<script src="js/schema-store-engine.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

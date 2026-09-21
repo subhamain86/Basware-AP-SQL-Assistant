@@ -1,144 +1,256 @@
+/* nl-query-engine.js — Natural Language -> Schema Understanding -> Query Plan.
+   Implements the pipeline described in the V11.5 spec (section 13):
+     Intent Detection -> Entity Identification -> Active Schema Analysis ->
+     Table/Column Resolution -> Relationship Resolution -> Filter Resolution ->
+     Aggregation/Grouping Resolution -> Query Plan
+   The engine never invents tables/columns/relationships that are not in the
+   active schema; anything it cannot resolve is reported in plan.missingInfo. */
 (function (root) {
   'use strict';
-  function normalizeSpaces(s) { return String(s || '').toLowerCase().replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim(); }
-  function containsPhrase(haystackLower, phrase) { if (!phrase) return false; return haystackLower.indexOf(phrase) !== -1; }
-  function bareTableName(tableName) { var idx = tableName.indexOf('_'); var withoutModule = idx !== -1 ? tableName.slice(idx + 1) : tableName; return normalizeSpaces(withoutModule); }
-  function scoreAllTables(text, engine) {
-    var textLower = String(text || '').toLowerCase(); var labels = engine.getModuleLabels();
-    return engine.getAllTables().map(function (t) {
-      var score = 0; var bare = bareTableName(t.name);
-      if (bare && containsPhrase(textLower, bare)) score += 4;
-      var rawPhrase = normalizeSpaces(t.name); if (rawPhrase && containsPhrase(textLower, rawPhrase)) score += 5;
-      var moduleLabel = labels[t.module]; if (moduleLabel && containsPhrase(textLower, normalizeSpaces(moduleLabel))) score += 1;
-      return { table: t, score: score };
-    }).sort(function (a, b) { return b.score - a.score; });
+
+  function up(s) { return String(s == null ? '' : s).toUpperCase(); }
+  function words(s) { return String(s || '').toLowerCase().match(/[a-z0-9_%]+/g) || []; }
+
+  var STOPWORDS = ['the', 'a', 'an', 'of', 'for', 'to', 'in', 'on', 'with', 'and', 'or', 'by', 'is', 'are', 'that', 'show', 'find', 'get', 'me', 'all', 'please', 'list'];
+
+  // ---- Step 1: Intent detection ----
+  function detectIntent(text) {
+    var t = text.toLowerCase();
+    if (/\bduplicate/.test(t)) return 'find_duplicates';
+    if (/\btop\s+\d+/.test(t) || /\bhighest\b|\blargest\b/.test(t)) return 'top_n';
+    if (/\bcount\b|\bhow many\b/.test(t)) return 'aggregate_count';
+    if (/\bsum\b|\btotal\b/.test(t)) return 'aggregate_sum';
+    if (/\baverage\b|\bavg\b/.test(t)) return 'aggregate_avg';
+    if (/\bmissing\b|\bnull\b|\bnot set\b|\bblank\b/.test(t)) return 'find_missing';
+    if (/\bstuck\b|\bpending\b|\bopen\b/.test(t)) return 'status_filter';
+    return 'list_records';
   }
-  function matchColumns(text, engine, tableNames) {
-    var textLower = String(text || '').toLowerCase(); var out = [];
-    tableNames.forEach(function (tname) {
-      var table = engine.getTable(tname); if (!table) return;
-      table.columns.forEach(function (c) {
-        var phrases = [normalizeSpaces(c.name)]; if (c.alias) phrases.push(normalizeSpaces(c.alias));
-        for (var p = 0; p < phrases.length; p++) { if (phrases[p] && containsPhrase(textLower, phrases[p])) { out.push({ table: tname, column: c.name }); break; } }
+
+  // ---- Step 2 & 3: entity identification against the active schema ----
+  function singularize(w) {
+    w = up(w);
+    if (w.length > 3 && /IES$/.test(w)) return w.slice(0, -3) + 'Y';
+    if (w.length > 3 && /SES$/.test(w)) return w.slice(0, -2);
+    if (w.length > 3 && /S$/.test(w) && !/SS$/.test(w)) return w.slice(0, -1);
+    return w;
+  }
+
+  function scoreTableMatch(term, table) {
+    var n = up(table.name);
+    var termU = up(term);
+    var termSing = singularize(term);
+    var score = 0;
+    if (n === termU || n === termSing) score += 10;
+    if (n.indexOf(termU) !== -1 || n.indexOf(termSing) !== -1) score += 4;
+    if (up(table.notes || '').indexOf(termU) !== -1) score += 2;
+    var nameParts = n.split('_');
+    nameParts.forEach(function (p) {
+      if (p === termU || p === termSing || singularize(p) === termSing) score += 3;
+    });
+    return score;
+  }
+
+  function findCandidateTables(engine, tokens) {
+    var tables = engine.getAllTables();
+    var scored = {};
+    tokens.forEach(function (tok) {
+      tables.forEach(function (t) {
+        var s = scoreTableMatch(tok, t);
+        if (s > 0) scored[t.name] = (scored[t.name] || 0) + s;
+      });
+    });
+    return Object.keys(scored).sort(function (a, b) { return scored[b] - scored[a]; });
+  }
+
+  function findCandidateColumns(engine, tokens, tableNames) {
+    var out = [];
+    tableNames.forEach(function (tn) {
+      var t = engine.getTable(tn);
+      if (!t) return;
+      (t.columns || []).forEach(function (c) {
+        var hay = up(c.name) + ' ' + up(c.description || '') + ' ' + up(c.alias || '');
+        var hit = tokens.some(function (tok) { return hay.indexOf(up(tok)) !== -1; });
+        if (hit) out.push({ table: t.name, column: c.name, type: c.type });
       });
     });
     return out;
   }
-  var VALUE_RE = '([\\w .,\\-\\/]+?)';
-  function cleanValue(v) {
-    v = String(v || '').trim();
-    if ((v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') || (v.charAt(0) === "'" && v.charAt(v.length - 1) === "'")) v = v.slice(1, -1);
-    return v.replace(/[.,;]+$/, '');
+
+  // ---- Step 6/7: filter resolution ----
+  function extractDateFilters(text, tables, engine) {
+    var conds = [];
+    var m;
+    if ((m = /last\s+(\d+)\s+day/.exec(text))) {
+      var dateCol = findBestDateColumn(engine, tables);
+      if (dateCol) conds.push({ table: dateCol.table, column: dateCol.column, operator: 'gte', value: '__DAYS_AGO_' + m[1], columnType: dateCol.type });
+    }
+    if ((m = /last\s+(\d+)\s+month/.exec(text))) {
+      var dateCol2 = findBestDateColumn(engine, tables);
+      if (dateCol2) conds.push({ table: dateCol2.table, column: dateCol2.column, operator: 'gte', value: '__MONTHS_AGO_' + m[1], columnType: dateCol2.type });
+    }
+    return conds;
   }
-  var OPERATOR_DEFS = [
-    { operator: 'gte', arity: 1, re: '(?:greater than or equal to|at least)\\s+' + VALUE_RE },
-    { operator: 'lte', arity: 1, re: '(?:less than or equal to|at most)\\s+' + VALUE_RE },
-    { operator: 'gt', arity: 1, re: '(?:greater than|more than|over|above)\\s+' + VALUE_RE },
-    { operator: 'lt', arity: 1, re: '(?:less than|under|below)\\s+' + VALUE_RE },
-    { operator: 'not_contains', arity: 1, re: '(?:does not contain|not containing|not contain)\\s+' + VALUE_RE },
-    { operator: 'contains', arity: 1, re: '(?:contains|containing)\\s+' + VALUE_RE },
-    { operator: 'neq', arity: 1, re: '(?:is not|not equal to)\\s+' + VALUE_RE },
-    { operator: 'eq', arity: 1, re: '(?:is|equals?|=)\\s+' + VALUE_RE }
-  ];
-  function matchFilters(text, engine, tableNames) {
-    text = String(text || ''); var conditions = []; var usedColumns = {};
-    tableNames.forEach(function (tname) {
-      var table = engine.getTable(tname); if (!table) return;
-      table.columns.forEach(function (col) {
-        var key = tname + '.' + col.name; if (usedColumns[key]) return;
-        var phrases = [normalizeSpaces(col.name)]; if (col.alias) phrases.push(normalizeSpaces(col.alias));
-        for (var p = 0; p < phrases.length; p++) {
-          var phrase = phrases[p]; if (!phrase) continue; var found = false;
-          for (var i = 0; i < OPERATOR_DEFS.length; i++) {
-            var def = OPERATOR_DEFS[i]; var fullRe = new RegExp(phrase.replace(/ /g, '\\s+') + '\\s+' + def.re, 'i'); var m = text.match(fullRe);
-            if (m) { conditions.push({ table: tname, column: col.name, operator: def.operator, value: cleanValue(m[1]) }); usedColumns[key] = true; found = true; break; }
-          }
-          if (found) break;
-        }
-      });
-    });
-    // Decode-label based filters, e.g. "active suppliers" -> IS_ACTIVE = 1
-    tableNames.forEach(function (tname) {
-      var table = engine.getTable(tname); if (!table) return;
-      table.columns.forEach(function (col) {
-        var key = tname + '.' + col.name; if (usedColumns[key] || !Array.isArray(col.decode)) return;
-        for (var i = 0; i < col.decode.length; i++) { var pair = col.decode[i]; var labelPhrase = normalizeSpaces(pair.label); if (labelPhrase.length > 2 && text.toLowerCase().indexOf(labelPhrase) !== -1) { conditions.push({ table: tname, column: col.name, operator: 'eq', value: pair.code }); usedColumns[key] = true; break; } }
-      });
-    });
-    return conditions;
-  }
-  function matchSort(text, engine, tableNames) {
-    var textLower = String(text || '').toLowerCase();
-    var re = /(?:sorted by|order(?:ed)? by|sort by)\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|\s+ascending|\s+asc\b|\s+descending|\s+desc\b|[.;]|$))/g;
-    var out = []; var m;
-    while ((m = re.exec(textLower))) { var phrase = normalizeSpaces(m[1]); var col = findColumnByPhrase(engine, tableNames, phrase); if (!col) continue; var tail = textLower.slice(m.index, m.index + m[0].length + 24); var direction = /descending|desc\b|newest|highest|largest|most recent/.test(tail) ? 'DESC' : 'ASC'; out.push({ table: col.table, column: col.column, direction: direction }); }
-    return out;
-  }
-  function findColumnByPhrase(engine, tableNames, phrase) {
-    for (var i = 0; i < tableNames.length; i++) {
-      var table = engine.getTable(tableNames[i]); if (!table) continue;
-      for (var j = 0; j < table.columns.length; j++) {
-        var c = table.columns[j]; var phrases = [normalizeSpaces(c.name)]; if (c.alias) phrases.push(normalizeSpaces(c.alias));
-        if (phrases.indexOf(phrase) !== -1) return { table: tableNames[i], column: c.name };
-      }
+
+  function findBestDateColumn(engine, tables) {
+    for (var i = 0; i < tables.length; i++) {
+      var t = engine.getTable(tables[i]);
+      if (!t) continue;
+      var dc = (t.columns || []).filter(function (c) { return /DATE|TIME/i.test(c.type || ''); })[0];
+      if (dc) return { table: t.name, column: dc.name, type: dc.type };
     }
     return null;
   }
-  function matchLimit(text) { var m = String(text || '').toLowerCase().match(/\b(?:top|first|only)\s+(\d+)\b/); return m ? parseInt(m[1], 10) : null; }
-  function matchDistinct(text) { return /\b(distinct|unique|no duplicates|without duplicates|remove duplicates|deduplicated?)\b/i.test(String(text || '')); }
-  function matchExclusion(text, engine, tableNames) {
-    var out = []; var re = /\b(?:exclude|excluding|without|except)\s+([a-z][a-z0-9 _\-]{1,40}?)\s+(?:users?|suppliers?|records?|invoices?|rows?|entries?|orders?|customers?)\b/ig; var m;
-    while ((m = re.exec(text))) {
-      var descriptor = normalizeSpaces(m[1]); if (!descriptor) continue;
-      tableNames.forEach(function (tname) { var table = engine.getTable(tname); if (!table) return; table.columns.forEach(function (col) { if (/email/i.test(col.name)) out.push({ table: tname, column: col.name, operator: 'not_contains', value: descriptor }); }); });
+
+  function extractNumericThreshold(text) {
+    var m = /more than\s+(\d+)/.exec(text) || /greater than\s+(\d+)/.exec(text) || /over\s+(\d+)/.exec(text);
+    if (m) return { operator: 'gt', value: m[1] };
+    m = /less than\s+(\d+)/.exec(text) || /fewer than\s+(\d+)/.exec(text);
+    if (m) return { operator: 'lt', value: m[1] };
+    return null;
+  }
+
+  function extractTopN(text) {
+    var m = /top\s+(\d+)/.exec(text);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  // ---- Main entry point ----
+  function interpretRequirement(text, engine, context) {
+    context = context || {};
+    var missingInfo = [];
+    var warnings = [];
+    var tokens = words(text).filter(function (w) { return STOPWORDS.indexOf(w) === -1; });
+    var intent = detectIntent(text);
+
+    var candidateTableNames = findCandidateTables(engine, tokens);
+    if (!candidateTableNames.length && context.previousPlan) {
+      candidateTableNames = context.previousPlan.tables.slice();
     }
-    return out;
+    if (!candidateTableNames.length) {
+      missingInfo.push('Could not identify which table(s) this request refers to. Try mentioning a table or business term from the active schema (e.g. "invoices", "suppliers").');
+      return { intent: intent, tables: [], columns: [], filterConditions: [], groupBy: [], orderBy: [], aggregations: [], distinct: false, limit: null, missingInfo: missingInfo, warnings: warnings };
+    }
+    var tables = candidateTableNames.slice(0, 4); // cap breadth; relationship resolution will connect them
+
+    var candidateColumns = findCandidateColumns(engine, tokens, tables);
+    var columns = candidateColumns.slice(0, 12);
+
+    // Relationship resolution — verify every extra table can actually be joined
+    var unresolved = [];
+    if (tables.length > 1) {
+      for (var i = 1; i < tables.length; i++) {
+        var rel = engine.findRelationship(tables[0], tables[i]);
+        if (!rel) unresolved.push(tables[i]);
+      }
+      if (unresolved.length) {
+        warnings.push('No documented relationship between ' + tables[0] + ' and ' + unresolved.join(', ') + '; these were excluded to avoid an incorrect join. Define a relationship in Update Schema to include them.');
+        tables = tables.filter(function (t) { return unresolved.indexOf(t) === -1; });
+      }
+    }
+
+    var filterConditions = [];
+    filterConditions = filterConditions.concat(extractDateFilters(text, tables, engine));
+
+    var threshold = extractNumericThreshold(text);
+    if (threshold) {
+      // attach to the first numeric-looking candidate column, else flag as missing
+      var numCol = columns.filter(function (c) { return /INTEGER|NUMBER|DECIMAL|FLOAT/i.test(c.type || ''); })[0];
+      if (numCol) filterConditions.push({ table: numCol.table, column: numCol.column, operator: threshold.operator, value: threshold.value, columnType: numCol.type });
+      else missingInfo.push('A numeric comparison ("' + threshold.operator + ' ' + threshold.value + '") was mentioned, but no matching numeric column was identified.');
+    }
+
+    if (intent === 'find_missing') {
+      var target = columns[0];
+      if (target) filterConditions.push({ table: target.table, column: target.column, operator: 'isnull' });
+      else missingInfo.push('Could not identify which column is "missing" — mention the field by name (e.g. "payment date").');
+    }
+
+    // Aggregation / grouping resolution
+    var aggregations = [];
+    var groupBy = [];
+    if (intent === 'aggregate_count' || intent === 'aggregate_sum' || intent === 'aggregate_avg') {
+      var aggFn = intent === 'aggregate_count' ? 'COUNT' : intent === 'aggregate_sum' ? 'SUM' : 'AVG';
+      var target2 = columns[0];
+      if (target2) {
+        aggregations.push({ table: target2.table, column: target2.column, fn: aggFn });
+        // non-aggregated selected columns become the GROUP BY
+        groupBy = columns.slice(1).map(function (c) { return { table: c.table, column: c.column }; });
+      } else if (aggFn === 'COUNT') {
+        aggregations.push({ table: tables[0], column: '*', fn: 'COUNT' });
+      }
+    }
+
+    var orderBy = [];
+    var topN = extractTopN(text);
+    if (topN || intent === 'top_n') {
+      var sortCol = columns.filter(function (c) { return /INTEGER|NUMBER|DECIMAL|FLOAT/i.test(c.type || ''); })[0] || columns[0];
+      if (sortCol) orderBy.push({ table: sortCol.table, column: sortCol.column, dir: 'desc' });
+    }
+    if (/sort by highest|highest amount|highest first|descending/.test(text.toLowerCase()) && !orderBy.length) {
+      var sc2 = columns[0];
+      if (sc2) orderBy.push({ table: sc2.table, column: sc2.column, dir: 'desc' });
+    }
+
+    var distinct = intent === 'find_duplicates' ? false : /\bdistinct\b|\bunique\b/i.test(text);
+
+    return {
+      intent: intent, tables: tables, columns: columns, filterConditions: filterConditions,
+      groupBy: groupBy, aggregations: aggregations, orderBy: orderBy, distinct: distinct,
+      limit: topN, missingInfo: missingInfo, warnings: warnings, rawText: text
+    };
   }
-  function matchHierarchy(text, engine) {
-    if (!/\b(hierarchy|org chart|organi[sz]ation chart|reporting chain|manager chain|supervisor chain|chain of command)\b/i.test(String(text || ''))) return null;
-    var selfRefTables = engine.getAllTables().filter(function (t) { return engine.getSelfReferencingEdges(t.name).length > 0; }).map(function (t) { return t.name; });
-    return selfRefTables[0] || null;
+
+  // ---- Conversational refinement: merge a follow-up instruction into a previous plan ----
+  function refinePlan(previousPlan, followUpText, engine) {
+    var t = followUpText.toLowerCase();
+    var plan = JSON.parse(JSON.stringify(previousPlan));
+    var m;
+    if ((m = /last\s+(\d+)\s+month/.exec(t))) {
+      var dateCol = findBestDateColumn(engine, plan.tables);
+      if (dateCol) {
+        plan.filterConditions = (plan.filterConditions || []).filter(function (c) { return !/DATE|TIME/i.test(c.columnType || ''); });
+        plan.filterConditions.push({ table: dateCol.table, column: dateCol.column, operator: 'gte', value: '__MONTHS_AGO_' + m[1], columnType: dateCol.type });
+      }
+    }
+    if (/add\s+(.+?)(\s+name)?$/.test(t) || /include\s+/.test(t)) {
+      var tokens = words(t);
+      var newCols = findCandidateColumns(engine, tokens, plan.tables);
+      newCols.forEach(function (nc) {
+        var exists = plan.columns.some(function (c) { return c.table === nc.table && c.column === nc.column; });
+        if (!exists) plan.columns.push(nc);
+      });
+    }
+    if (/sort by highest|highest first|descending|largest first/.test(t)) {
+      var sortTarget = plan.columns[plan.columns.length - 1] || plan.columns[0];
+      if (sortTarget) plan.orderBy = [{ table: sortTarget.table, column: sortTarget.column, dir: 'desc' }];
+    }
+    if (/sort by lowest|lowest first|ascending|smallest first/.test(t)) {
+      var sortTarget2 = plan.columns[plan.columns.length - 1] || plan.columns[0];
+      if (sortTarget2) plan.orderBy = [{ table: sortTarget2.table, column: sortTarget2.column, dir: 'asc' }];
+    }
+    plan.rawText = (previousPlan.rawText || '') + ' | ' + followUpText;
+    return plan;
   }
-  function explainInterpretation(interpretation) {
-    if (!interpretation) return [];
-    var lines = [];
-    if (interpretation.tables && interpretation.tables.length) lines.push('Uses table(s): ' + interpretation.tables.join(', ') + '.');
-    if (interpretation.columns && interpretation.columns.length) lines.push('Selects column(s): ' + interpretation.columns.map(function (c) { return c.table + '.' + c.column; }).join(', ') + '.');
-    if (interpretation.filterConditions && interpretation.filterConditions.length) lines.push('Filters on ' + interpretation.filterConditions.length + ' condition(s).');
-    if (interpretation.orderBy && interpretation.orderBy.length) lines.push('Sorted by ' + interpretation.orderBy.map(function (o) { return o.table + '.' + o.column; }).join(', ') + '.');
-    if (interpretation.limit) lines.push('Limited to the first ' + interpretation.limit + ' row(s).');
-    if (interpretation.hierarchyTable) lines.push('Walks the full hierarchy of ' + interpretation.hierarchyTable + '.');
-    return lines;
+
+  // Resolves the special relative-date placeholders produced above into real literal values
+  // at generation time (kept separate so the plan stays serializable/testable).
+  function resolveRelativeDates(value) {
+    var m;
+    if ((m = /^__DAYS_AGO_(\d+)$/.exec(value))) {
+      var d = new Date(); d.setDate(d.getDate() - parseInt(m[1], 10));
+      return d.toISOString().slice(0, 10);
+    }
+    if ((m = /^__MONTHS_AGO_(\d+)$/.exec(value))) {
+      var d2 = new Date(); d2.setMonth(d2.getMonth() - parseInt(m[1], 10));
+      return d2.toISOString().slice(0, 10);
+    }
+    return value;
   }
-  function interpretRequirement(text, engine) {
-    text = String(text || '');
-    if (!text.trim()) return { tables: [], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: null, matched: [], warnings: [] };
-    var hierarchyTable = matchHierarchy(text, engine);
-    if (hierarchyTable) return { tables: [hierarchyTable], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: hierarchyTable, matched: ['Hierarchy: ' + hierarchyTable], warnings: [] };
-    var ranked = scoreAllTables(text, engine).filter(function (s) { return s.score >= 1; });
-    if (!ranked.length) return { tables: [], columns: [], filterConditions: [], orderBy: [], limit: null, distinct: false, hierarchyTable: null, matched: [], warnings: ['Could not identify any tables mentioned in your description. Try naming a specific concept (e.g. "invoices", "suppliers", "users"), or select tables manually below.'] };
-    var candidateNames = ranked.map(function (s) { return s.table.name; }).slice(0, 4);
-    var columns = matchColumns(text, engine, candidateNames);
-    var filterConditions = matchFilters(text, engine, candidateNames).concat(matchExclusion(text, engine, candidateNames));
-    var orderBy = matchSort(text, engine, candidateNames);
-    var limit = matchLimit(text); var distinct = matchDistinct(text);
-    var tablesWithPurpose = {}; columns.forEach(function (c) { tablesWithPurpose[c.table] = true; }); filterConditions.forEach(function (c) { tablesWithPurpose[c.table] = true; }); orderBy.forEach(function (o) { tablesWithPurpose[o.table] = true; }); tablesWithPurpose[candidateNames[0]] = true;
-    var finalTables = candidateNames.filter(function (t) { return tablesWithPurpose[t]; });
-    return { tables: finalTables, columns: columns.filter(function (c) { return finalTables.indexOf(c.table) !== -1; }), filterConditions: filterConditions.filter(function (c) { return finalTables.indexOf(c.table) !== -1; }), orderBy: orderBy.filter(function (o) { return finalTables.indexOf(o.table) !== -1; }), limit: limit, distinct: distinct, hierarchyTable: null, matched: ['Table(s): ' + finalTables.join(', ')], warnings: [] };
-  }
-  function mergeTableLists(a, b) { var seen = {}; var out = []; (a || []).concat(b || []).forEach(function (t) { var k = String(t).toUpperCase(); if (!seen[k]) { seen[k] = true; out.push(t); } }); return out; }
-  function mergeColumnLists(a, b) {
-    var existing = {}; (a || []).forEach(function (c) { existing[String(c.table).toUpperCase() + '.' + String(c.column).toUpperCase()] = true; });
-    var additions = (b || []).filter(function (c) { var k = String(c.table).toUpperCase() + '.' + String(c.column).toUpperCase(); if (existing[k]) return false; existing[k] = true; return true; });
-    return (a || []).concat(additions);
-  }
-  function mergeFilterConditions(a, b) {
-    function keyOf(c) { return [c.table, c.column, c.operator, c.value, c.value2].map(function (x) { return String(x == null ? '' : x).toUpperCase(); }).join('|'); }
-    var existing = {}; (a || []).forEach(function (c) { existing[keyOf(c)] = true; });
-    var additions = (b || []).filter(function (c) { var k = keyOf(c); if (existing[k]) return false; existing[k] = true; return true; });
-    return (a || []).concat(additions);
-  }
-  var API = { interpretRequirement: interpretRequirement, mergeTableLists: mergeTableLists, mergeColumnLists: mergeColumnLists, mergeFilterConditions: mergeFilterConditions, explainInterpretation: explainInterpretation, scoreAllTables: scoreAllTables };
+
+  var API = {
+    detectIntent: detectIntent, interpretRequirement: interpretRequirement, refinePlan: refinePlan,
+    resolveRelativeDates: resolveRelativeDates, findCandidateTables: findCandidateTables, findCandidateColumns: findCandidateColumns
+  };
   if (typeof module === 'object' && module.exports) module.exports = API;
-  if (typeof root !== 'undefined') root.APSQL_NLQUERY = API;
+  if (typeof root !== 'undefined') root.APSQL_NLQ = API;
 })(typeof window !== 'undefined' ? window : this);

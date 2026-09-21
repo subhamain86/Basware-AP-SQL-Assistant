@@ -1,904 +1,1032 @@
-/* ==========================================================================
-   AP-SQL Assistant V11.4 — Application wiring (UI <-> engines)
-   ========================================================================== */
+/* app.js — UI wiring for AP-SQL Assistant V11.5. Every page reads from the same
+   application state (schema store + relationship store + decode store + password
+   manager), so schema changes propagate everywhere immediately (spec section 29). */
 (function () {
   'use strict';
 
-  // ---------------------------------------------------------------------
-  // Shorthand DOM helpers
-  // ---------------------------------------------------------------------
-  function $(id) { return document.getElementById(id); }
-  function el(tag, attrs, children) {
-    var node = document.createElement(tag);
-    attrs = attrs || {};
-    Object.keys(attrs).forEach(function (k) {
-      if (k === 'class') node.className = attrs[k];
-      else if (k === 'html') node.innerHTML = attrs[k];
-      else if (k === 'text') node.textContent = attrs[k];
-      else if (k.indexOf('on') === 0 && typeof attrs[k] === 'function') node.addEventListener(k.slice(2), attrs[k]);
-      else node.setAttribute(k, attrs[k]);
-    });
-    (children || []).forEach(function (c) { if (c) node.appendChild(c); });
-    return node;
-  }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function clearNode(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-  function alertBox(kind, text) { return '<div class="alert alert-' + kind + '">' + esc(text) + '</div>'; }
-
-  // ---------------------------------------------------------------------
-  // Core state
-  // ---------------------------------------------------------------------
-  var schemaStore = window.APSQL_SCHEMA_STORE.createStore();
-  var relationshipStore = window.APSQL_RELATIONSHIP.createRelationshipStore();
-  var decodeSessionStore = window.APSQL_DECODE.createDecodeStore(); // pending-approval scratch space only
-  var passwordManager = window.APSQL_PASSWORD_MANAGER.createPasswordManager();
-  var githubConfigStore = window.APSQL_GITHUB_SYNC.createConfigStore();
-  var engine = null; // effective engine (schema + manual relationship overlay)
-
-  var uiState = {
-    selectedTables: [],                 // array of table names
-    selectedColumns: [],                // [{table, column, alias, aggregate, distinct, decode}]
-    filters: [],                        // filter condition objects (filter-engine format)
-    lastGeneratedResult: null,
-    pendingDecodeDraft: null,           // draft awaiting admin approval
-    onPasswordApproved: null            // callback set right before opening password modal
+  //================================================================
+  // 1. APPLICATION STATE
+  //================================================================
+  var APP = {
+    schemaStore: null,
+    relStore: null,
+    decodeStore: null,
+    passwordManager: null,
+    conversation: null,
+    engine: null,        // schema-engine over the merged active schema
+    effEngine: null,      // wrapped with manual relationship store
+    theme: 'system',
+    manualTables: {},     // { TABLE_NAME: true }
+    manualColumns: [],    // [{table,column,alias,decode,aggregate}]
+    manualFilters: [],    // filter row state objects
+    manualOrderBy: [],
+    manualGroupBy: [],
+    crFields: [],
+    crFilters: [],
+    lastRoResult: null,
+    pendingDecodeApprovals: [], // [{table,column,def,requestedAt}]
+    pendingSchemaUpdate: null,  // { schema, targetEntryId }
+    workingSchemaEntryId: null, // schema currently targeted by import/download in Update Schema
+    githubLinker: null,
+    walkthrough: { steps: [], index: 0 }
   };
 
-  function refreshEngine() {
-    var merged = schemaStore.getMergedActiveSchema();
-    var base = window.APSQL.createEngine(merged);
-    engine = window.APSQL_RELATIONSHIP.createEffectiveEngine(base, relationshipStore);
-    return merged;
-  }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
-  function bootstrapSchemaStoreIfEmpty() {
-    if (schemaStore.count() === 0 && window.__AP_SCHEMA__) {
-      schemaStore.importLegacySingleSchema(window.__AP_SCHEMA__, window.__AP_SCHEMA__.schema_name || 'Embedded Schema');
-    }
-  }
-
-  function currentDialect() { return $('globalDialect').value || 'Generic'; }
-
-  // ---------------------------------------------------------------------
-  // Tabs
-  // ---------------------------------------------------------------------
-  function initTabs() {
-    var buttons = document.querySelectorAll('#tabbar button');
-    buttons.forEach(function (b) {
-      b.addEventListener('click', function () {
-        buttons.forEach(function (x) { x.classList.remove('active'); });
-        document.querySelectorAll('.tabpanel').forEach(function (p) { p.classList.remove('active'); });
-        b.classList.add('active');
-        $('tab-' + b.getAttribute('data-tab')).classList.add('active');
-      });
-    });
-  }
-
-  // ---------------------------------------------------------------------
-  // Header / schema status
-  // ---------------------------------------------------------------------
-  function renderHeaderStatus() {
-    var def = schemaStore.getDefaultEntry();
-    var active = schemaStore.getActiveEntries();
-    $('hdrSchemaName').textContent = def ? def.name : 'No schema loaded';
-    var merged = schemaStore.getMergedActiveSchema();
-    $('hdrSchemaTables').textContent = '(' + (merged.tables || []).length + ' tables · ' + active.length + ' active schema' + (active.length === 1 ? '' : 's') + ')';
-  }
-
-  // =======================================================================
-  // SECTION 3 — Manual Query Configuration: Select Table / Select Column / Filters
-  // =======================================================================
-  function tableMatches(table, q) {
-    if (!q) return true;
-    q = q.toLowerCase();
-    return table.name.toLowerCase().indexOf(q) !== -1 || (table.notes || '').toLowerCase().indexOf(q) !== -1;
-  }
-
-  function renderTableList() {
-    var q = $('tableSearch').value.trim();
-    var listNode = $('tableList');
-    clearNode(listNode);
-    var tables = engine.getAllTables().filter(function (t) { return tableMatches(t, q); });
-    var modules = {};
-    tables.forEach(function (t) { (modules[t.module] = modules[t.module] || []).push(t); });
-    var labels = engine.getModuleLabels();
-    Object.keys(modules).sort().forEach(function (m) {
-      listNode.appendChild(el('div', { class: 'mqc-group-label', text: labels[m] || m }));
-      modules[m].forEach(function (t) {
-        var selected = uiState.selectedTables.indexOf(t.name) !== -1;
-        var item = el('label', { class: 'mqc-item' + (selected ? ' selected' : '') }, [
-          el('input', { type: 'checkbox', checked: selected ? 'checked' : null }),
-          el('div', {}, [
-            el('div', { class: 'name', text: t.name }),
-            el('div', { class: 'meta', text: (t.notes || (t.columns.length + ' columns')) })
-          ])
-        ]);
-        var cb = item.querySelector('input');
-        cb.checked = selected;
-        cb.addEventListener('change', function () {
-          if (cb.checked) uiState.selectedTables.push(t.name);
-          else uiState.selectedTables = uiState.selectedTables.filter(function (n) { return n !== t.name; });
-          uiState.selectedColumns = uiState.selectedColumns.filter(function (c) { return uiState.selectedTables.indexOf(c.table) !== -1; });
-          renderTableList(); renderColumnList(); renderFilterExistsHierarchy();
-        });
-        listNode.appendChild(item);
-      });
-    });
-    $('tableCount').textContent = uiState.selectedTables.length ? uiState.selectedTables.length + ' selected' : '';
-  }
-
-  function columnSelected(table, column) {
-    return uiState.selectedColumns.some(function (c) { return c.table === table && c.column === column; });
-  }
-  function getColumnSel(table, column) {
-    return uiState.selectedColumns.filter(function (c) { return c.table === table && c.column === column; })[0];
-  }
-
-  function renderColumnList() {
-    var listNode = $('columnList'); clearNode(listNode);
-    if (!uiState.selectedTables.length) {
-      listNode.appendChild(el('div', { class: 'muted small', style: 'padding:10px;', text: 'Select one or more tables first.' }));
-      $('columnCount').textContent = '';
-      return;
-    }
-    var q = $('columnSearch').value.trim().toLowerCase();
-    uiState.selectedTables.forEach(function (tname) {
-      var table = engine.getTable(tname); if (!table) return;
-      var cols = table.columns.filter(function (c) { return !q || c.name.toLowerCase().indexOf(q) !== -1; });
-      if (!cols.length) return;
-      listNode.appendChild(el('div', { class: 'mqc-group-label', text: tname }));
-      cols.forEach(function (c) {
-        var sel = columnSelected(tname, c.name);
-        var hasDecode = Array.isArray(c.decode) && c.decode.length;
-        var row = el('div', { class: 'mqc-item' + (sel ? ' selected' : '') });
-        var cb = el('input', { type: 'checkbox' }); cb.checked = sel;
-        var nameWrap = el('div', {}, [
-          el('div', { class: 'name' }, []),
-          el('div', { class: 'meta', text: (c.type || '') + (c.primary_key ? ' · PK' : '') })
-        ]);
-        nameWrap.firstChild.textContent = c.name + (c.alias ? ' (' + c.alias + ')' : '');
-        if (hasDecode) nameWrap.firstChild.appendChild(el('span', { class: 'badge-decode', text: 'DECODE' }));
-        row.appendChild(cb); row.appendChild(nameWrap);
-        var controls = el('div', { class: 'col-row-controls' });
-        var gear = el('button', { class: 'decode-gear', title: 'CASE / DECODE options', text: '⚙️' });
-        gear.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); openDecodeModal(tname, c.name); });
-        controls.appendChild(gear);
-        row.appendChild(controls);
-        cb.addEventListener('change', function () {
-          if (cb.checked) uiState.selectedColumns.push({ table: tname, column: c.name, alias: '', aggregate: '', distinct: false, decode: false });
-          else uiState.selectedColumns = uiState.selectedColumns.filter(function (x) { return !(x.table === tname && x.column === c.name); });
-          renderColumnList();
-        });
-        listNode.appendChild(row);
-      });
-    });
-    $('columnCount').textContent = uiState.selectedColumns.length ? uiState.selectedColumns.length + ' selected' : '';
-  }
-
-  // ---------------------------------------------------------------------
-  // Filters
-  // ---------------------------------------------------------------------
-  function allSelectableColumns() {
-    var out = [];
-    uiState.selectedTables.forEach(function (tname) {
-      var t = engine.getTable(tname); if (!t) return;
-      t.columns.forEach(function (c) { out.push({ table: tname, column: c.name }); });
-    });
-    return out;
-  }
-
-  function renderFilterList() {
-    var listNode = $('filterList'); clearNode(listNode);
-    if (!uiState.filters.length) {
-      listNode.appendChild(el('div', { class: 'muted small', style: 'padding:10px;', text: 'No filters added yet.' }));
-      $('filterCount').textContent = '';
-      return;
-    }
-    var options = allSelectableColumns();
-    uiState.filters.forEach(function (cond, idx) {
-      var wrap = el('div', { class: 'filter-row' });
-      var top = el('div', { class: 'filter-row-top' });
-      if (idx > 0) {
-        var joinSel = el('select', { style: 'width:70px;' }, [el('option', { value: 'AND', text: 'AND' }), el('option', { value: 'OR', text: 'OR' })]);
-        joinSel.value = cond.join || 'AND';
-        joinSel.addEventListener('change', function () { cond.join = joinSel.value; });
-        top.appendChild(joinSel);
-      }
-      var colSel = el('select', {});
-      colSel.appendChild(el('option', { value: '', text: '— column —' }));
-      options.forEach(function (o) {
-        var opt = el('option', { value: o.table + '.' + o.column, text: o.table + '.' + o.column });
-        if (cond.table === o.table && cond.column === o.column) opt.selected = true;
-        colSel.appendChild(opt);
-      });
-      colSel.addEventListener('change', function () { var parts = colSel.value.split('.'); cond.table = parts[0]; cond.column = parts.slice(1).join('.'); });
-      top.appendChild(colSel);
-      var removeBtn = el('button', { class: 'filter-remove', text: '✕', title: 'Remove filter' });
-      removeBtn.addEventListener('click', function () { uiState.filters.splice(idx, 1); renderFilterList(); });
-      top.appendChild(removeBtn);
-      wrap.appendChild(top);
-
-      var row2 = el('div', { class: 'row' });
-      var opSel = el('select', {});
-      window.APSQL_FILTER.OPERATORS.forEach(function (o) { var opt = el('option', { value: o.id, text: o.label }); if (cond.operator === o.id) opt.selected = true; opSel.appendChild(opt); });
-      opSel.addEventListener('change', function () { cond.operator = opSel.value; renderFilterList(); });
-      row2.appendChild(opSel);
-      var op = window.APSQL_FILTER.getOperator(cond.operator) || { arity: 1 };
-      if (op.arity >= 1) {
-        var val1 = el('input', { type: 'text', placeholder: op.multi ? 'value1, value2, …' : 'value' });
-        val1.value = cond.value || '';
-        val1.addEventListener('input', function () { cond.value = val1.value; });
-        row2.appendChild(val1);
-      }
-      if (op.arity === 2) {
-        var val2 = el('input', { type: 'text', placeholder: 'to value' });
-        val2.value = cond.value2 || '';
-        val2.addEventListener('input', function () { cond.value2 = val2.value; });
-        row2.appendChild(val2);
-      }
-      wrap.appendChild(row2);
-      listNode.appendChild(wrap);
-    });
-    $('filterCount').textContent = uiState.filters.length + ' condition' + (uiState.filters.length === 1 ? '' : 's');
-  }
-
-  function renderFilterExistsHierarchy() {
-    // EXISTS filters + recursive hierarchy availability
-    var area = $('existsFilterArea'); clearNode(area);
-    var base = uiState.selectedTables[0];
-    var recursiveCb = $('optRecursive');
-    if (base && engine.getSelfReferencingEdges(base).length) {
-      recursiveCb.disabled = false;
-    } else {
-      recursiveCb.disabled = true; recursiveCb.checked = false;
-    }
-  }
-
-  // =======================================================================
-  // SQL generation (manual configuration + NL requirement)
-  // =======================================================================
-  function collectManualOptions() {
-    return {
-      dialect: currentDialect(),
-      selectedTables: uiState.selectedTables.slice(),
-      selectedColumns: uiState.selectedColumns.map(function (c) { return Object.assign({}, c); }),
-      filterGroup: { conditions: uiState.filters.map(function (f) { return Object.assign({}, f); }) },
-      join: $('optJoinType').value,
-      distinct: $('optDistinct').checked,
-      limit: $('optLimit').value ? parseInt($('optLimit').value, 10) : null,
-      orderBy: $('optOrderBy').value.trim() || null,
-      groupBy: $('optGroupBy').value.trim() ? $('optGroupBy').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : null,
-      having: $('optHaving').value.trim() || null,
-      viewName: $('optViewName').value.trim() || null,
-      recursiveHierarchy: $('optRecursive').checked && uiState.selectedTables[0] ? { table: uiState.selectedTables[0] } : null
-    };
-  }
-
-  function renderSqlResult(result, requirementText) {
-    uiState.lastGeneratedResult = result;
-    var msgNode = $('sqlMessages'); clearNode(msgNode);
-    var explainNode = $('sqlExplain'); clearNode(explainNode);
-    if (!result || result.status === 'clarification_needed') {
-      $('sqlOutput').textContent = '-- ' + (result ? result.message : 'Please provide more detail.');
-      msgNode.innerHTML = alertBox('info', result ? result.message : 'Please provide more detail.');
-      return;
-    }
-    if (result.status === 'rejected') {
-      $('sqlOutput').textContent = '-- Query could not be generated.';
-      msgNode.innerHTML = alertBox('error', result.message);
-      var suggestions = window.APSQL_SUGGEST.buildSuggestions(result.message);
-      var ul = el('ul', { class: 'explain-list' });
-      suggestions.forEach(function (s) { ul.appendChild(el('li', { text: s })); });
-      explainNode.appendChild(el('div', { class: 'small', html: '<strong>Suggestions</strong>' }));
-      explainNode.appendChild(ul);
-      return;
-    }
-    $('sqlOutput').textContent = result.sql;
-    var lines = [];
-    if (result.tablesUsed && result.tablesUsed.length) lines.push('Tables used: ' + result.tablesUsed.join(', '));
-    if (result.filtersApplied && result.filtersApplied.length) result.filtersApplied.forEach(function (f) { lines.push(f); });
-    if (result.assumptions && result.assumptions.length) result.assumptions.forEach(function (a) { lines.push('Assumption: ' + a); });
-    if (lines.length) {
-      var ul2 = el('ul', { class: 'explain-list' });
-      lines.forEach(function (l) { ul2.appendChild(el('li', { text: l })); });
-      explainNode.appendChild(el('div', { class: 'small', html: '<strong>What this query does</strong>' }));
-      explainNode.appendChild(ul2);
-    }
-  }
-
-  function generateFromManualConfig() {
-    var opts = collectManualOptions();
-    var requirement = $('nlRequirement').value.trim();
-    var result = window.APSQL_ENGINE.generateSql(requirement, opts, engine, decodeSessionStoreForActiveSchema());
-    renderSqlResult(result, requirement);
-  }
-
-  // The decode store used at SQL-generation time should reflect the CURRENT schema first
-  // (handled inside decode-engine.resolveDecode via `engine`), with the session-only
-  // manual store only used as a fallback preview before a draft has been approved.
-  function decodeSessionStoreForActiveSchema() { return decodeSessionStore; }
-
-  function applyInterpretationToManualConfig(interp) {
-    uiState.selectedTables = interp.tables.slice();
-    uiState.selectedColumns = interp.columns.map(function (c) { return { table: c.table, column: c.column, alias: '', aggregate: '', distinct: false, decode: false }; });
-    uiState.filters = interp.filterConditions.map(function (c) { return window.APSQL_FILTER.newCondition(c); });
-    $('optOrderBy').value = interp.orderBy && interp.orderBy.length ? interp.orderBy.map(function (o) { return o.table + '.' + o.column + ' ' + o.direction; }).join(', ') : '';
-    $('optLimit').value = interp.limit || '';
-    $('optDistinct').checked = !!interp.distinct;
-    $('optRecursive').checked = !!interp.hierarchyTable;
-    renderTableList(); renderColumnList(); renderFilterList(); renderFilterExistsHierarchy();
-  }
-
-  function buildFromNaturalLanguage() {
-    var text = $('nlRequirement').value.trim();
-    var warnNode = $('nlWarnings'); clearNode(warnNode);
-    if (!text) { warnNode.innerHTML = alertBox('warn', 'Please describe what you need first.'); return; }
-    var interp = window.APSQL_NLQUERY.interpretRequirement(text, engine);
-    if (interp.warnings && interp.warnings.length) { warnNode.innerHTML = interp.warnings.map(function (w) { return alertBox('warn', w); }).join(''); }
-    applyInterpretationToManualConfig(interp);
-    if (interp.tables.length) generateFromManualConfig();
-    else renderSqlResult({ status: 'clarification_needed', message: 'Could not confidently determine tables from your description — refine Select Table / Select Column below, then click "Generate SQL from Manual Configuration".' });
-  }
-
-  // =======================================================================
-  // CASE / DECODE modal — schema-aware lookup + manual addition + admin approval
-  // =======================================================================
-  function openDecodeModal(table, column) {
-    var backdrop = $('decodeModalBackdrop');
-    var body = $('decodeModalBody'); var footer = $('decodeModalFooter');
-    clearNode(body); clearNode(footer);
-    $('decodeModalTitle').textContent = 'CASE / DECODE — ' + table + '.' + column;
-    var resolved = window.APSQL_DECODE.resolveDecode(engine, decodeSessionStore, table, column);
-    var colSel = getColumnSel(table, column);
-
-    if (resolved.source === 'schema') {
-      body.innerHTML = alertBox('ok', 'A CASE/DECODE definition already exists in the active schema for this column and will be used automatically when this column is selected.');
-      var kv = el('div', { class: 'kv mt8' });
-      resolved.values.forEach(function (p) { kv.appendChild(el('div', { text: p.code })); kv.appendChild(el('div', { text: p.label })); });
-      body.appendChild(kv);
-      var useLabel = el('label', { class: 'inline mt12' }, [el('input', { type: 'checkbox' }), document.createTextNode(' Use CASE/DECODE display for this column in generated SQL')]);
-      var useCb = useLabel.querySelector('input'); useCb.checked = !!(colSel && colSel.decode);
-      useCb.addEventListener('change', function () { if (colSel) { colSel.decode = useCb.checked; renderColumnList(); } });
-      body.appendChild(useLabel);
-      var closeBtn = el('button', { class: 'btn', text: 'Close' });
-      closeBtn.addEventListener('click', closeDecodeModal);
-      footer.appendChild(closeBtn);
-    } else {
-      body.innerHTML = alertBox('warn', 'No CASE/DECODE definition was found in the active schema for ' + table + '.' + column + '. You can add a manual definition below — it will require Admin approval before being saved to the current schema.');
-      if (resolved.source === 'session') {
-        body.appendChild(el('div', { class: 'small mt8', html: '<strong>Pending (not yet approved) session draft:</strong>' }));
-        var kv2 = el('div', { class: 'kv mt8' });
-        resolved.values.forEach(function (p) { kv2.appendChild(el('div', { text: p.code })); kv2.appendChild(el('div', { text: p.label })); });
-        body.appendChild(kv2);
-      }
-      body.appendChild(buildManualDecodeForm(table, column));
-    }
-    backdrop.classList.add('open');
-  }
-  function closeDecodeModal() { $('decodeModalBackdrop').classList.remove('open'); }
-  $('decodeModalClose').addEventListener('click', closeDecodeModal);
-  $('decodeModalBackdrop').addEventListener('click', function (e) { if (e.target === $('decodeModalBackdrop')) closeDecodeModal(); });
-
-  function buildManualDecodeForm(table, column) {
-    var wrap = el('div', { class: 'mt12' });
-    wrap.appendChild(el('div', { class: 'small', html: '<strong>Manual CASE/DECODE Definition</strong>' }));
-    var pairsWrap = el('div', { class: 'mt8', id: 'decodePairsWrap' });
-    var pairs = [{ code: '', label: '' }];
-
-    function renderPairs() {
-      clearNode(pairsWrap);
-      pairs.forEach(function (p, idx) {
-        var row = el('div', { class: 'pair-row' });
-        var codeInput = el('input', { type: 'text', placeholder: 'Condition / value (e.g. 1)' }); codeInput.value = p.code;
-        codeInput.addEventListener('input', function () { p.code = codeInput.value; });
-        var labelInput = el('input', { type: 'text', placeholder: 'Result / output (e.g. Active)' }); labelInput.value = p.label;
-        labelInput.addEventListener('input', function () { p.label = labelInput.value; });
-        var rm = el('button', { class: 'filter-remove', text: '✕' });
-        rm.addEventListener('click', function () { pairs.splice(idx, 1); renderPairs(); });
-        row.appendChild(codeInput); row.appendChild(labelInput); row.appendChild(rm);
-        pairsWrap.appendChild(row);
-      });
-    }
-    renderPairs();
-    wrap.appendChild(pairsWrap);
-    var addPairBtn = el('button', { class: 'btn secondary sm mt8', text: '➕ Add condition' });
-    addPairBtn.addEventListener('click', function () { pairs.push({ code: '', label: '' }); renderPairs(); });
-    wrap.appendChild(addPairBtn);
-
-    var elseInput = el('input', { type: 'text', placeholder: 'ELSE / default value (optional)' });
-    wrap.appendChild(el('label', { class: 'mt8', text: 'ELSE / default value' }));
-    wrap.appendChild(elseInput);
-    var descInput = el('textarea', { rows: '2', placeholder: 'Optional description' });
-    wrap.appendChild(el('label', { class: 'mt8', text: 'Description (optional)' }));
-    wrap.appendChild(descInput);
-
-    var msgArea = el('div', { class: 'mt8' });
-    wrap.appendChild(msgArea);
-
-    var submitBtn = el('button', { class: 'btn mt12', text: 'Submit for Admin Approval' });
-    submitBtn.addEventListener('click', function () {
-      clearNode(msgArea);
-      var draft = window.APSQL_DECODE_APPROVAL.createDraft({ table: table, column: column, description: descInput.value, elseDefault: elseInput.value, pairs: pairs });
-      var check = window.APSQL_DECODE_APPROVAL.validateDraft(draft);
-      if (!check.valid) { msgArea.innerHTML = check.errors.map(function (e) { return alertBox('error', e); }).join(''); return; }
-      decodeSessionStore.setManualDecode(table, column, check.cleanPairs);
-      uiState.pendingDecodeDraft = draft;
-      requestAdminApproval(function (approvedBy) {
-        var defaultEntry = schemaStore.getDefaultEntry();
-        if (!defaultEntry) { msgArea.innerHTML = alertBox('error', 'No default schema is set to save this definition into.'); return; }
-        var applyResult = window.APSQL_DECODE_APPROVAL.applyApprovedDraftToSchema(defaultEntry.schema, draft, { approvedBy: approvedBy });
-        if (!applyResult.ok) {
-          if (applyResult.duplicate) {
-            msgArea.innerHTML = alertBox('info', applyResult.errors[0]);
-            var colSelDup = getColumnSel(table, column); if (colSelDup) { colSelDup.decode = true; }
-            refreshEngine(); renderColumnList(); renderHeaderStatus();
-          } else {
-            msgArea.innerHTML = applyResult.errors.map(function (e) { return alertBox('error', e); }).join('');
-          }
-          return;
-        }
-        schemaStore.updateEntry(defaultEntry.id, { schema: applyResult.schema });
-        decodeSessionStore.clearManualDecode(table, column);
-        refreshEngine();
-        var colSelNew = getColumnSel(table, column); if (colSelNew) colSelNew.decode = true;
-        renderColumnList(); renderHeaderStatus(); renderSchemaEntries();
-        msgArea.innerHTML = alertBox('ok', 'Approved and saved to the current schema (' + defaultEntry.name + ').');
-        setTimeout(closeDecodeModal, 900);
-      });
-    });
-    wrap.appendChild(submitBtn);
-    return wrap;
-  }
-
-  // ---------------------------------------------------------------------
-  // Admin password approval modal (reused for decode approval and other admin actions)
-  // ---------------------------------------------------------------------
-  function requestAdminApproval(onApproved) {
-    uiState.onPasswordApproved = onApproved;
-    $('pwModalInput').value = '';
-    clearNode($('pwModalMsg'));
-    $('pwModalBackdrop').classList.add('open');
-    $('pwModalInput').focus();
-  }
-  function closePwModal() { $('pwModalBackdrop').classList.remove('open'); uiState.onPasswordApproved = null; }
-  $('pwModalCancel').addEventListener('click', closePwModal);
-  $('pwModalClose').addEventListener('click', closePwModal);
-  $('pwModalBackdrop').addEventListener('click', function (e) { if (e.target === $('pwModalBackdrop')) closePwModal(); });
-  $('pwModalApprove').addEventListener('click', function () {
-    var pw = $('pwModalInput').value;
-    passwordManager.verifyCurrentPassword(pw).then(function (ok) {
-      if (!ok) { $('pwModalMsg').innerHTML = alertBox('error', 'Incorrect password. Approval denied.'); return; }
-      var cb = uiState.onPasswordApproved;
-      closePwModal();
-      if (cb) cb('Administrator');
-    });
+  //================================================================
+  // 2. INITIALIZATION
+  //================================================================
+  document.addEventListener('DOMContentLoaded', function () {
+    try { initState(); } catch (e) { console.error('State init failed', e); }
+    try { wireNavigation(); } catch (e) { console.error('Nav wiring failed', e); }
+    try { wireTheme(); } catch (e) { console.error('Theme wiring failed', e); }
+    try { wireSyncSchedule(); } catch (e) { console.error('Sync schedule wiring failed', e); }
+    try { renderHome(); } catch (e) { console.error('Home render failed', e); }
+    try { wireReadOnlyBuilder(); } catch (e) { console.error('RO builder wiring failed', e); }
+    try { wireCrBuilder(); } catch (e) { console.error('CR builder wiring failed', e); }
+    try { renderUsedSchema(); } catch (e) { console.error('Used schema render failed', e); }
+    try { wireUpdateSchema(); } catch (e) { console.error('Update schema wiring failed', e); }
+    try { wireErrorRectifier(); } catch (e) { console.error('Rectifier wiring failed', e); }
+    try { wireWalkthrough(); } catch (e) { console.error('Walkthrough wiring failed', e); }
+    try { checkLiveSharedSchemaOnLoad(); } catch (e) { console.error('Live shared schema check failed', e); }
   });
 
-  // =======================================================================
-  // Wiring — Section 1 / 2 / 3
-  // =======================================================================
-  function initReadOnlyBuilder() {
-    $('btnBuildQuery').addEventListener('click', buildFromNaturalLanguage);
-    $('btnClearAll').addEventListener('click', function () {
-      $('nlRequirement').value = ''; uiState.selectedTables = []; uiState.selectedColumns = []; uiState.filters = [];
-      ['optLimit', 'optOrderBy', 'optGroupBy', 'optHaving', 'optViewName'].forEach(function (id) { $(id).value = ''; });
-      $('optDistinct').checked = false; $('optRecursive').checked = false;
-      clearNode($('nlWarnings'));
-      renderTableList(); renderColumnList(); renderFilterList(); renderFilterExistsHierarchy();
-      renderSqlResult({ status: 'clarification_needed', message: 'Cleared. Describe a new requirement, or select tables/columns manually.' });
-    });
-    $('tableSearch').addEventListener('input', renderTableList);
-    $('columnSearch').addEventListener('input', renderColumnList);
-    $('btnAddFilter').addEventListener('click', function () {
-      var opts = allSelectableColumns();
-      var first = opts[0] || { table: '', column: '' };
-      uiState.filters.push(window.APSQL_FILTER.newCondition({ table: first.table, column: first.column }));
-      renderFilterList();
-    });
-    $('btnGenerateManual').addEventListener('click', generateFromManualConfig);
-    $('btnCopySql').addEventListener('click', function () {
-      var text = $('sqlOutput').textContent;
-      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
-    });
-    $('btnOptimizeSql').addEventListener('click', function () {
-      if (!uiState.lastGeneratedResult || uiState.lastGeneratedResult.status !== 'ok') return;
-      var opt = window.APSQL_OPTIMIZE.optimizeSql(engine, uiState.lastGeneratedResult);
-      $('sqlOutput').textContent = opt.optimizedSql;
-      var explainNode = $('sqlExplain');
-      var box = el('div', { class: 'mt8' });
-      if (opt.changesApplied.length) { box.innerHTML += alertBox('ok', 'Optimizations applied: ' + opt.changesApplied.join(' ')); }
-      if (opt.recommendations.length) { box.innerHTML += opt.recommendations.map(function (r) { return alertBox('info', r); }).join(''); }
-      explainNode.appendChild(box);
-    });
-    $('btnSendToRectifier').addEventListener('click', function () {
-      $('rectSql').value = $('sqlOutput').textContent;
-      document.querySelector('#tabbar button[data-tab="rectifier"]').click();
-    });
-  }
-
-  // =======================================================================
-  // CR Query Builder
-  // =======================================================================
-  function populateCrTableSelect() {
-    var sel = $('crTable'); clearNode(sel);
-    engine.getAllTables().forEach(function (t) { sel.appendChild(el('option', { value: t.name, text: t.name })); });
-    renderCrColumnsArea();
-  }
-  function renderCrColumnsArea() {
-    var area = $('crColumnsArea'); clearNode(area);
-    var tname = $('crTable').value; var table = engine.getTable(tname);
-    var cmd = $('crCommand').value;
-    if (!table) return;
-    if (cmd === 'INSERT') {
-      area.appendChild(el('div', { class: 'small', html: '<strong>Columns &amp; values to insert</strong>' }));
-      table.columns.forEach(function (c) {
-        var row = el('div', { class: 'row', style: 'align-items:center;' });
-        var lab = el('label', { class: 'inline', style: 'flex:0 0 40px;' }, [el('input', { type: 'checkbox', 'data-col': c.name })]);
-        var name = el('div', { style: 'flex:0 0 160px; font-size:12.5px; font-weight:600;', text: c.name });
-        var val = el('input', { type: 'text', placeholder: 'value', 'data-valfor': c.name });
-        row.appendChild(lab); row.appendChild(name); row.appendChild(val);
-        area.appendChild(row);
-      });
-    } else if (cmd === 'UPDATE') {
-      area.appendChild(el('div', { class: 'small', html: '<strong>Columns to update</strong>' }));
-      table.columns.forEach(function (c) {
-        var row = el('div', { class: 'row', style: 'align-items:center;' });
-        var lab = el('label', { class: 'inline', style: 'flex:0 0 40px;' }, [el('input', { type: 'checkbox', 'data-col': c.name })]);
-        var name = el('div', { style: 'flex:0 0 160px; font-size:12.5px; font-weight:600;', text: c.name });
-        var val = el('input', { type: 'text', placeholder: 'new value', 'data-valfor': c.name });
-        row.appendChild(lab); row.appendChild(name); row.appendChild(val);
-        area.appendChild(row);
-      });
+  function initState() {
+    APP.schemaStore = APSQL_SCHEMA_STORE.createStore(safeLocalStorage());
+    if (APP.schemaStore.getEntries().length === 0) {
+      APP.schemaStore.addEntry({ name: 'Embedded Sample Schema', schema: APSQL_SAMPLE_SCHEMA });
     }
-    renderCrFilterArea();
-  }
-  function renderCrFilterArea() {
-    var area = $('crFilterArea'); clearNode(area);
-    var cmd = $('crCommand').value;
-    if (cmd === 'INSERT') return;
-    area.appendChild(el('div', { class: 'small', html: '<strong>WHERE condition(s)</strong>' }));
-    if (!window.__crFilters) window.__crFilters = [];
-    var listNode = el('div', {});
-    function draw() {
-      clearNode(listNode);
-      var tname = $('crTable').value; var table = engine.getTable(tname);
-      window.__crFilters.forEach(function (cond, idx) {
-        var wrap = el('div', { class: 'filter-row' });
-        var row2 = el('div', { class: 'row' });
-        var colSel = el('select', {});
-        (table ? table.columns : []).forEach(function (c) { var opt = el('option', { value: c.name, text: c.name }); if (cond.column === c.name) opt.selected = true; colSel.appendChild(opt); });
-        colSel.addEventListener('change', function () { cond.table = tname; cond.column = colSel.value; });
-        cond.table = tname; if (!cond.column && table && table.columns[0]) cond.column = table.columns[0].name;
-        row2.appendChild(colSel);
-        var opSel = el('select', {});
-        window.APSQL_FILTER.OPERATORS.forEach(function (o) { var opt = el('option', { value: o.id, text: o.label }); if (cond.operator === o.id) opt.selected = true; opSel.appendChild(opt); });
-        opSel.addEventListener('change', function () { cond.operator = opSel.value; draw(); });
-        row2.appendChild(opSel);
-        var op = window.APSQL_FILTER.getOperator(cond.operator) || { arity: 1 };
-        if (op.arity >= 1) { var v1 = el('input', { type: 'text', placeholder: 'value' }); v1.value = cond.value || ''; v1.addEventListener('input', function () { cond.value = v1.value; }); row2.appendChild(v1); }
-        var rm = el('button', { class: 'filter-remove', text: '✕' }); rm.addEventListener('click', function () { window.__crFilters.splice(idx, 1); draw(); });
-        row2.appendChild(rm);
-        wrap.appendChild(row2); listNode.appendChild(wrap);
-      });
-    }
-    draw();
-    area.appendChild(listNode);
-    var addBtn = el('button', { class: 'btn secondary sm mt8', text: '➕ Add condition' });
-    addBtn.addEventListener('click', function () { window.__crFilters.push(window.APSQL_FILTER.newCondition({})); draw(); });
-    area.appendChild(addBtn);
+    APP.workingSchemaEntryId = APP.schemaStore.getDefaultId();
+    APP.relStore = APSQL_RELATIONSHIPS.createRelationshipStore();
+    APP.decodeStore = APSQL_DECODE.createDecodeStore();
+    APP.passwordManager = APSQL_PASSWORD_MANAGER.createPasswordManager(safeLocalStorage());
+    APP.conversation = APSQL_CONVERSATION.createConversation();
+    rebuildEngine();
   }
 
-  function initCrBuilder() {
-    $('crSafetyBanner').textContent = window.APSQL_CR.SAFETY_BANNER;
-    $('crCommand').addEventListener('change', renderCrColumnsArea);
-    $('crTable').addEventListener('change', renderCrColumnsArea);
-    $('btnBuildCr').addEventListener('click', function () {
-      var cmd = $('crCommand').value; var tname = $('crTable').value;
-      var msgs = $('crMessages'); clearNode(msgs);
-      var request = { command: cmd, table: tname, allowNoWhere: $('crAllowNoWhere').checked };
-      if (cmd === 'INSERT') {
-        request.columns = [];
-        document.querySelectorAll('#crColumnsArea input[type=checkbox]').forEach(function (cb) {
-          if (cb.checked) { var name = cb.getAttribute('data-col'); var valInput = document.querySelector('#crColumnsArea input[data-valfor="' + name + '"]'); request.columns.push({ name: name, value: valInput ? valInput.value : '' }); }
-        });
-      } else if (cmd === 'UPDATE') {
-        request.updates = [];
-        document.querySelectorAll('#crColumnsArea input[type=checkbox]').forEach(function (cb) {
-          if (cb.checked) { var name = cb.getAttribute('data-col'); var valInput = document.querySelector('#crColumnsArea input[data-valfor="' + name + '"]'); request.updates.push({ column: name, value: valInput ? valInput.value : '' }); }
-        });
-        request.filterGroup = { conditions: (window.__crFilters || []).slice() };
-      } else if (cmd === 'DELETE') {
-        request.filterGroup = { conditions: (window.__crFilters || []).slice() };
-      }
-      var result = window.APSQL_CR.buildCrQuery(engine, request, currentDialect());
-      if (result.status === 'rejected') {
-        msgs.innerHTML = alertBox('error', result.message);
-        window.APSQL_SUGGEST.buildSuggestions(result.message).forEach(function (s) { msgs.innerHTML += alertBox('info', s); });
-        $('crOutput').textContent = '-- Query could not be generated.';
-        return;
-      }
-      if (result.warnings && result.warnings.length) msgs.innerHTML = result.warnings.map(function (w) { return alertBox('warn', w); }).join('');
-      $('crOutput').textContent = window.APSQL_CR.SAFETY_BANNER + '\n\n' + result.sql;
-    });
+  function safeLocalStorage() {
+    try { if (typeof localStorage !== 'undefined') { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); return localStorage; } } catch (e) {}
+    var mem = {};
+    return { getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; }, setItem: function (k, v) { mem[k] = v; }, removeItem: function (k) { delete mem[k]; } };
   }
 
-  // =======================================================================
-  // Error Rectifier
-  // =======================================================================
-  function initRectifier() {
-    $('btnDetectDialect').addEventListener('click', function () {
-      var detected = window.APSQL_ERROR_RECTIFIER.detectDialectFromError($('rectError').value);
-      if (detected) $('rectDialect').value = detected;
-    });
-    $('btnRectify').addEventListener('click', function () {
-      var result = window.APSQL_ERROR_RECTIFIER.rectify($('rectSql').value, $('rectError').value, engine, $('rectDialect').value);
-      var out = $('rectResult'); clearNode(out);
-      out.innerHTML = (result.changed ? alertBox('ok', 'Correction applied.') : alertBox('info', 'No automatic change was made.'));
-      out.innerHTML += '<div class="kv mt8"><div>Identified issue</div><div>' + esc(result.errorIdentified) + '</div><div>Correction applied</div><div>' + esc(result.correctionApplied) + '</div></div>';
-      var pre = el('pre', { class: 'sql-output mt8', text: result.correctedSql });
-      out.appendChild(pre);
-    });
+  function rebuildEngine() {
+    var merged = APP.schemaStore.getMergedActiveSchema();
+    APP.engine = APSQL_SCHEMA_ENGINE.createEngine(merged);
+    APP.effEngine = APSQL_RELATIONSHIPS.createEffectiveEngine(APP.engine, APP.relStore);
   }
 
-  // =======================================================================
-  // Update Schema tab
-  // =======================================================================
-  function renderSchemaEntries() {
-    var area = $('schemaEntries'); clearNode(area);
-    var entries = schemaStore.listEntries();
-    if (!entries.length) { area.innerHTML = alertBox('info', 'No schema loaded yet.'); }
-    entries.forEach(function (e) {
-      var state = schemaStore.getSchemaState(e.id);
-      var wrap = el('div', { class: 'schema-entry' });
-      wrap.appendChild(el('div', {}, [
-        el('div', { class: 'name', text: e.name }),
-        el('div', { class: 'meta', text: 'v' + (e.schema.schema_version || '0.0') + ' · ' + (e.schema.tables || []).length + ' tables · source: ' + e.source })
-      ]));
-      wrap.appendChild(el('span', { class: 'chip state-' + state, text: state.charAt(0).toUpperCase() + state.slice(1) }));
-      var actions = el('div', { class: 'actions' });
-      if (state !== 'default') {
-        var setDefaultBtn = el('button', { class: 'btn secondary sm', text: 'Set as default' });
-        setDefaultBtn.addEventListener('click', function () { schemaStore.setDefaultId(e.id); refreshEngine(); afterSchemaChange(); });
-        actions.appendChild(setDefaultBtn);
-      }
-      var toggleActiveBtn = el('button', { class: 'btn secondary sm', text: state === 'inactive' ? 'Activate' : 'Deactivate' });
-      toggleActiveBtn.disabled = state === 'default';
-      toggleActiveBtn.addEventListener('click', function () { schemaStore.setEntryActive(e.id, state === 'inactive'); refreshEngine(); afterSchemaChange(); });
-      actions.appendChild(toggleActiveBtn);
-      var removeBtn = el('button', { class: 'btn danger sm', text: 'Remove' });
-      removeBtn.addEventListener('click', function () { if (confirm('Remove schema "' + e.name + '"?')) { schemaStore.removeEntry(e.id); refreshEngine(); afterSchemaChange(); } });
-      actions.appendChild(removeBtn);
-      wrap.appendChild(actions);
-      area.appendChild(wrap);
-    });
-  }
-
-  function populateSchemaMergeTarget() {
-    var sel = $('schemaMergeTarget'); clearNode(sel);
-    schemaStore.listEntries().forEach(function (e) { sel.appendChild(el('option', { value: e.id, text: e.name })); });
-  }
-
-  function initSchemaTab() {
-    $('btnAddSchemaEntry').addEventListener('click', function () {
-      var file = $('schemaUploadFile').files[0];
-      var msgs = $('schemaUploadMsgs'); clearNode(msgs);
-      if (!file) { msgs.innerHTML = alertBox('warn', 'Choose a .csv or .json schema file first.'); return; }
-      window.APSQL_SCHEMA_TOOLS.fileToTables(file).then(function (tables) {
-        var check = window.APSQL_SCHEMA_TOOLS.validateSchema(tables);
-        if (!check.valid) { msgs.innerHTML = check.errors.map(function (er) { return alertBox('error', er); }).join(''); return; }
-        var name = $('schemaUploadName').value.trim() || file.name;
-        schemaStore.addEntry({ name: name, schema: { schema_name: name, schema_version: '1.0', last_updated: new Date().toISOString().slice(0, 10), tables: tables }, source: 'upload' });
-        refreshEngine(); afterSchemaChange();
-        msgs.innerHTML = alertBox('ok', 'Added new schema entry "' + name + '" with ' + tables.length + ' table(s).');
-      }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
-    });
-    $('btnMergeSchemaEntry').addEventListener('click', function () {
-      var file = $('schemaUploadFile').files[0];
-      var msgs = $('schemaUploadMsgs'); clearNode(msgs);
-      if (!file) { msgs.innerHTML = alertBox('warn', 'Choose a .csv or .json schema file first.'); return; }
-      var targetId = $('schemaMergeTarget').value;
-      var target = schemaStore.getEntry(targetId);
-      if (!target) { msgs.innerHTML = alertBox('warn', 'Choose a schema to merge into.'); return; }
-      window.APSQL_SCHEMA_TOOLS.fileToTables(file).then(function (tables) {
-        var merged = window.APSQL_SCHEMA_TOOLS.mergeSchemas(target.schema, tables, file.name);
-        schemaStore.updateEntry(target.id, { schema: merged.schema });
-        refreshEngine(); afterSchemaChange();
-        msgs.innerHTML = alertBox('ok', 'Merged into "' + target.name + '": ' + merged.addedTables.length + ' new table(s), ' + merged.addedColumns.length + ' new column(s).');
-      }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
-    });
-    $('btnDownloadSampleCsv').addEventListener('click', function () { downloadBlob(window.APSQL_SCHEMA_TOOLS.buildSampleCsvBlob(), 'ap-sql-schema-template.csv'); });
-    $('btnExportCurrentJson').addEventListener('click', function () {
-      var def = schemaStore.getDefaultEntry(); if (!def) return;
-      downloadBlob(window.APSQL_SCHEMA_TOOLS.buildCurrentSchemaJsonBlob(def.schema), def.name.replace(/\s+/g, '_') + '.json');
-    });
-    $('btnAddRelationship').addEventListener('click', function () {
-      var ft = $('relFromTable').value.trim(), fc = $('relFromColumn').value.trim(), tt = $('relToTable').value.trim(), tc = $('relToColumn').value.trim();
-      if (!ft || !fc || !tt || !tc) return;
-      relationshipStore.setManualRelationship(ft, fc, tt, tc);
-      ['relFromTable', 'relFromColumn', 'relToTable', 'relToColumn'].forEach(function (id) { $(id).value = ''; });
-      alert('Relationship saved for this session: ' + ft + '.' + fc + ' ↔ ' + tt + '.' + tc);
-    });
-
-    var syncSel = $('syncScheduleSelect'); clearNode(syncSel);
-    window.APSQL_SYNC_SCHEDULE.OPTIONS.forEach(function (o) { syncSel.appendChild(el('option', { value: o.id, text: o.label })); });
-    syncSel.value = window.APSQL_SYNC_SCHEDULE.loadSelectedOptionId();
-    $('syncScheduleNote').textContent = 'Current: ' + (window.APSQL_SYNC_SCHEDULE.getOption(syncSel.value) || {}).label;
-    $('btnSaveSyncSchedule').addEventListener('click', function () {
-      window.APSQL_SYNC_SCHEDULE.saveSelectedOptionId(undefined, syncSel.value);
-      $('syncScheduleNote').textContent = 'Saved: ' + (window.APSQL_SYNC_SCHEDULE.getOption(syncSel.value) || {}).label;
-    });
-
-    $('btnChangePassword').addEventListener('click', function () {
-      var msgs = $('pwMsgs'); clearNode(msgs);
-      passwordManager.changePassword($('pwCurrent').value, $('pwNew').value, $('pwConfirm').value).then(function (res) {
-        if (!res.ok) { msgs.innerHTML = alertBox('error', res.error); return; }
-        msgs.innerHTML = alertBox('ok', 'Operational password changed successfully.');
-        ['pwCurrent', 'pwNew', 'pwConfirm'].forEach(function (id) { $(id).value = ''; });
-      });
-    });
-  }
-
-  function downloadBlob(blob, filename) {
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
-  }
-
-  function afterSchemaChange() {
-    renderHeaderStatus(); renderSchemaEntries(); populateSchemaMergeTarget();
-    renderTableList(); renderColumnList(); renderFilterList(); renderFilterExistsHierarchy();
+  function onSchemaChanged() {
+    rebuildEngine();
+    renderHome();
+    renderUsedSchema();
+    renderUpdateSchemaLists();
+    renderRoTables();
+    renderRoColumns();
     populateCrTableSelect();
   }
 
-  // =======================================================================
-  // GitHub Sync & Vault
-  // =======================================================================
-  function loadGithubConfigIntoForm() {
-    var cfg = githubConfigStore.loadConfig() || {};
-    $('ghOwner').value = cfg.owner || ''; $('ghRepo').value = cfg.repo || '';
-    $('ghBranch').value = cfg.branch || ''; $('ghPath').value = cfg.path || 'schema/shared-schema.json';
-    $('githubStatusHint').textContent = window.APSQL_GITHUB_SYNC.describeGitHubSyncStatus({ configured: window.APSQL_GITHUB_SYNC.isReadConfigComplete(cfg), owner: cfg.owner, repo: cfg.repo, path: cfg.path, branch: cfg.branch }).text;
+  //================================================================
+  // 3. NAVIGATION
+  //================================================================
+  function wireNavigation() {
+    document.querySelectorAll('[data-nav]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        goTo(el.getAttribute('data-nav'));
+        var oc = bootstrap.Offcanvas.getInstance($('appMenu'));
+        if (oc) oc.hide();
+      });
+    });
+    document.querySelectorAll('.menu-submenu-toggle').forEach(function (t) {
+      t.addEventListener('click', function () {
+        t.classList.toggle('open');
+        var sub = $('submenu-' + t.getAttribute('data-toggle-submenu'));
+        if (sub) sub.classList.toggle('open');
+      });
+    });
   }
-  function readGithubFormConfig() {
-    return { owner: $('ghOwner').value.trim(), repo: $('ghRepo').value.trim(), branch: $('ghBranch').value.trim() || 'main', path: $('ghPath').value.trim() || 'schema/shared-schema.json', token: $('ghToken').value };
+
+  function goTo(viewName) {
+    document.querySelectorAll('.app-view').forEach(function (v) { v.classList.remove('active'); });
+    var target = $('view-' + viewName);
+    if (target) target.classList.add('active');
+    document.querySelectorAll('[data-nav]').forEach(function (el) { el.classList.toggle('active', el.getAttribute('data-nav') === viewName); });
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
   }
-  function initSyncTab() {
-    loadGithubConfigIntoForm();
-    $('btnGhSaveConfig').addEventListener('click', function () {
-      var cfg = readGithubFormConfig(); githubConfigStore.saveConfig(cfg);
-      $('ghMsgs').innerHTML = alertBox('ok', 'GitHub configuration saved for this browser.');
-      loadGithubConfigIntoForm();
+
+  //================================================================
+  // 4. THEME
+  //================================================================
+  function wireTheme() {
+    var saved = safeLocalStorage().getItem('ap_sql_theme') || 'system';
+    applyTheme(saved);
+    document.querySelectorAll('[data-theme-choice]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        applyTheme(el.getAttribute('data-theme-choice'));
+      });
     });
-    $('btnGhFetch').addEventListener('click', function () {
-      var cfg = readGithubFormConfig(); var msgs = $('ghMsgs'); clearNode(msgs);
-      window.APSQL_GITHUB_SYNC.fetchRemoteSchema(cfg).then(function (res) {
-        if (!res.exists) { msgs.innerHTML = alertBox('warn', 'No schema file exists yet at that path.'); return; }
-        var name = res.schema.schema_name || 'GitHub Schema';
-        schemaStore.addEntry({ name: name, schema: res.schema, source: 'github' });
-        refreshEngine(); afterSchemaChange();
-        msgs.innerHTML = alertBox('ok', 'Fetched and added schema "' + name + '" from GitHub.');
-      }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
+  }
+  function applyTheme(choice) {
+    APP.theme = choice;
+    safeLocalStorage().setItem('ap_sql_theme', choice);
+    var resolved = choice;
+    if (choice === 'system') resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-bs-theme', resolved);
+  }
+
+  //================================================================
+  // 5. SYNC SCHEDULE (navbar)
+  //================================================================
+  function wireSyncSchedule() {
+    var sel = $('syncScheduleSelect');
+    if (!sel) return;
+    APSQL_SYNC_SCHEDULE.getOptions().forEach(function (o) {
+      var opt = document.createElement('option'); opt.value = o.id; opt.textContent = o.label; sel.appendChild(opt);
     });
-    $('btnGhPush').addEventListener('click', function () {
-      var cfg = readGithubFormConfig(); var msgs = $('ghMsgs'); clearNode(msgs);
-      var def = schemaStore.getDefaultEntry(); if (!def) { msgs.innerHTML = alertBox('warn', 'No default schema to push.'); return; }
-      window.APSQL_GITHUB_SYNC.fetchRemoteSchema(cfg).catch(function () { return { exists: false }; }).then(function (existing) {
-        return window.APSQL_GITHUB_SYNC.pushSchemaToGitHub(cfg, def.schema, existing && existing.sha);
-      }).then(function () { msgs.innerHTML = alertBox('ok', 'Pushed the default schema to GitHub.'); }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
+    var saved = safeLocalStorage().getItem('ap_sql_sync_schedule') || 'manual';
+    sel.value = saved;
+    sel.addEventListener('change', function () { safeLocalStorage().setItem('ap_sql_sync_schedule', sel.value); });
+  }
+
+  //================================================================
+  // 6. HOME
+  //================================================================
+  function renderHome() {
+    var merged = APP.schemaStore.getMergedActiveSchema();
+    var summary = $('homeSchemaSummary');
+    if (summary) {
+      var activeCount = APP.schemaStore.getActiveIds().length;
+      var totalTables = merged.tables.length;
+      summary.innerHTML = '<i class="bi bi-diagram-3"></i> Active schema(s): <strong>' + activeCount + '</strong> &nbsp;·&nbsp; Tables visible to SQL generation: <strong>' + totalTables + '</strong>';
+    }
+    var areas = $('homeSchemaAreas');
+    if (areas) {
+      areas.innerHTML = '';
+      var modules = {};
+      merged.tables.forEach(function (t) { var m = t.module || 'General'; modules[m] = (modules[m] || 0) + 1; });
+      Object.keys(modules).forEach(function (m) {
+        var label = (merged.module_labels && merged.module_labels[m]) || m;
+        var span = document.createElement('span');
+        span.className = 'badge text-bg-light border module-chip';
+        span.textContent = label + ' (' + modules[m] + ')';
+        areas.appendChild(span);
+      });
+      if (!Object.keys(modules).length) areas.innerHTML = '<span class="text-secondary small">No active schema tables yet — go to Update Schema to import one.</span>';
+    }
+  }
+
+  //================================================================
+  // 7. READ ONLY QUERY BUILDER
+  //================================================================
+  function wireReadOnlyBuilder() {
+    renderRoTables();
+    renderRoColumns();
+    renderRoFilterRows();
+    renderRoOrderByRows();
+    renderRoGroupByRows();
+
+    $('btnBuildQuery').addEventListener('click', function () { runDescribeBuild(); });
+    $('describeInput').addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runDescribeBuild(); });
+    $('btnBuildQueryManual').addEventListener('click', function () { runManualBuild(); });
+    $('btnStartOver').addEventListener('click', function () {
+      APP.conversation.reset(); APP.manualTables = {}; APP.manualColumns = []; APP.manualFilters = []; APP.manualOrderBy = []; APP.manualGroupBy = [];
+      $('describeInput').value = ''; $('describeTurnCount').textContent = '0'; $('describeInterpretation').innerHTML = '';
+      renderRoTables(); renderRoColumns(); renderRoFilterRows(); renderRoOrderByRows(); renderRoGroupByRows();
+      $('roSqlOutput').textContent = '-- Your generated SQL will appear here.'; $('roSqlExplanation').innerHTML = ''; $('roSqlWarnings').innerHTML = '';
     });
-    $('btnEncryptVault').addEventListener('click', function () {
-      var cfg = readGithubFormConfig(); var pass = $('vaultPass1').value; var msgs = $('vaultMsgs'); clearNode(msgs);
-      if (!pass) { msgs.innerHTML = alertBox('warn', 'Enter a vault passphrase first.'); return; }
-      window.APSQL_VAULT.buildVaultBlob(cfg, pass).then(function (blobText) {
-        downloadBlob(new Blob([blobText], { type: 'application/json' }), 'shared-schema.vault.json');
-        msgs.innerHTML = alertBox('ok', 'Vault file generated. Place it at schema/shared-schema.vault.json alongside index.html to publish it, then use "Fetch & unlock vault" on any device with the passphrase.');
-      }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
+    $('btnRemoveDuplicates').addEventListener('click', function () { $('roDistinct').checked = true; runManualBuild(); });
+    $('btnCopyRoSql').addEventListener('click', function () { copyToClipboard($('roSqlOutput').textContent); });
+
+    $('roTableSearch').addEventListener('input', function () { renderRoTables(); });
+    $('roTablesSelectAll').addEventListener('click', function () { APP.engine.getAllTables().forEach(function (t) { APP.manualTables[t.name] = true; }); renderRoTables(); renderRoColumns(); });
+    $('roTablesClear').addEventListener('click', function () { APP.manualTables = {}; renderRoTables(); renderRoColumns(); });
+
+    $('roColumnSearch').addEventListener('input', function () { renderRoColumns(); });
+    $('roColumnsSelectAll').addEventListener('click', function () { setAllRoColumns(true); });
+    $('roColumnsUnselectAll').addEventListener('click', function () { setAllRoColumns(false); });
+
+    $('roAddFilter').addEventListener('click', function () { APP.manualFilters.push({ table: '', column: '', operator: 'eq', value: '' }); renderRoFilterRows(); });
+    $('roClearFilters').addEventListener('click', function () { APP.manualFilters = []; renderRoFilterRows(); });
+    $('roAddOrderBy').addEventListener('click', function () { APP.manualOrderBy.push({ table: '', column: '', dir: 'asc' }); renderRoOrderByRows(); });
+    $('roAddGroupBy').addEventListener('click', function () { APP.manualGroupBy.push({ table: '', column: '' }); renderRoGroupByRows(); });
+
+    document.querySelector('#roConfigTabs').addEventListener('shown.bs.tab', function (e) {
+      if (e.target && e.target.getAttribute('data-bs-target') === '#roTabSummary') updateRoSummary();
+    });
+  }
+
+  function selectedRoTables() { return Object.keys(APP.manualTables).filter(function (t) { return APP.manualTables[t]; }); }
+
+  function renderRoTables() {
+    var list = $('roTableList'); if (!list) return;
+    var term = ($('roTableSearch').value || '').toUpperCase();
+    list.innerHTML = '';
+    APP.engine.getAllTables().filter(function (t) { return !term || t.name.toUpperCase().indexOf(term) !== -1; }).forEach(function (t) {
+      var row = document.createElement('div'); row.className = 'form-check';
+      var checked = !!APP.manualTables[t.name];
+      row.innerHTML = '<input class="form-check-input" type="checkbox" id="rotbl_' + t.name + '" ' + (checked ? 'checked' : '') + '>' +
+        '<label class="form-check-label small" for="rotbl_' + t.name + '"><strong>' + esc(t.name) + '</strong> <span class="text-secondary">' + esc(t.notes || '') + '</span></label>';
+      row.querySelector('input').addEventListener('change', function (e) {
+        if (e.target.checked) APP.manualTables[t.name] = true; else delete APP.manualTables[t.name];
+        renderRoColumns();
+      });
+      list.appendChild(row);
+    });
+    $('roTableCount').textContent = String(selectedRoTables().length);
+  }
+
+  function renderRoColumns() {
+    var list = $('roColumnList'); if (!list) return;
+    var term = ($('roColumnSearch').value || '').toUpperCase();
+    list.innerHTML = '';
+    var tables = selectedRoTables();
+    if (!tables.length) { list.innerHTML = '<div class="text-secondary small p-2">Select at least one table first.</div>'; return; }
+    tables.forEach(function (tn) {
+      var t = APP.engine.getTable(tn); if (!t) return;
+      var heading = document.createElement('div'); heading.className = 'col-group-heading'; heading.textContent = tn; list.appendChild(heading);
+      (t.columns || []).filter(function (c) { return !term || c.name.toUpperCase().indexOf(term) !== -1; }).forEach(function (c) {
+        var existing = APP.manualColumns.filter(function (mc) { return mc.table === tn && mc.column === c.name; })[0];
+        var row = document.createElement('div'); row.className = 'column-row-grid';
+        row.innerHTML =
+          '<span class="col-check"><input class="form-check-input" type="checkbox" ' + (existing ? 'checked' : '') + '></span>' +
+          '<span class="col-name">' + esc(c.name) + '</span>' +
+          '<input class="form-control form-control-sm col-alias" placeholder="alias" value="' + esc(existing ? existing.alias || '' : '') + '" ' + (existing ? '' : 'disabled') + '>' +
+          '<button type="button" class="btn btn-sm btn-outline-secondary col-decode ' + (existing ? '' : 'disabled') + '" title="CASE/DECODE" ' + (existing ? '' : 'disabled') + '><i class="bi bi-gear"></i></button>';
+        var checkbox = row.querySelector('input[type=checkbox]');
+        var aliasInput = row.querySelector('.col-alias');
+        var decodeBtn = row.querySelector('.col-decode');
+        checkbox.addEventListener('change', function () {
+          if (checkbox.checked) {
+            APP.manualColumns.push({ table: tn, column: c.name, alias: '', decode: false });
+            aliasInput.disabled = false; decodeBtn.disabled = false; decodeBtn.classList.remove('disabled');
+          } else {
+            APP.manualColumns = APP.manualColumns.filter(function (mc) { return !(mc.table === tn && mc.column === c.name); });
+            aliasInput.disabled = true; decodeBtn.disabled = true; decodeBtn.classList.add('disabled');
+          }
+        });
+        aliasInput.addEventListener('input', function () {
+          var mc = APP.manualColumns.filter(function (x) { return x.table === tn && x.column === c.name; })[0];
+          if (mc) mc.alias = aliasInput.value;
+        });
+        decodeBtn.addEventListener('click', function () { openDecodeDialog(tn, c.name); });
+        list.appendChild(row);
+      });
+    });
+  }
+
+  function setAllRoColumns(select) {
+    var tables = selectedRoTables();
+    if (select) {
+      tables.forEach(function (tn) {
+        var t = APP.engine.getTable(tn); if (!t) return;
+        (t.columns || []).forEach(function (c) {
+          if (!APP.manualColumns.some(function (mc) { return mc.table === tn && mc.column === c.name; })) APP.manualColumns.push({ table: tn, column: c.name, alias: '', decode: false });
+        });
+      });
+    } else {
+      APP.manualColumns = APP.manualColumns.filter(function (mc) { return tables.indexOf(mc.table) === -1; });
+    }
+    renderRoColumns();
+  }
+
+  function openDecodeDialog(table, column) {
+    var existing = APSQL_DECODE.resolveDecode(APP.engine, APP.decodeStore, table, column);
+    if (existing) {
+      alert('A CASE/DECODE definition already exists for ' + table + '.' + column + ' (source: ' + existing.source + '). It will be applied automatically when this column is marked as decoded.');
+      var mc = APP.manualColumns.filter(function (x) { return x.table === table && x.column === column; })[0];
+      if (mc) mc.decode = true;
+      return;
+    }
+    var casesText = prompt('Define CASE/DECODE for ' + table + '.' + column + '.\nEnter one "value=label" pair per line (e.g.\n1=Pending\n2=Approved):', '');
+    if (casesText === null) return;
+    var elseVal = prompt('Default (ELSE) label if no case matches (optional):', '') || '';
+    var cases = casesText.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (l) {
+      var idx = l.indexOf('='); return idx === -1 ? null : { when: l.slice(0, idx).trim(), then: l.slice(idx + 1).trim() };
+    }).filter(Boolean);
+    var def = { cases: cases, else_value: elseVal };
+    var v = APSQL_DECODE.validateNewDefinition(APP.engine, APP.decodeStore, table, column, def);
+    if (!v.valid) { alert('Could not save this definition:\n' + v.errors.join('\n')); return; }
+    APP.decodeStore.setManual(table, column, def);
+    APP.pendingDecodeApprovals.push({ table: table, column: column, def: def, requestedAt: new Date().toISOString() });
+    renderDecodeApprovalList();
+    var mc2 = APP.manualColumns.filter(function (x) { return x.table === table && x.column === column; })[0];
+    if (mc2) mc2.decode = true;
+    alert('Manual definition saved for this session and queued for Admin Approval in Update Schema before it is written into the Default schema.');
+  }
+
+  function renderRoFilterRows() {
+    var container = $('roFilterRows'); if (!container) return;
+    container.innerHTML = '';
+    APP.manualFilters.forEach(function (f, idx) {
+      var row = document.createElement('div'); row.className = 'filter-row';
+      row.innerHTML = buildColumnSelectHtml('f-table-' + idx, f.table) +
+        '<select class="form-select form-select-sm f-operator">' + operatorOptionsHtml(f.operator) + '</select>' +
+        '<input class="form-control form-control-sm f-value" placeholder="value" value="' + esc(f.value || '') + '">' +
+        '<input class="form-control form-control-sm f-value2" placeholder="value 2 (BETWEEN)" value="' + esc(f.value2 || '') + '" style="display:' + (f.operator === 'between' ? 'inline-block' : 'none') + '">' +
+        '<button class="btn btn-sm btn-outline-danger f-remove"><i class="bi bi-x-lg"></i></button>';
+      wireColumnSelect(row, f, function () { });
+      var opSel = row.querySelector('.f-operator');
+      opSel.value = f.operator;
+      opSel.addEventListener('change', function () { f.operator = opSel.value; row.querySelector('.f-value2').style.display = (f.operator === 'between') ? 'inline-block' : 'none'; });
+      row.querySelector('.f-value').addEventListener('input', function (e) { f.value = e.target.value; });
+      row.querySelector('.f-value2').addEventListener('input', function (e) { f.value2 = e.target.value; });
+      row.querySelector('.f-remove').addEventListener('click', function () { APP.manualFilters.splice(idx, 1); renderRoFilterRows(); });
+      container.appendChild(row);
+    });
+  }
+
+  function operatorOptionsHtml(current) {
+    var ops = [['eq', '='], ['neq', '<>'], ['gt', '>'], ['gte', '>='], ['lt', '<'], ['lte', '<='], ['like', 'LIKE'], ['notlike', 'NOT LIKE'], ['in', 'Is one of (IN)'], ['notin', 'Is not one of (NOT IN)'], ['between', 'BETWEEN'], ['isnull', 'IS NULL'], ['isnotnull', 'IS NOT NULL']];
+    return ops.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === current ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+  }
+
+  function buildColumnSelectHtml(idPrefix, selectedValue) {
+    var tables = selectedRoTables().length ? selectedRoTables() : APP.engine.getAllTables().map(function (t) { return t.name; });
+    var html = '<select class="form-select form-select-sm f-column" data-id="' + idPrefix + '"><option value="">table.column</option>';
+    tables.forEach(function (tn) {
+      var t = APP.engine.getTable(tn); if (!t) return;
+      (t.columns || []).forEach(function (c) {
+        var val = tn + '.' + c.name;
+        html += '<option value="' + val + '"' + (val === selectedValue ? ' selected' : '') + '>' + val + '</option>';
+      });
+    });
+    html += '</select>';
+    return html;
+  }
+
+  function wireColumnSelect(row, target, onChange) {
+    var sel = row.querySelector('.f-column');
+    sel.addEventListener('change', function () {
+      var parts = sel.value.split('.');
+      target.table = parts[0] || ''; target.column = parts[1] || '';
+      var colDef = target.table ? APP.engine.getColumn(target.table, target.column) : null;
+      target.columnType = colDef ? colDef.type : null;
+      onChange();
+    });
+  }
+
+  function renderRoOrderByRows() {
+    var container = $('roOrderByRows'); if (!container) return;
+    container.innerHTML = '';
+    APP.manualOrderBy.forEach(function (o, idx) {
+      var row = document.createElement('div'); row.className = 'orderby-row';
+      row.innerHTML = buildColumnSelectHtml('ob-' + idx, o.table ? o.table + '.' + o.column : '') +
+        '<select class="form-select form-select-sm ob-dir"><option value="asc"' + (o.dir === 'asc' ? ' selected' : '') + '>ASC</option><option value="desc"' + (o.dir === 'desc' ? ' selected' : '') + '>DESC</option></select>' +
+        '<button class="btn btn-sm btn-outline-danger ob-remove"><i class="bi bi-x-lg"></i></button>';
+      wireColumnSelect(row, o, function () { });
+      row.querySelector('.ob-dir').addEventListener('change', function (e) { o.dir = e.target.value; });
+      row.querySelector('.ob-remove').addEventListener('click', function () { APP.manualOrderBy.splice(idx, 1); renderRoOrderByRows(); });
+      container.appendChild(row);
+    });
+  }
+
+  function renderRoGroupByRows() {
+    var container = $('roGroupByRows'); if (!container) return;
+    container.innerHTML = '';
+    APP.manualGroupBy.forEach(function (g, idx) {
+      var row = document.createElement('div'); row.className = 'groupby-row';
+      row.innerHTML = buildColumnSelectHtml('gb-' + idx, g.table ? g.table + '.' + g.column : '') +
+        '<button class="btn btn-sm btn-outline-danger gb-remove"><i class="bi bi-x-lg"></i></button>';
+      wireColumnSelect(row, g, function () { });
+      row.querySelector('.gb-remove').addEventListener('click', function () { APP.manualGroupBy.splice(idx, 1); renderRoGroupByRows(); });
+      container.appendChild(row);
+    });
+  }
+
+  function updateRoSummary() {
+    $('roSummaryJson').textContent = JSON.stringify(assembleRoOptions(), null, 2);
+  }
+
+  function assembleRoOptions() {
+    var dialect = $('describeDialect').value;
+    var options = {
+      dialect: dialect,
+      selectedTables: selectedRoTables(),
+      selectedColumns: APP.manualColumns.slice(),
+      filterGroup: { conditions: APP.manualFilters.filter(function (f) { return f.table && f.column; }).map(function (f) { return APSQL_FILTER.newCondition(f); }) },
+      orderBy: APP.manualOrderBy.filter(function (o) { return o.table && o.column; }),
+      groupBy: APP.manualGroupBy.filter(function (g) { return g.table && g.column; }),
+      having: ($('roHaving').value || '') || undefined,
+      cteName: $('roCteName').value || undefined,
+      distinct: $('roDistinct').checked,
+      joinType: $('roJoinType').value,
+      limit: $('roLimit').value ? parseInt($('roLimit').value, 10) : undefined
+    };
+    var advRaw = ($('roAdvancedJson').value || '').trim();
+    if (advRaw) {
+      try {
+        var adv = JSON.parse(advRaw);
+        Object.keys(adv).forEach(function (k) { if (adv[k] !== null && adv[k] !== undefined) options[k] = adv[k]; });
+      } catch (e) { showAlertBox('roSqlWarnings', 'warning', 'Power-user JSON options could not be parsed and were ignored: ' + e.message); }
+    }
+    return options;
+  }
+
+  function planToOptions(plan, dialect) {
+    var opts = {
+      dialect: dialect,
+      selectedTables: plan.tables,
+      selectedColumns: plan.columns.map(function (c) { return { table: c.table, column: c.column }; }),
+      filterGroup: { conditions: (plan.filterConditions || []).map(function (c) {
+        var copy = Object.assign({}, c);
+        if (typeof copy.value === 'string' && /^__(DAYS|MONTHS)_AGO_/.test(copy.value)) copy.value = APSQL_NLQ.resolveRelativeDates(copy.value);
+        return APSQL_FILTER.newCondition(copy);
+      }) },
+      orderBy: plan.orderBy || [],
+      groupBy: plan.groupBy || [],
+      distinct: !!plan.distinct,
+      limit: plan.limit || undefined
+    };
+    if (plan.aggregations && plan.aggregations.length) {
+      plan.aggregations.forEach(function (a) {
+        opts.selectedColumns.push({ table: a.table, column: a.column, aggregate: a.fn, alias: a.fn.toLowerCase() + '_' + a.column });
+      });
+    }
+    return opts;
+  }
+
+  function runDescribeBuild() {
+    var text = $('describeInput').value.trim();
+    if (!text) return;
+    var plan = APP.conversation.submit(text, APP.effEngine);
+    $('describeTurnCount').textContent = String(APP.conversation.getHistory().length);
+    renderInterpretation(plan);
+    if (plan.missingInfo && plan.missingInfo.length) return; // don't attempt generation if we couldn't understand it
+    var options = planToOptions(plan, $('describeDialect').value);
+    generateAndRenderRo(options);
+  }
+
+  function runManualBuild() {
+    var options = assembleRoOptions();
+    if (!options.selectedTables.length && APP.conversation.getCurrentPlan()) {
+      var plan = APP.conversation.getCurrentPlan();
+      var planOpts = planToOptions(plan, options.dialect);
+      options.selectedTables = planOpts.selectedTables;
+      if (!options.selectedColumns.length) options.selectedColumns = planOpts.selectedColumns;
+      options.filterGroup.conditions = options.filterGroup.conditions.concat(planOpts.filterGroup.conditions);
+    }
+    generateAndRenderRo(options);
+    updateRoSummary();
+  }
+
+  function renderInterpretation(plan) {
+    var box = $('describeInterpretation');
+    if (!plan.tables.length) {
+      box.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0 small">' + (plan.missingInfo || []).map(esc).join('<br>') + '</div>';
+      return;
+    }
+    var lines = [];
+    lines.push('<strong>Tables:</strong> ' + plan.tables.join(', '));
+    if (plan.columns && plan.columns.length) lines.push('<strong>Columns:</strong> ' + plan.columns.map(function (c) { return c.table + '.' + c.column; }).join(', '));
+    if (plan.filterConditions && plan.filterConditions.length) lines.push('<strong>Filters:</strong> ' + plan.filterConditions.length + ' condition(s)');
+    if (plan.aggregations && plan.aggregations.length) lines.push('<strong>Aggregation:</strong> ' + plan.aggregations.map(function (a) { return a.fn + '(' + a.column + ')'; }).join(', '));
+    if (plan.orderBy && plan.orderBy.length) lines.push('<strong>Sort:</strong> ' + plan.orderBy.map(function (o) { return o.table + '.' + o.column + ' ' + o.dir.toUpperCase(); }).join(', '));
+    if (plan.warnings && plan.warnings.length) lines.push('<span class="text-warning">' + plan.warnings.join('<br>') + '</span>');
+    box.innerHTML = '<div class="alert alert-light border py-2 px-3 mb-0 small"><ul class="mb-0">' + lines.map(function (l) { return '<li>' + l + '</li>'; }).join('') + '</ul></div>';
+  }
+
+  function generateAndRenderRo(options) {
+    if (!options.selectedTables || !options.selectedTables.length) {
+      showAlertBox('roSqlWarnings', 'warning', 'Select at least one table (manually, or via a description above) before building a query.');
+      return;
+    }
+    var result = APSQL_VALIDATION.selfCorrect(APSQL_SQL.generateSql, null, options, APP.effEngine, APP.decodeStore, APP.effEngine, 3);
+    $('roSqlWarnings').innerHTML = '';
+    if (result.status !== 'ok') {
+      $('roSqlOutput').textContent = '-- Could not generate SQL.';
+      $('roSqlExplanation').innerHTML = '';
+      showAlertBox('roSqlWarnings', 'danger', (result.errors || []).join('<br>'));
+      return;
+    }
+    APP.lastRoResult = result;
+    $('roSqlOutput').textContent = result.sql;
+    $('roSqlExplanation').textContent = APSQL_OPTIMIZE.explainQuery(result, APP.effEngine) || '';
+    var hints = APSQL_OPTIMIZE.optimizationHints(result.sql);
+    var allWarnings = (result.warnings || []).concat(hints);
+    if (allWarnings.length) showAlertBox('roSqlWarnings', 'info', allWarnings.join('<br>'));
+  }
+
+  function showAlertBox(containerId, kind, html) {
+    var el = $(containerId); if (!el) return;
+    el.innerHTML = '<div class="alert alert-' + kind + ' py-2 px-3 mb-0 small">' + html + '</div>';
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(function () {});
+    else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(ta); }
+  }
+
+  //================================================================
+  // 8. CR QUERY BUILDER
+  //================================================================
+  function wireCrBuilder() {
+    populateCrTableSelect();
+    document.querySelectorAll('.cr-command-option').forEach(function (opt) {
+      opt.addEventListener('click', function () {
+        document.querySelectorAll('.cr-command-option').forEach(function (o) { o.classList.remove('active'); });
+        opt.classList.add('active');
+        APP.crFields = [];
+        renderCrFieldRows();
+        updateCrUiForCommand();
+      });
+    });
+    $('crAddField').addEventListener('click', function () { APP.crFields.push({ column: '', value: '' }); renderCrFieldRows(); });
+    $('crAddFilter').addEventListener('click', function () { APP.crFilters.push({ table: '', column: '', operator: 'eq', value: '' }); renderCrFilterRows(); });
+    $('btnBuildCr').addEventListener('click', buildCrQuerySql);
+    $('btnCopyCrSql').addEventListener('click', function () { copyToClipboard($('crSqlOutput').textContent); });
+    $('crTableSelect').addEventListener('change', function () { APP.crFields = []; APP.crFilters = []; renderCrFieldRows(); renderCrFilterRows(); });
+    renderCrFieldRows(); renderCrFilterRows(); updateCrUiForCommand();
+  }
+
+  function currentCrCommand() { var el = document.querySelector('.cr-command-option.active'); return el ? el.getAttribute('data-command') : 'INSERT'; }
+
+  function updateCrUiForCommand() {
+    var cmd = currentCrCommand();
+    $('crFieldsHeading').textContent = cmd === 'DELETE' ? 'No columns needed for DELETE' : (cmd === 'UPDATE' ? 'Columns to Update' : 'Columns & Values');
+    $('crFieldRows').style.display = cmd === 'DELETE' ? 'none' : '';
+    $('crAddField').style.display = cmd === 'DELETE' ? 'none' : '';
+    $('crFilterCard').style.display = cmd === 'INSERT' ? 'none' : '';
+  }
+
+  function populateCrTableSelect() {
+    var sel = $('crTableSelect'); if (!sel) return;
+    sel.innerHTML = '';
+    APP.engine.getAllTables().forEach(function (t) { var o = document.createElement('option'); o.value = t.name; o.textContent = t.name; sel.appendChild(o); });
+  }
+
+  function renderCrFieldRows() {
+    var container = $('crFieldRows'); if (!container) return;
+    container.innerHTML = '';
+    var table = $('crTableSelect').value;
+    var t = APP.engine.getTable(table);
+    APP.crFields.forEach(function (f, idx) {
+      var row = document.createElement('div'); row.className = 'field-row';
+      var colOptions = '<option value="">column</option>' + ((t && t.columns) || []).map(function (c) { return '<option value="' + c.name + '"' + (c.name === f.column ? ' selected' : '') + '>' + c.name + '</option>'; }).join('');
+      row.innerHTML = '<select class="form-select form-select-sm cf-col">' + colOptions + '</select>' +
+        '<input class="form-control form-control-sm cf-val" placeholder="value" value="' + esc(f.value || '') + '">' +
+        '<button class="btn btn-sm btn-outline-danger cf-remove"><i class="bi bi-x-lg"></i></button>';
+      row.querySelector('.cf-col').addEventListener('change', function (e) { f.column = e.target.value; });
+      row.querySelector('.cf-val').addEventListener('input', function (e) { f.value = e.target.value; });
+      row.querySelector('.cf-remove').addEventListener('click', function () { APP.crFields.splice(idx, 1); renderCrFieldRows(); });
+      container.appendChild(row);
+    });
+  }
+
+  function renderCrFilterRows() {
+    var container = $('crFilterRows'); if (!container) return;
+    container.innerHTML = '';
+    var table = $('crTableSelect').value;
+    var t = APP.engine.getTable(table);
+    APP.crFilters.forEach(function (f, idx) {
+      var row = document.createElement('div'); row.className = 'filter-row';
+      var colOptions = '<option value="">column</option>' + ((t && t.columns) || []).map(function (c) { return '<option value="' + c.name + '"' + (c.name === f.column ? ' selected' : '') + '>' + c.name + '</option>'; }).join('');
+      row.innerHTML = '<select class="form-select form-select-sm cff-col">' + colOptions + '</select>' +
+        '<select class="form-select form-select-sm cff-op">' + operatorOptionsHtml(f.operator) + '</select>' +
+        '<input class="form-control form-control-sm cff-val" placeholder="value" value="' + esc(f.value || '') + '">' +
+        '<button class="btn btn-sm btn-outline-danger cff-remove"><i class="bi bi-x-lg"></i></button>';
+      row.querySelector('.cff-col').addEventListener('change', function (e) { f.column = e.target.value; f.table = table; });
+      row.querySelector('.cff-op').addEventListener('change', function (e) { f.operator = e.target.value; });
+      row.querySelector('.cff-val').addEventListener('input', function (e) { f.value = e.target.value; });
+      row.querySelector('.cff-remove').addEventListener('click', function () { APP.crFilters.splice(idx, 1); renderCrFilterRows(); });
+      container.appendChild(row);
+    });
+  }
+
+  function buildCrQuerySql() {
+    var table = $('crTableSelect').value;
+    var command = currentCrCommand();
+    var dialect = $('crDialect').value;
+    var req = { command: command, table: table, explicitOverride: $('crExplicitOverride').checked };
+    if (command === 'INSERT') req.columns = APP.crFields.filter(function (f) { return f.column; }).map(function (f) { return { name: f.column, value: f.value }; });
+    if (command === 'UPDATE') req.updates = APP.crFields.filter(function (f) { return f.column; }).map(function (f) { return { column: f.column, value: f.value }; });
+    req.filterGroup = { conditions: APP.crFilters.filter(function (f) { return f.column; }).map(function (f) { return APSQL_FILTER.newCondition({ table: table, column: f.column, operator: f.operator, value: f.value }); }) };
+    var result = APSQL_CR.buildCrQuery(APP.effEngine, req, dialect);
+    $('crSqlWarnings').innerHTML = '';
+    if (result.status === 'rejected' || result.status === 'error') {
+      $('crSqlOutput').textContent = '-- Query blocked.';
+      showAlertBox('crSqlWarnings', 'danger', (result.errors || []).join('<br>'));
+      return;
+    }
+    $('crSqlOutput').textContent = result.sql;
+    if ((result.warnings || []).length) showAlertBox('crSqlWarnings', 'warning', result.warnings.join('<br>'));
+  }
+
+  //================================================================
+  // 9. USED SCHEMA
+  //================================================================
+  function renderUsedSchema() {
+    var list = $('usedSchemaList'); if (!list) return;
+    list.innerHTML = '';
+    APP.schemaStore.getEntries().forEach(function (e) {
+      var state = APP.schemaStore.getSchemaState(e.id);
+      var badgeClass = state === 'default' ? 'badge-schema-default' : (state === 'active' ? 'badge-schema-active' : 'badge-schema-inactive');
+      var row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2';
+      row.innerHTML = '<div><input type="checkbox" class="form-check-input me-2" ' + (state === 'default' ? 'disabled checked' : (state === 'active' ? 'checked' : '')) + '> <strong>' + esc(e.name) + '</strong> <span class="text-secondary small">v' + esc(e.version) + '</span></div>' +
+        '<span class="badge ' + badgeClass + ' text-uppercase">' + state + '</span>';
+      row.querySelector('input').addEventListener('change', function (ev) {
+        var ok = APP.schemaStore.setEntryActive(e.id, ev.target.checked);
+        if (!ok) { ev.target.checked = true; alert('The Default schema is always Active and cannot be deactivated here. Change the Default schema first in Update Schema.'); }
+        onSchemaChanged();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  //================================================================
+  // 10. UPDATE SCHEMA
+  //================================================================
+  function wireUpdateSchema() {
+    $('btnUnlockUpdateSchema').addEventListener('click', function () {
+      var pw = $('updateSchemaPasswordInput').value;
+      APP.passwordManager.verifyCurrentPassword(pw).then(function (ok) {
+        if (ok) { $('updateSchemaLock').style.display = 'none'; $('updateSchemaContent').style.display = ''; renderUpdateSchemaLists(); renderDecodeApprovalList(); }
+        else { $('updateSchemaPasswordError').style.display = 'block'; $('updateSchemaPasswordError').textContent = 'Incorrect password.'; }
+      });
+    });
+    $('btnForgotPassword').addEventListener('click', function () {
+      if (confirm('Reset the operational password back to its default? This does not delete any stored schemas.')) {
+        APP.passwordManager.resetToDefault();
+        alert('Password reset to the documented default. You can now unlock Update Schema with it.');
+      }
+    });
+
+    $('btnAddNewSchema').addEventListener('click', function () {
+      var name = $('newSchemaName').value.trim() || undefined;
+      var entry = APP.schemaStore.addEntry({ name: name, schema: { schema_name: name || 'New Schema', schema_version: '1.0', tables: [] } });
+      $('newSchemaName').value = '';
+      onSchemaChanged();
+    });
+
+    $('btnSaveActiveSelection').addEventListener('click', function () {
+      document.querySelectorAll('#activeSchemaChoices input[type=checkbox]').forEach(function (cb) {
+        APP.schemaStore.setEntryActive(cb.value, cb.checked);
+      });
+      onSchemaChanged();
+      alert('Active schema selection saved.');
+    });
+
+    $('btnProcessFile').addEventListener('click', processSchemaImportFile);
+    document.querySelectorAll('[data-sample]').forEach(function (btn) { btn.addEventListener('click', function () { downloadSampleFormat(btn.getAttribute('data-sample')); }); });
+    document.querySelectorAll('[data-download]').forEach(function (btn) { btn.addEventListener('click', function () { downloadCurrentSchema(btn.getAttribute('data-download')); }); });
+    $('btnViewExpectedStructure').addEventListener('click', function () {
+      alert('Expected structure (JSON): { schema_name, schema_version, module_labels, tables: [ { name, module, notes, columns: [ { name, type, nullable, primary_key, foreign_key:{table,column}|null, alias, description, decode } ] } ] }.\nCSV/XLSX use one row per column with headers: table, module, column, type, nullable, primary_key, fk_table, fk_column, alias, description.');
+    });
+
+    $('btnApplySchemaUpdate').addEventListener('click', function () {
+      if (!APP.pendingSchemaUpdate) return;
+      APP.schemaStore.updateEntrySchema(APP.pendingSchemaUpdate.targetEntryId, APP.pendingSchemaUpdate.schema);
+      APP.pendingSchemaUpdate = null;
+      $('schemaPreviewPanel').style.display = 'none';
+      showAlertBox('schemaImportMessage', 'success', 'Schema update applied.');
+      onSchemaChanged();
+    });
+    $('btnCancelSchemaUpdate').addEventListener('click', function () {
+      APP.pendingSchemaUpdate = null;
+      $('schemaPreviewPanel').style.display = 'none';
+      showAlertBox('schemaImportMessage', 'secondary', 'Update canceled — no changes were made.');
+    });
+
+    $('btnCheckSharedSchemaNow').addEventListener('click', function () {
+      var path = $('sharedSchemaPath').value || APSQL_SHARED_SCHEMA_LOADER.DEFAULT_PATH;
+      APSQL_SHARED_SCHEMA_LOADER.checkNow(path).then(function (r) {
+        var el = $('sharedSchemaResult');
+        if (r.found) { el.innerHTML = '<span class="text-success">Found a shared schema at ' + esc(path) + '. Applying to the Default schema…</span>'; APP.schemaStore.updateEntrySchema(APP.schemaStore.getDefaultId(), r.schema); onSchemaChanged(); }
+        else el.innerHTML = '<span class="text-secondary">' + esc(r.reason) + '</span>';
+      });
+    });
+
+    APP.githubLinker = APSQL_SCHEMA_SYNC.createLinker(safeLocalStorage());
+    $('btnLinkFile').addEventListener('click', function () {
+      APP.githubLinker.link().then(function () { $('linkedFileResult').innerHTML = '<span class="text-success">File linked.</span>'; })
+        .catch(function (e) { $('linkedFileResult').innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; });
+    });
+    $('btnReadLinkedFile').addEventListener('click', function () {
+      APP.githubLinker.readLinkedFile().then(function (schema) {
+        APP.schemaStore.updateEntrySchema(APP.schemaStore.getDefaultId(), schema);
+        onSchemaChanged();
+        $('linkedFileResult').innerHTML = '<span class="text-success">Linked file applied to the Default schema.</span>';
+      }).catch(function (e) { $('linkedFileResult').innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; });
+    });
+    $('btnWriteLinkedFile').addEventListener('click', function () {
+      var entry = APP.schemaStore.getEntry(APP.schemaStore.getDefaultId());
+      APP.githubLinker.writeLinkedFile(entry.schema).then(function () { $('linkedFileResult').innerHTML = '<span class="text-success">Default schema published to the linked file.</span>'; })
+        .catch(function (e) { $('linkedFileResult').innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; });
+    });
+
+    $('btnGithubFetch').addEventListener('click', function () {
+      var cfg = { owner: $('ghOwner').value, repo: $('ghRepo').value, path: $('ghPath').value, branch: $('ghBranch').value || undefined };
+      APSQL_GITHUB_SYNC.fetchSchemaAnonymous(cfg).then(function (schema) {
+        APP.schemaStore.updateEntrySchema(APP.schemaStore.getDefaultId(), schema);
+        onSchemaChanged();
+        $('githubSyncResult').innerHTML = '<span class="text-success">Fetched and applied to the Default schema.</span>';
+      }).catch(function (e) { $('githubSyncResult').innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; });
+    });
+
+    $('btnEncryptPublishVault').addEventListener('click', function () {
+      var cfg = { owner: $('ghOwner').value, repo: $('ghRepo').value, path: $('ghPath').value, branch: $('ghBranch').value || undefined, token: $('ghToken').value };
+      var pw = $('vaultPassword').value;
+      if (!pw) { $('vaultResult').innerHTML = '<span class="text-danger">Enter a vault password first.</span>'; return; }
+      APSQL_VAULT.encryptVault(cfg, pw).then(function (vault) {
+        safeLocalStorage().setItem('ap_sql_github_vault', JSON.stringify(vault));
+        $('vaultResult').innerHTML = '<span class="text-success">Vault encrypted and stored (locally). Token is never stored in plaintext.</span>';
+      });
     });
     $('btnFetchUnlockVault').addEventListener('click', function () {
-      var pass = $('vaultPass2').value; var msgs = $('vaultMsgs'); clearNode(msgs);
-      if (!pass) { msgs.innerHTML = alertBox('warn', 'Enter the vault passphrase first.'); return; }
-      fetch('schema/shared-schema.vault.json', { cache: 'no-store' }).then(function (res) {
-        if (res.status === 404) throw new Error('No vault file was found at schema/shared-schema.vault.json. Ask an administrator to publish one first.');
-        if (!res.ok) throw new Error('Could not read the vault file (HTTP ' + res.status + ').');
-        return res.json();
-      }).then(function (vaultObj) { return window.APSQL_VAULT.decryptConfig(vaultObj, pass); }).then(function (cfg) {
-        githubConfigStore.saveConfig(cfg); loadGithubConfigIntoForm();
-        msgs.innerHTML = alertBox('ok', 'Vault unlocked and GitHub configuration loaded.');
-      }).catch(function (err) { msgs.innerHTML = alertBox('error', err.message); });
+      var raw = safeLocalStorage().getItem('ap_sql_github_vault');
+      if (!raw) { $('vaultResult').innerHTML = '<span class="text-danger">No vault file was found. Ask an administrator to publish one first.</span>'; return; }
+      var vault; try { vault = JSON.parse(raw); } catch (e) { $('vaultResult').innerHTML = '<span class="text-danger">This does not look like a valid encrypted credential vault.</span>'; return; }
+      var pw = $('vaultPassword').value;
+      APSQL_VAULT.decryptVault(vault, pw).then(function (cfg) {
+        $('ghOwner').value = cfg.owner || ''; $('ghRepo').value = cfg.repo || ''; $('ghPath').value = cfg.path || ''; $('ghToken').value = cfg.token || '';
+        $('vaultResult').innerHTML = '<span class="text-success">Vault unlocked.</span>';
+      }).catch(function (e) { $('vaultResult').innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; });
+    });
+
+    $('btnChangePassword').addEventListener('click', function () {
+      APP.passwordManager.changePassword($('pwCurrent').value, $('pwNew').value, $('pwConfirm').value).then(function (r) {
+        $('pwChangeResult').innerHTML = r.ok ? '<span class="text-success">Password changed.</span>' : '<span class="text-danger">' + esc(r.error) + '</span>';
+        if (r.ok) { $('pwCurrent').value = ''; $('pwNew').value = ''; $('pwConfirm').value = ''; }
+      });
+    });
+
+    $('btnDeleteSchemaContents').addEventListener('click', function () {
+      if (!confirm('Permanently clear the working schema\u2019s contents? A backup will download automatically first.')) return;
+      var entry = APP.schemaStore.getEntry(APP.workingSchemaEntryId);
+      if (!entry) return;
+      downloadFile(entry.name.replace(/\s+/g, '_') + '_backup.json', JSON.stringify(entry.schema, null, 2), 'application/json');
+      APP.schemaStore.updateEntrySchema(entry.id, { schema_name: entry.schema.schema_name, schema_version: entry.schema.schema_version, module_labels: {}, tables: [] });
+      onSchemaChanged();
+    });
+
+    renderUpdateSchemaLists();
+  }
+
+  function renderUpdateSchemaLists() {
+    var manage = $('manageSchemaList'); if (!manage) return;
+    manage.innerHTML = '';
+    APP.schemaStore.getEntries().forEach(function (e) {
+      var state = APP.schemaStore.getSchemaState(e.id);
+      var row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-1';
+      row.innerHTML = '<span><input type="radio" name="workingSchema" ' + (APP.workingSchemaEntryId === e.id ? 'checked' : '') + '> ' + esc(e.name) + ' <span class="badge text-bg-light border">' + state + '</span></span>' +
+        '<button class="btn btn-sm btn-outline-danger" ' + (state === 'default' ? 'disabled title="Cannot delete the Default schema"' : '') + '><i class="bi bi-trash"></i></button>';
+      row.querySelector('input').addEventListener('change', function () { APP.workingSchemaEntryId = e.id; $('workingWithSchemaName').textContent = e.name; });
+      row.querySelector('button').addEventListener('click', function () { if (confirm('Delete "' + e.name + '"? This cannot be undone.')) { APP.schemaStore.removeEntry(e.id); onSchemaChanged(); renderUpdateSchemaLists(); } });
+      manage.appendChild(row);
+    });
+    var workingEntry = APP.schemaStore.getEntry(APP.workingSchemaEntryId);
+    $('workingWithSchemaName').textContent = workingEntry ? workingEntry.name : '—';
+
+    var defaultChoices = $('defaultSchemaChoices'); defaultChoices.innerHTML = '';
+    var activeChoices = $('activeSchemaChoices'); activeChoices.innerHTML = '';
+    APP.schemaStore.getEntries().forEach(function (e) {
+      var d = document.createElement('div'); d.className = 'form-check';
+      d.innerHTML = '<input class="form-check-input" type="radio" name="defaultSchemaRadio" value="' + e.id + '" ' + (APP.schemaStore.isDefault(e.id) ? 'checked' : '') + '> <label class="form-check-label small">' + esc(e.name) + '</label>';
+      d.querySelector('input').addEventListener('change', function () { APP.schemaStore.setDefaultId(e.id); onSchemaChanged(); renderUpdateSchemaLists(); });
+      defaultChoices.appendChild(d);
+
+      var a = document.createElement('div'); a.className = 'form-check';
+      a.innerHTML = '<input class="form-check-input" type="checkbox" value="' + e.id + '" ' + (APP.schemaStore.isActive(e.id) ? 'checked' : '') + ' ' + (APP.schemaStore.isDefault(e.id) ? 'disabled' : '') + '> <label class="form-check-label small">' + esc(e.name) + '</label>';
+      activeChoices.appendChild(a);
     });
   }
 
-  // =======================================================================
-  // Guided Walkthrough (clamped to viewport)
-  // =======================================================================
-  var TOUR_STEPS = [
-    { id: 'card-describe', title: '1. Describe What You Need', text: 'Type your request in plain language and click "Build Query". The engine understands intent, resolves it against the active schema, and fills in the sections below.' },
-    { id: 'card-generated-sql', title: '2. Generated SQL', text: 'Validated, schema-aware SQL appears here, along with a plain-English explanation of tables, filters, and assumptions used.' },
-    { id: 'mqc-table', title: '3a. Select Table', text: 'Fine-tune or build manually: search and tick one or more tables. The list scrolls independently so the page never stretches.' },
-    { id: 'mqc-column', title: '3b. Select Column', text: 'Pick the columns you need. Columns with a governed CASE/DECODE definition show a DECODE badge — click the gear to manage it.' },
-    { id: 'mqc-filters', title: '3c. Filters', text: 'Add one or more filter conditions, combine with AND/OR, then generate SQL from this manual configuration at any time.' },
-    { id: 'tabbar', title: 'More tools', text: 'Switch tabs for the CR Query Builder, Error Rectifier, multi-schema management, and secure GitHub sync — all built on the same governed schema.' }
-  ];
-  var tourIndex = 0;
-  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-  function showTourStep(i) {
-    clearTourHighlight();
-    if (i < 0 || i >= TOUR_STEPS.length) { endTour(); return; }
-    tourIndex = i;
-    var step = TOUR_STEPS[i];
-    var targetTab = document.querySelector('#tabbar button[data-tab="readonly"]');
-    if (targetTab && !targetTab.classList.contains('active')) targetTab.click();
-    var target = $(step.id);
-    if (!target) { showTourStep(i + 1); return; }
-    target.classList.add('tour-highlight');
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    $('tourScrim').style.display = 'block';
-    var tooltip = $('tourTooltip');
-    tooltip.style.display = 'block';
-    tooltip.innerHTML =
-      '<div class="tt-title">' + esc(step.title) + '</div>' +
-      '<div>' + esc(step.text) + '</div>' +
-      '<div class="tt-actions">' +
-      '<span class="tt-progress">' + (i + 1) + ' / ' + TOUR_STEPS.length + '</span>' +
-      '<span>' +
-      (i > 0 ? '<button class="btn secondary sm" id="tourPrev">Back</button> ' : '') +
-      '<button class="btn secondary sm" id="tourSkip">Skip</button> ' +
-      '<button class="btn sm" id="tourNext">' + (i === TOUR_STEPS.length - 1 ? 'Finish' : 'Next') + '</button>' +
-      '</span></div>';
-    setTimeout(function () { positionTooltip(target, tooltip); }, 60);
-    var nextBtn = document.getElementById('tourNext'); if (nextBtn) nextBtn.addEventListener('click', function () { showTourStep(i + 1); });
-    var prevBtn = document.getElementById('tourPrev'); if (prevBtn) prevBtn.addEventListener('click', function () { showTourStep(i - 1); });
-    var skipBtn = document.getElementById('tourSkip'); if (skipBtn) skipBtn.addEventListener('click', endTour);
-  }
-  function positionTooltip(target, tooltip) {
-    var rect = target.getBoundingClientRect();
-    var tw = tooltip.offsetWidth || 320, th = tooltip.offsetHeight || 140;
-    var vw = window.innerWidth, vh = window.innerHeight;
-    var top = rect.bottom + 12;
-    var left = rect.left;
-    if (top + th > vh - 10) top = clamp(rect.top - th - 12, 10, vh - th - 10);
-    left = clamp(left, 10, vw - tw - 10);
-    top = clamp(top, 10, vh - th - 10);
-    tooltip.style.top = top + 'px';
-    tooltip.style.left = left + 'px';
-  }
-  function clearTourHighlight() { document.querySelectorAll('.tour-highlight').forEach(function (n) { n.classList.remove('tour-highlight'); }); }
-  function endTour() { clearTourHighlight(); $('tourScrim').style.display = 'none'; $('tourTooltip').style.display = 'none'; }
-  function initTour() {
-    $('btnStartTour').addEventListener('click', function () { showTourStep(0); });
-    $('tourScrim').addEventListener('click', endTour);
-    window.addEventListener('resize', function () { if ($('tourTooltip').style.display === 'block') { var step = TOUR_STEPS[tourIndex]; var target = $(step && step.id); if (target) positionTooltip(target, $('tourTooltip')); } });
-  }
-
-  // =======================================================================
-  // Boot
-  // =======================================================================
-  function boot() {
-    bootstrapSchemaStoreIfEmpty();
-    refreshEngine();
-    initTabs();
-    initReadOnlyBuilder();
-    initCrBuilder();
-    initRectifier();
-    initSchemaTab();
-    initSyncTab();
-    initTour();
-    $('globalDialect').addEventListener('change', function () { /* dialect applies at generation time */ });
-    afterSchemaChange();
-    renderSqlResult({ status: 'clarification_needed', message: 'Describe what you need above, or configure a query manually below.' });
-
-    // Offer to load a live shared schema if one is published alongside this app.
-    window.APSQL_SHARED_SCHEMA.fetchSharedSchema('schema/shared-schema.json').then(function (res) {
-      if (res && res.found) {
-        var already = schemaStore.listEntries().some(function (e) { return e.source === 'shared' && JSON.stringify(e.schema) === JSON.stringify(res.schema); });
-        if (!already) {
-          schemaStore.addEntry({ name: (res.schema.schema_name || 'Shared Schema') + ' (live)', schema: res.schema, source: 'shared' });
-          refreshEngine(); afterSchemaChange();
+  function renderDecodeApprovalList() {
+    var el = $('decodeApprovalList'); if (!el) return;
+    if (!APP.pendingDecodeApprovals.length) { el.innerHTML = 'No pending definitions.'; return; }
+    el.innerHTML = '';
+    APP.pendingDecodeApprovals.forEach(function (p, idx) {
+      var row = document.createElement('div'); row.className = 'border rounded p-2 mb-2 d-flex justify-content-between align-items-center';
+      row.innerHTML = '<span><strong>' + esc(p.table) + '.' + esc(p.column) + '</strong> — ' + p.def.cases.length + ' case(s)</span>' +
+        '<div><button class="btn btn-sm btn-success me-1">Approve</button><button class="btn btn-sm btn-outline-danger">Reject</button></div>';
+      row.querySelectorAll('button')[0].addEventListener('click', function () {
+        var def = APP.schemaStore.getEntry(APP.schemaStore.getDefaultId());
+        var t = (def.schema.tables || []).filter(function (tt) { return tt.name.toUpperCase() === p.table.toUpperCase(); })[0];
+        if (t) {
+          var col = (t.columns || []).filter(function (c) { return c.name.toUpperCase() === p.column.toUpperCase(); })[0];
+          if (col) col.decode = p.def;
         }
-      }
-    }).catch(function () { /* no shared schema published — silently ignore */ });
+        APP.schemaStore.updateEntrySchema(def.id, def.schema);
+        APP.pendingDecodeApprovals.splice(idx, 1);
+        onSchemaChanged(); renderDecodeApprovalList();
+      });
+      row.querySelectorAll('button')[1].addEventListener('click', function () { APP.pendingDecodeApprovals.splice(idx, 1); renderDecodeApprovalList(); });
+      el.appendChild(row);
+    });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  function downloadFile(filename, content, mime) {
+    var blob = new Blob([content], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function downloadSampleFormat(fmt) {
+    if (fmt === 'json') downloadFile('ap-sql-sample-schema.json', APSQL_SCHEMA_TOOLS.sampleJson(), 'application/json');
+    else if (fmt === 'csv') downloadFile('ap-sql-sample-schema.csv', APSQL_SCHEMA_TOOLS.sampleCsv(), 'text/csv');
+    else if (fmt === 'xlsx') {
+      if (typeof XLSX === 'undefined') { alert('XLSX library not loaded (no internet connection?).'); return; }
+      var rows = APSQL_SCHEMA_TOOLS.tablesToCsvRows(APSQL_SCHEMA_TOOLS.sampleSchemaObject().tables);
+      var ws = XLSX.utils.aoa_to_sheet(rows); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Schema');
+      XLSX.writeFile(wb, 'ap-sql-sample-schema.xlsx');
+    } else if (fmt === 'doc') {
+      var rows2 = APSQL_SCHEMA_TOOLS.tablesToCsvRows(APSQL_SCHEMA_TOOLS.sampleSchemaObject().tables);
+      downloadFile('ap-sql-sample-schema.doc', rowsToHtmlTableDoc(rows2), 'application/msword');
+    }
+  }
+
+  function rowsToHtmlTableDoc(rows) {
+    var html = '<html><head><meta charset="utf-8"></head><body><table border="1">' +
+      rows.map(function (r, i) { return '<tr>' + r.map(function (c) { return (i === 0 ? '<th>' : '<td>') + esc(c) + (i === 0 ? '</th>' : '</td>'); }).join('') + '</tr>'; }).join('') +
+      '</table></body></html>';
+    return html;
+  }
+
+  function downloadCurrentSchema(fmt) {
+    var entry = APP.schemaStore.getEntry(APP.workingSchemaEntryId);
+    if (!entry) return;
+    var base = (entry.name || 'schema').replace(/\s+/g, '_');
+    if (fmt === 'json') downloadFile(base + '.json', JSON.stringify(entry.schema, null, 2), 'application/json');
+    else if (fmt === 'csv') downloadFile(base + '.csv', APSQL_SCHEMA_TOOLS.rowsToCsvString(APSQL_SCHEMA_TOOLS.tablesToCsvRows(entry.schema.tables)), 'text/csv');
+    else if (fmt === 'xlsx') {
+      if (typeof XLSX === 'undefined') { alert('XLSX library not loaded (no internet connection?).'); return; }
+      var rows = APSQL_SCHEMA_TOOLS.tablesToCsvRows(entry.schema.tables);
+      var ws = XLSX.utils.aoa_to_sheet(rows); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Schema');
+      XLSX.writeFile(wb, base + '.xlsx');
+    } else if (fmt === 'doc') {
+      downloadFile(base + '.doc', rowsToHtmlTableDoc(APSQL_SCHEMA_TOOLS.tablesToCsvRows(entry.schema.tables)), 'application/msword');
+    }
+  }
+
+  function processSchemaImportFile() {
+    var input = $('schemaImportFile');
+    var file = input.files && input.files[0];
+    if (!file) { showAlertBox('schemaImportMessage', 'warning', 'Choose a file first.'); return; }
+    var ext = file.name.split('.').pop().toLowerCase();
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var newSchema;
+        if (ext === 'json') {
+          newSchema = JSON.parse(e.target.result);
+        } else if (ext === 'csv') {
+          newSchema = APSQL_SCHEMA_TOOLS.parseCsvToSchema(e.target.result);
+        } else if (ext === 'xlsx' || ext === 'xls') {
+          if (typeof XLSX === 'undefined') throw new Error('XLSX library not available (no internet connection?).');
+          var wb = XLSX.read(e.target.result, { type: 'binary' });
+          var ws = wb.Sheets[wb.SheetNames[0]];
+          var csvStr = XLSX.utils.sheet_to_csv(ws);
+          newSchema = APSQL_SCHEMA_TOOLS.parseCsvToSchema(csvStr);
+        } else if (ext === 'docx') {
+          if (typeof mammoth === 'undefined') throw new Error('DOCX reader library not available (no internet connection?).');
+          mammoth.extractRawText({ arrayBuffer: e.target.result }).then(function (result) {
+            var csvLike = docxTextToCsv(result.value);
+            finishImport(APSQL_SCHEMA_TOOLS.parseCsvToSchema(csvLike));
+          }).catch(function (err) { showAlertBox('schemaImportMessage', 'danger', 'Could not read .docx: ' + esc(err.message)); });
+          return;
+        } else if (ext === 'doc') {
+          // Only supports the app's own HTML-table-in-.doc export format (round-trip).
+          var text = e.target.result;
+          var tmp = document.createElement('div'); tmp.innerHTML = text;
+          var table = tmp.querySelector('table');
+          if (!table) throw new Error('This .doc file was not produced by AP-SQL Assistant\u2019s own export and cannot be parsed. Please use .json, .csv, or .xlsx for external files.');
+          var rows = Array.prototype.map.call(table.querySelectorAll('tr'), function (tr) {
+            return Array.prototype.map.call(tr.querySelectorAll('th,td'), function (td) { return td.textContent; });
+          });
+          newSchema = APSQL_SCHEMA_TOOLS.csvRowsToTables(rows);
+          newSchema = { schema_name: 'Imported Schema', schema_version: '1.0', module_labels: {}, tables: newSchema };
+        } else {
+          throw new Error('Unsupported file type: .' + ext);
+        }
+        finishImport(newSchema);
+      } catch (err) {
+        showAlertBox('schemaImportMessage', 'danger', 'Import failed: ' + esc(err.message));
+      }
+    };
+    if (ext === 'xlsx' || ext === 'xls') reader.readAsBinaryString(file);
+    else if (ext === 'docx') reader.readAsArrayBuffer(file);
+    else reader.readAsText(file);
+  }
+
+  function docxTextToCsv(text) {
+    // Best-effort: mammoth extracts tab-separated-ish table text; normalize into CSV rows.
+    var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    return lines.map(function (l) { return l.split(/\t|\s{2,}/).join(','); }).join('\n');
+  }
+
+  function finishImport(newSchema) {
+    var v = APSQL_SCHEMA_TOOLS.validateSchema(newSchema.tables || []);
+    var targetEntry = APP.schemaStore.getEntry(APP.workingSchemaEntryId);
+    var diff = APSQL_SCHEMA_TOOLS.diffSchemas(targetEntry ? targetEntry.schema : { tables: [] }, newSchema);
+    $('previewAdded').innerHTML = diff.added.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') || '<li class="text-secondary">None</li>';
+    $('previewRemoved').innerHTML = diff.removed.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') || '<li class="text-secondary">None</li>';
+    $('previewChanged').innerHTML = diff.changed.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') || '<li class="text-secondary">None</li>';
+    $('schemaPreviewPanel').style.display = '';
+    APP.pendingSchemaUpdate = { schema: newSchema, targetEntryId: APP.workingSchemaEntryId };
+    var msgKind = v.valid ? 'success' : 'warning';
+    var msg = v.valid ? 'File parsed successfully.' : ('Parsed with warnings: ' + v.errors.concat(v.warnings).join('; '));
+    showAlertBox('schemaImportMessage', msgKind, msg);
+  }
+
+  function checkLiveSharedSchemaOnLoad() {
+    APSQL_SHARED_SCHEMA_LOADER.checkNow().then(function (r) {
+      if (r.found) {
+        APP.schemaStore.updateEntrySchema(APP.schemaStore.getDefaultId(), r.schema);
+        onSchemaChanged();
+      }
+    });
+  }
+
+  //================================================================
+  // 11. ERROR RECTIFIER
+  //================================================================
+  function wireErrorRectifier() {
+    $('btnRectify').addEventListener('click', function () {
+      var sql = $('rectifierSql').value;
+      var err = $('rectifierError').value;
+      var dialect = $('rectifierDialect').value;
+      if (!sql || !err) { $('rectifierOutput').textContent = '-- Provide both the SQL and the error text.'; return; }
+      var result = APSQL_ERROR_RECTIFIER.rectify(sql, err, APP.effEngine, dialect);
+      $('rectifierOutput').textContent = result.correctedSql;
+      $('rectifierExplanation').innerHTML = (result.changes.length ? '<ul>' + result.changes.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '') + esc(result.explanation);
+    });
+    $('btnRectifierClear').addEventListener('click', function () {
+      $('rectifierSql').value = ''; $('rectifierError').value = ''; $('rectifierOutput').textContent = '-- Corrected SQL will appear here.'; $('rectifierExplanation').innerHTML = '';
+    });
+    $('btnCopyRectifiedSql').addEventListener('click', function () { copyToClipboard($('rectifierOutput').textContent); });
+  }
+
+  //================================================================
+  // 12. GUIDED WALKTHROUGH
+  //================================================================
+  var WALKTHROUGH_STEPS = {
+    home: [
+      { text: 'Welcome to AP-SQL Assistant. This home page summarizes your active schema and links to every major tool.' },
+      { id: 'homeSchemaAreas', text: 'These chips show every module/table area covered by your currently Active schema(s).' }
+    ],
+    readonly: [
+      { id: 'stepDescribe', text: 'Describe What You Need in plain language. Follow-up instructions refine the same query conversationally.' },
+      { id: 'stepGeneratedSql', text: 'Generated SQL appears here, already validated and self-corrected, with a plain-language explanation.' },
+      { id: 'stepManualConfig', text: 'For precise control, use Manual Query Configuration: Select Table, Select Column, Filters, and Advanced Options.' }
+    ],
+    cr: [
+      { id: 'crCommandSelector', text: 'Choose INSERT, UPDATE, or DELETE.' },
+      { id: 'crFilterCard', text: 'UPDATE/DELETE require a WHERE condition unless you explicitly override the safeguard.' }
+    ],
+    'used-schema': [ { id: 'usedSchemaList', text: 'Tick which stored schemas are Active right now — takes effect immediately, no password needed.' } ],
+    'update-schema': [
+      { id: 'updateSchemaLock', text: 'Update Schema is password-protected. Default password: P@assw0rd.' },
+      { id: 'manageSchemaList', text: 'Manage every stored schema here, and pick which one you are currently working with.' }
+    ],
+    rectifier: [ { id: 'rectifierSql', text: 'Paste a database error and the SQL that caused it to get a schema-aware correction.' } ]
+  };
+
+  function wireWalkthrough() {
+    $('btnWalkthrough').addEventListener('click', startWalkthroughForCurrentPage);
+    $('menuRestartWalkthrough').addEventListener('click', function (e) { e.preventDefault(); startWalkthroughForCurrentPage(); });
+    $('walkthroughClose').addEventListener('click', closeWalkthrough);
+    $('walkthroughNext').addEventListener('click', function () { advanceWalkthrough(1); });
+    $('walkthroughPrev').addEventListener('click', function () { advanceWalkthrough(-1); });
+  }
+
+  function currentViewName() {
+    var active = document.querySelector('.app-view.active');
+    return active ? active.id.replace('view-', '') : 'home';
+  }
+
+  function startWalkthroughForCurrentPage() {
+    var page = currentViewName();
+    APP.walkthrough.steps = WALKTHROUGH_STEPS[page] || [{ text: 'No walkthrough steps are defined for this page yet.' }];
+    APP.walkthrough.index = 0;
+    showWalkthroughStep();
+  }
+
+  function showWalkthroughStep() {
+    clearWalkthroughHighlight();
+    var step = APP.walkthrough.steps[APP.walkthrough.index];
+    if (!step) { closeWalkthrough(); return; }
+    $('walkthroughOverlay').style.display = 'block';
+    $('walkthroughTitle').textContent = 'Step ' + (APP.walkthrough.index + 1) + ' of ' + APP.walkthrough.steps.length;
+    $('walkthroughText').textContent = step.text;
+    $('walkthroughProgress').textContent = (APP.walkthrough.index + 1) + ' / ' + APP.walkthrough.steps.length;
+    $('walkthroughPrev').disabled = APP.walkthrough.index === 0;
+    $('walkthroughNext').textContent = (APP.walkthrough.index === APP.walkthrough.steps.length - 1) ? 'Done' : 'Next';
+    if (step.id) {
+      var el = $(step.id);
+      if (el) { el.classList.add('walkthrough-highlight'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    }
+  }
+  function clearWalkthroughHighlight() { document.querySelectorAll('.walkthrough-highlight').forEach(function (el) { el.classList.remove('walkthrough-highlight'); }); }
+  function advanceWalkthrough(delta) {
+    var next = APP.walkthrough.index + delta;
+    if (next >= APP.walkthrough.steps.length) { closeWalkthrough(); return; }
+    if (next < 0) return;
+    APP.walkthrough.index = next;
+    showWalkthroughStep();
+  }
+  function closeWalkthrough() { $('walkthroughOverlay').style.display = 'none'; clearWalkthroughHighlight(); }
+
 })();
