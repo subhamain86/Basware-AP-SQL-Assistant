@@ -1,8 +1,8 @@
 {
   "name": "ap-sql-assistant",
   "private": true,
-  "version": "11.6.0",
-  "description": "AP-SQL Assistant — Version 11.6. Consolidates every capability introduced from V10.7.1 through V11.5 into one stable, tested build: the V10.7 Multiple Schema Store now additionally supports the V11.1 Stored/Active/Default/Inactive state model (multiple schemas can be Active simultaneously, with a merged view used for SQL generation, Query Builders, and the Error Rectifier — Default's tables win on name collisions); the V10.7.1 Secure GitHub Connection Vault anonymous-read fix, the selectable Schema Synchronization Schedule, and operational password management (with a non-disclosing Forgot Password reset) are all retained and retested; the compact, responsive UI pass (V11.1–V11.3.1) keeps the navbar, Query Builders, and Update Schema screen usable at every viewport width; and the intelligent Describe What You Need engine, structured Query Builder, CR Builder, schema-aware CASE/DECODE, and Error Rectifier are unchanged in behavior from the real, tested V10.7.1 baseline this build was consolidated from.",
+  "version": "11.7.0",
+  "description": "AP-SQL Assistant — Version 11.7. Restores the application UI to the original Version 10.7.1 visual design (navbar, 3D logo badge, cards, gradients, signature) verbatim, while retaining every feature consolidated through Version 11.5 underneath it: the V10.7 Multiple Schema Store, the V11.1 additive Stored/Active/Default/Inactive schema state model, the V10.7.1 Secure GitHub Connection Vault (with its anonymous-read fix), the selectable Schema Synchronization Schedule, and operational password management with a non-disclosing Forgot Password reset.",
   "scripts": {
     "test": "node test/run-all.js"
   },

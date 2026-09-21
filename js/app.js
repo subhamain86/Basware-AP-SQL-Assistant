@@ -2,18 +2,6 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
-  /* ================================================================
-     V10.7: MULTIPLE SCHEMA STORE — replaces the single "currentSchema"
-     global with a managed collection of named entries. Migrates any
-     pre-V10.7 single-schema localStorage value into the new store on
-     first load, so nothing existing breaks.
-     V11.1: schema-store-engine.js now ADDITIVELY supports Stored /
-     Active / Default / Inactive states (multiple schemas can be Active
-     at once; getActiveSchema() resolves to the MERGED view of every
-     Active schema, Default's tables winning on collisions) — every
-     call site below that used the V10.7 single-schema API keeps
-     working completely unchanged.
-     ================================================================ */
   var LEGACY_SCHEMA_STORAGE_KEY = 'ap_sql_active_schema_v1';
   var schemaStore = APSQL_SCHEMA_STORE.createStore();
   (function migrateOrSeed() {
@@ -25,7 +13,7 @@
         var parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.tables) && window.APSQL_SCHEMA_TOOLS.validateSchema(parsed.tables).valid) legacySchema = parsed;
       }
-    } catch (e) { /* ignore corrupted legacy value */ }
+    } catch (e) {}
     if (legacySchema) {
       schemaStore.importLegacySingleSchema(legacySchema, legacySchema.schema_name || 'Migrated Schema');
     } else {
@@ -42,13 +30,7 @@
   function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); }
   rebuildEngine();
   var decodeStore = APSQL_DECODE.createDecodeStore();
-  /* ================================================================
-     LIVE SHARED SCHEMA — zero-config auto-load (applies to the ACTIVE
-     schema entry)
-     ================================================================ */
-  var sharedSchemaChecked = false;
-  var sharedSchemaFound = false;
-  var sharedSchemaError = null;
+  var sharedSchemaChecked = false, sharedSchemaFound = false, sharedSchemaError = null;
   var SHARED_SCHEMA_PATH = APSQL_SHARED_SCHEMA.DEFAULT_SHARED_SCHEMA_PATH;
   function renderSharedSchemaStrip(elId) {
     var el = $(elId); if (!el) return;
@@ -93,10 +75,6 @@
   }
   renderAllSharedSchemaStrips();
   checkSharedSchema(false);
-  /* ================================================================
-     CROSS-DEVICE SCHEMA SYNC — OPTION A: File System Access API
-     (operates on the currently active/targeted schema entry)
-     ================================================================ */
   var syncSupported = APSQL_SYNC.isFileSystemAccessSupported(window);
   var syncHandleStore = syncSupported ? APSQL_SYNC.createHandleStore() : null;
   var linkedHandle = null, linkedFileName = null, lastKnownFileModified = null;
@@ -181,9 +159,6 @@
       return APSQL_SYNC.verifyPermissionSilent(handle, 'read').then(function (granted) { if (!granted) { syncNeedsReconnect = true; renderSyncStatus(); return; } return checkLinkedFileForUpdates(false).then(function () { renderSyncStatus(); }); });
     }).catch(function () { renderSyncStatus(); });
   } else { renderSyncStatus(); }
-  /* ================================================================
-     CROSS-DEVICE SCHEMA SYNC — OPTION B: GitHub (administrator-facing)
-     ================================================================ */
   var githubConfigStore = APSQL_GITHUB_SYNC.createConfigStore();
   var githubConfig = null, githubLastSha = null, githubError = null, githubConflict = false, githubLastCheckedAt = null;
   function renderGithubSyncStatus(transientNote) {
@@ -253,9 +228,6 @@
     checkGithubForUpdates(false).then(function () { renderGithubSyncStatus(); });
   })();
   (function defaultGithubPathToSharedPath() { var pathInput = $('githubPathInput'); if (pathInput && !pathInput.value) pathInput.value = SHARED_SCHEMA_PATH; })();
-  /* ================================================================
-     V10.7: SELECTABLE SCHEMA SYNCHRONIZATION SCHEDULE
-     ================================================================ */
   var syncScheduleSelectedId = APSQL_SYNC_SCHEDULE.loadSelectedOptionId();
   var syncIntervalHandle = null;
   function runAllAutomaticSyncChecks() {
@@ -285,9 +257,6 @@
     applySyncScheduleInterval();
     renderSyncScheduleSelect();
   });
-  /* ================================================================
-     V10.7 (fixed in V10.7.1): SECURE GITHUB CONNECTION VAULT
-     ================================================================ */
   function renderVaultStatus(transientNote, level) {
     var box = $('vaultStatusBody'); if (!box) return;
     var lvl = level || 'unset';
@@ -350,13 +319,10 @@
       resultBox.innerHTML = '<div class="alert alert-danger py-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(err.message) + '</div>';
     });
   });
-  /* ================================================================
-     V10.7: OPERATIONAL PASSWORD MANAGEMENT
-     ================================================================ */
   var passwordManager = APSQL_PASSWORD_MANAGER.createPasswordManager();
   function renderPasswordCustomNote() {
     var note = $('passwordCustomStatusNote'); if (!note) return;
-    note.textContent = passwordManager.isCustomPasswordSet() ? '(A custom password is currently set in this browser.)' : '(Currently using the default password for this browser.)';
+    note.textContent = passwordManager.isCustomPasswordSet() ? 'A custom password is currently set in this browser.' : 'Currently using the default password for this browser. Change the password required to unlock this Update Schema section, in this browser.';
   }
   renderPasswordCustomNote();
   $('changePasswordBtn').addEventListener('click', function () {
@@ -383,19 +349,9 @@
     el.innerHTML = '<i class="bi bi-hdd-fill"></i><span>Currently working with <strong>' + esc(entry ? entry.name : 'an unnamed schema') + '</strong> (' + schemaStore.count() + ' schema' + (schemaStore.count() === 1 ? '' : 's') + ' stored in this browser). Applying an update or deleting content is saved automatically from now on.</span>';
   }
   renderSchemaPersistenceStatus();
-  /* ================================================================
-     V10.7: Stored-schema management UI (Used Schema + Update Schema)
-     V11.1: ADDITIVE — each row now also shows Default / Active / Inactive
-     state, Used Schema gains a per-row Active checkbox (multi-select,
-     no password required — takes effect immediately), and Update Schema
-     gains two new admin-only cards: "Select Default Schema" (single choice)
-     and "Select Active Schemas" (multi-select with a Save button). The
-     original V10.7 single "Set Active" button is preserved unchanged.
-     ================================================================ */
   function syncStatusBadgeClass(status) { return 'status-' + (status || 'idle'); }
   function schemaStateBadgeHtml(state) {
-    var cls = state === 'default' ? 'text-bg-success' : (state === 'active' ? 'text-bg-primary' : 'text-bg-secondary');
-    return '<span class="badge ' + cls + ' schema-store-active-badge text-uppercase">' + state + '</span>';
+    return '<span class="badge schema-state-badge state-' + state + ' text-uppercase">' + state + '</span>';
   }
   function renderSchemaStoreList() {
     var box = $('schemaStoreList'); if (!box) return;
@@ -407,7 +363,7 @@
       var st = APSQL.createEngine(e.schema).getStatus();
       var isActive = e.id === activeId;
       var schemaState = schemaStore.getSchemaState(e.id);
-      var item = document.createElement('div'); item.className = 'schema-store-item' + (schemaStore.isDefault(e.id) ? ' active' : ''); item.setAttribute('data-entry-id', e.id);
+      var item = document.createElement('div'); item.className = 'schema-store-item' + (schemaStore.isDefault(e.id) ? ' active default' : ''); item.setAttribute('data-entry-id', e.id);
       var main = document.createElement('div'); main.className = 'schema-store-item-main';
       var nameLine = document.createElement('div'); nameLine.className = 'schema-store-item-name';
       nameLine.innerHTML = '<i class="bi bi-database"></i> ' + esc(e.name) + ' ' + schemaStateBadgeHtml(schemaState);
@@ -415,11 +371,6 @@
       metaLine.innerHTML = '<span>Version: ' + esc(st.schemaVersion || '\u2014') + '</span><span>Source: ' + esc(e.source) + '</span><span>Tables: ' + st.tableCount + '</span><span>Last sync: ' + (e.lastSyncAt ? new Date(e.lastSyncAt).toLocaleString() : 'never') + '</span><span class="schema-store-sync-badge ' + syncStatusBadgeClass(e.lastSyncStatus) + '">Sync status: ' + esc(e.lastSyncStatus) + (e.lastSyncError ? ' (' + esc(e.lastSyncError) + ')' : '') + '</span>';
       main.appendChild(nameLine); main.appendChild(metaLine);
       var actions = document.createElement('div'); actions.className = 'schema-store-item-actions';
-      /* V11.1: a per-row "Active" checkbox — ticking/unticking takes effect
-         immediately (no password), and instantly updates SQL generation,
-         both Query Builders, and the Error Rectifier. The Default schema's
-         checkbox is always checked and disabled (it can't be deactivated
-         directly — change the Default first in Update Schema). */
       var activeToggleWrap = document.createElement('div'); activeToggleWrap.className = 'form-check form-switch schema-store-active-toggle';
       var activeToggle = document.createElement('input'); activeToggle.type = 'checkbox'; activeToggle.className = 'form-check-input'; activeToggle.checked = schemaStore.isActive(e.id); activeToggle.disabled = schemaStore.isDefault(e.id);
       var activeToggleLabel = document.createElement('label'); activeToggleLabel.className = 'form-check-label small'; activeToggleLabel.textContent = 'Active';
@@ -484,7 +435,6 @@
       if (deleteStoredSchemaModal) deleteStoredSchemaModal.hide();
     });
   });
-  /* ---- V11.1: Update Schema — Select Default Schema / Select Active Schemas ---- */
   function renderDefaultActiveSchemaChoices() {
     var defaultBox = $('defaultSchemaChoices'); var activeBox = $('activeSchemaChoices');
     if (!defaultBox || !activeBox) return;
@@ -520,8 +470,6 @@
   });
   function moduleLabels() { return engine.getModuleLabels(); }
   function allTables() { return engine.getAllTables().slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }); }
-  function syncNavbarOffset() { var navbar = $('mainNavbar'); if (!navbar) return; document.documentElement.style.setProperty('--navbar-h', navbar.offsetHeight + 'px'); }
-  syncNavbarOffset(); window.addEventListener('resize', syncNavbarOffset); window.addEventListener('load', syncNavbarOffset);
   var THEME_KEY = 'ap_sql_theme';
   function systemPrefersDark() { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches; }
   function applyTheme(choice) { document.documentElement.setAttribute('data-bs-theme', choice === 'auto' ? (systemPrefersDark() ? 'dark' : 'light') : choice); }
@@ -532,13 +480,13 @@
   function closeMenu() { if (offcanvasInstance) offcanvasInstance.hide(); }
   var currentView = 'quickstart';
   function showView(view) {
-    document.querySelectorAll('.offcanvas-body > button.nav-link, .menu-submenu .nav-link').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === view); });
+    document.querySelectorAll('.offcanvas-body > button.nav-link, .menu-submenu .nav-link, [data-view]').forEach(function (b) { if (b.hasAttribute && b.hasAttribute('data-view')) b.classList.toggle('active', b.getAttribute('data-view') === view); });
     document.querySelectorAll('.app-view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
     window.scrollTo(0, 0);
     currentView = view;
     if (view === 'usedschema') { renderUsedSchema(); renderSchemaStoreList(); }
   }
-  document.querySelectorAll('[data-view]').forEach(function (b) { b.addEventListener('click', function () { showView(b.getAttribute('data-view')); closeMenu(); }); });
+  document.querySelectorAll('[data-view]').forEach(function (b) { b.addEventListener('click', function (e) { e.preventDefault(); showView(b.getAttribute('data-view')); closeMenu(); }); });
   function makeCollapsible(toggleId, submenuId) { var toggle = $(toggleId), submenu = $(submenuId); toggle.addEventListener('click', function () { toggle.classList.toggle('open'); submenu.classList.toggle('open'); }); }
   makeCollapsible('queryBuilderMenuToggle', 'queryBuilderSubmenu'); makeCollapsible('schemaMenuToggle', 'schemaSubmenu'); makeCollapsible('themeMenuToggle', 'themeSubmenu');
   document.querySelectorAll('#manualTabs .nav-link').forEach(function (t) { t.addEventListener('click', function () { var name = t.getAttribute('data-tab'); document.querySelectorAll('#manualTabs .nav-link').forEach(function (x) { x.classList.toggle('active', x === t); }); document.querySelectorAll('.tab-pane-manual').forEach(function (p) { var show = p.id === 'pane-' + name; p.classList.toggle('d-none', !show); p.classList.toggle('active', show); }); if (name === 'requirements') renderRequirementsSummary(); }); });
@@ -693,8 +641,8 @@
     containerEl.innerHTML = '';
     var colOptions = columnOptionsForTables(availableTables);
     filterGroup.conditions.forEach(function (cond, idx) {
-      var row = document.createElement('div'); row.className = 'filter-condition-row' + (idx === 0 ? ' first-condition' : '');
-      var joinSel = document.createElement('select'); joinSel.className = 'form-select form-select-sm join-select'; joinSel.innerHTML = '<option value="AND">AND</option><option value="OR">OR</option>'; joinSel.value = cond.join || 'AND';
+      var row = document.createElement('div'); row.className = 'filter-condition-row d-flex flex-wrap gap-2 align-items-center mb-2';
+      var joinSel = document.createElement('select'); joinSel.className = 'form-select form-select-sm join-select'; joinSel.style.maxWidth = '80px'; joinSel.innerHTML = '<option value="AND">AND</option><option value="OR">OR</option>'; joinSel.value = cond.join || 'AND';
       joinSel.addEventListener('change', function () { cond.join = joinSel.value; onChange(); });
       var colSel = document.createElement('select'); colSel.className = 'form-select form-select-sm filter-col-select';
       colSel.innerHTML = colOptions.map(function (o) { var val = o.table + '.' + o.column; return '<option value="' + val + '">' + o.table + '.' + o.column + '</option>'; }).join('');
@@ -704,19 +652,14 @@
       opSel.innerHTML = APSQL_FILTER.OPERATORS.map(function (o) { return '<option value="' + o.id + '">' + o.label + '</option>'; }).join(''); opSel.value = cond.operator;
       var valInput = document.createElement('input'); valInput.className = 'form-control form-control-sm filter-value-input'; valInput.placeholder = 'Value'; valInput.value = cond.value || '';
       var val2Input = document.createElement('input'); val2Input.className = 'form-control form-control-sm filter-value2-input'; val2Input.placeholder = 'and...'; val2Input.value = cond.value2 || '';
-      var multiHint = document.createElement('div'); multiHint.className = 'multi-value-hint d-none'; multiHint.textContent = 'Separate multiple values with commas, e.g. 10, 20, 40';
-      function refreshArity() { var op = APSQL_FILTER.getOperator(opSel.value); valInput.style.display = op.arity >= 1 ? '' : 'none'; val2Input.style.display = op.arity === 2 ? '' : 'none'; var isMulti = !!op.multi; valInput.classList.toggle('multi-value', isMulti); valInput.placeholder = isMulti ? 'value1, value2, value3, ...' : 'Value'; multiHint.classList.toggle('d-none', !isMulti); }
+      function refreshArity() { var op = APSQL_FILTER.getOperator(opSel.value); valInput.style.display = op.arity >= 1 ? '' : 'none'; val2Input.style.display = op.arity === 2 ? '' : 'none'; var isMulti = !!op.multi; valInput.placeholder = isMulti ? 'value1, value2, value3, ...' : 'Value'; }
       opSel.addEventListener('change', function () { cond.operator = opSel.value; refreshArity(); onChange(); });
       valInput.addEventListener('input', function () { cond.value = valInput.value; });
       val2Input.addEventListener('input', function () { cond.value2 = val2Input.value; });
       refreshArity();
-      var toolbar = document.createElement('div'); toolbar.className = 'd-flex gap-1 filter-remove-btn';
-      var dupBtn = document.createElement('button'); dupBtn.type = 'button'; dupBtn.className = 'btn btn-outline-secondary btn-sm'; dupBtn.title = 'Duplicate'; dupBtn.textContent = '\u29C9';
-      dupBtn.addEventListener('click', function () { var copy = APSQL_FILTER.duplicateCondition(cond); filterGroup.conditions.splice(idx + 1, 0, copy); onChange(); renderFilterGroup(containerEl, filterGroup, availableTables, onChange); });
-      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm'; rmBtn.title = 'Remove'; rmBtn.textContent = '\u00d7';
+      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm'; rmBtn.textContent = '\u00d7';
       rmBtn.addEventListener('click', function () { filterGroup.conditions.splice(idx, 1); onChange(); renderFilterGroup(containerEl, filterGroup, availableTables, onChange); });
-      toolbar.appendChild(dupBtn); toolbar.appendChild(rmBtn);
-      row.appendChild(joinSel); row.appendChild(colSel); row.appendChild(opSel); row.appendChild(valInput); row.appendChild(val2Input); row.appendChild(toolbar); row.appendChild(multiHint);
+      row.appendChild(joinSel); row.appendChild(colSel); row.appendChild(opSel); row.appendChild(valInput); row.appendChild(val2Input); row.appendChild(rmBtn);
       containerEl.appendChild(row);
     });
     if (!colOptions.length) containerEl.innerHTML = '<p class="text-body-secondary small mb-0">Select at least one table first to build filter conditions.</p>';
@@ -786,7 +729,7 @@
     if (!colOptions.length) { container.innerHTML = '<p class="multi-row-empty">Select at least one table on the Tables &amp; Columns tab first.</p>'; return; }
     if (!sortRows.length) { container.innerHTML = '<p class="multi-row-empty">No sort columns added yet \u2014 results will be shown in default order.</p>'; return; }
     sortRows.forEach(function (row, idx) {
-      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row';
+      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row d-flex gap-2 align-items-center mb-2';
       var colSel = document.createElement('select'); colSel.className = 'form-select form-select-sm filter-col-select';
       colSel.innerHTML = colOptions.map(function (o) { var val = o.table + '.' + o.column; return '<option value="' + val + '">' + o.table + '.' + o.column + '</option>'; }).join('');
       colSel.value = (row.table ? row.table + '.' : '') + row.column;
@@ -794,7 +737,7 @@
       var dirSel = document.createElement('select'); dirSel.className = 'form-select form-select-sm filter-op-select';
       dirSel.innerHTML = '<option value="ASC">Smallest / earliest first</option><option value="DESC">Largest / latest first</option>'; dirSel.value = row.direction || 'ASC';
       dirSel.addEventListener('change', function () { row.direction = dirSel.value; });
-      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm filter-remove-btn'; rmBtn.textContent = '\u00d7';
+      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm'; rmBtn.textContent = '\u00d7';
       rmBtn.addEventListener('click', function () { sortRows.splice(idx, 1); renderSortRows(); });
       rowEl.appendChild(colSel); rowEl.appendChild(dirSel); rowEl.appendChild(rmBtn); container.appendChild(rowEl);
     });
@@ -807,7 +750,7 @@
     var tbls = allTables();
     if (!existsRows.length) { container.innerHTML = '<p class="multi-row-empty">No related-table checks added yet.</p>'; return; }
     existsRows.forEach(function (row, idx) {
-      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row';
+      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row d-flex gap-2 align-items-center mb-2';
       var tblSel = document.createElement('select'); tblSel.className = 'form-select form-select-sm filter-col-select';
       tblSel.innerHTML = tbls.map(function (t) { return '<option value="' + t.name + '">' + t.name + '</option>'; }).join(''); tblSel.value = row.relatedTable || (tbls[0] ? tbls[0].name : '');
       tblSel.addEventListener('change', function () { row.relatedTable = tblSel.value; });
@@ -816,7 +759,7 @@
       negCb.addEventListener('change', function () { row.negate = negCb.checked; });
       var negLabel = document.createElement('label'); negLabel.className = 'form-check-label multi-row-remove-label'; negLabel.textContent = 'Opposite (no match)';
       negWrap.appendChild(negCb); negWrap.appendChild(negLabel);
-      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm filter-remove-btn'; rmBtn.textContent = '\u00d7';
+      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm'; rmBtn.textContent = '\u00d7';
       rmBtn.addEventListener('click', function () { existsRows.splice(idx, 1); renderExistsRows(); });
       rowEl.appendChild(tblSel); rowEl.appendChild(negWrap); rowEl.appendChild(rmBtn); container.appendChild(rowEl);
     });
@@ -829,12 +772,12 @@
     var tbls = allTables();
     if (!scalarRows.length) { container.innerHTML = '<p class="multi-row-empty">No related counts added yet.</p>'; return; }
     scalarRows.forEach(function (row, idx) {
-      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row';
+      var rowEl = document.createElement('div'); rowEl.className = 'filter-condition-row d-flex gap-2 align-items-center mb-2';
       var tblSel = document.createElement('select'); tblSel.className = 'form-select form-select-sm filter-col-select';
       tblSel.innerHTML = tbls.map(function (t) { return '<option value="' + t.name + '">' + t.name + '</option>'; }).join(''); tblSel.value = row.relatedTable || (tbls[0] ? tbls[0].name : '');
       tblSel.addEventListener('change', function () { row.relatedTable = tblSel.value; });
       var label = document.createElement('span'); label.className = 'small text-body-secondary'; label.textContent = 'Count of matching records';
-      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm filter-remove-btn'; rmBtn.textContent = '\u00d7';
+      var rmBtn = document.createElement('button'); rmBtn.type = 'button'; rmBtn.className = 'btn btn-outline-danger btn-sm'; rmBtn.textContent = '\u00d7';
       rmBtn.addEventListener('click', function () { scalarRows.splice(idx, 1); renderScalarRows(); });
       rowEl.appendChild(tblSel); rowEl.appendChild(label); rowEl.appendChild(rmBtn); container.appendChild(rowEl);
     });
@@ -1141,7 +1084,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap ? new window.bootstrap.Modal(aboutModalEl) : null;
   $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.6'], ['Purpose', 'Consolidates every capability introduced from V10.7.1 through V11.5 into one stable build: multiple schemas can be stored, made Active (multiple simultaneously) or set as the single Default, and independently synchronized; the GitHub connection can be encrypted and shared across machines via a passphrase-protected vault; the synchronization schedule is selectable; the operational password can be changed; and the compact, redesigned Read Only / CR Query Builders retain the intelligent Describe What You Need engine, CASE/DECODE, and the Error Rectifier.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.7'], ['Purpose', 'Version 11.7 restores the application UI to the original Version 10.7.1 visual design (navbar, cards, 3D logo badge, signature, gradients) while retaining every feature consolidated through Version 11.5 underneath it: multiple stored schemas with independent Default/Active/Inactive states, the encrypted GitHub connection vault, a selectable synchronization schedule, and operational password management. Describe What You Need remains an intelligent, schema-aware assistant, and the structured Query Builder remains fully available for precise manual control.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
   var WORKFLOW_STEPS = ['Upload Document', 'Read Document', 'Detect Format', 'Detect Modules', 'Detect Tables', 'Detect Columns', 'Extract Metadata', 'Normalize Schema', 'Validate Schema', 'Show Preview', 'User Reviews Changes', 'Generate JSON', 'Validate JSON', 'Apply Schema Update'];
@@ -1166,7 +1109,7 @@
   $('downloadDocxSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleDocxBlob(), 'sample-schema.docx'); });
   $('downloadXlsxSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleXlsxBlob(), 'sample-schema.xlsx'); });
   $('downloadDocSampleBtn').addEventListener('click', function () { triggerDownload(window.APSQL_SCHEMA_TOOLS.buildSampleDocBlob(), 'sample-schema.doc'); });
-  $('toggleExpectedStructureBtn').addEventListener('click', function () { var box = $('expectedStructureBox'); var btn = $('toggleExpectedStructureBtn'); box.classList.toggle('d-none'); btn.innerHTML = box.classList.contains('d-none') ? '<i class="bi bi-search me-1"></i>View Expected Structure' : '<i class="bi bi-search me-1"></i>Hide Expected Structure'; });
+  $('toggleExpectedStructureBtn').addEventListener('click', function () { var box = $('expectedStructureBox'); box.classList.toggle('d-none'); });
   var pendingIncomingTables = null;
   $('updateSchemaFileInput').addEventListener('change', function () { $('unsupportedFormatError').classList.add('d-none'); var file = $('updateSchemaFileInput').files && $('updateSchemaFileInput').files[0]; if (!file) return; if (!window.APSQL_SCHEMA_TOOLS.detectFormat(file.name)) { $('unsupportedFormatError').textContent = 'Unsupported file format. Please upload a .json or .csv file.'; $('unsupportedFormatError').classList.remove('d-none'); $('updateSchemaFileInput').value = ''; } });
   $('updateSchemaProcessBtn').addEventListener('click', function () {

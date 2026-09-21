@@ -1,30 +1,29 @@
 /**
  * schema-store-engine.js — AP-SQL Assistant
- * V10.7   — Manages MULTIPLE named, independently-stored schemas. Each entry
- *           tracks its own metadata (name, version, source, last/next sync
- *           time, sync status) so Used Schema / Update Schema can display
- *           and act on them independently; a sync failure on one schema
- *           never affects any other (each entry's status is isolated).
- * V11.1   — ADDITIVE multi-schema state model layered on top, without
- *           changing any V10.7/V10.7.1 method's existing behavior:
- *             Stored   — exists in the repository (every listed entry)
- *             Active   — included in SQL generation / both Query Builders /
- *                        Error Rectifier (a schema can be Active without
- *                        being Default; multiple schemas can be Active at
- *                        once — a merged view of every Active schema's
- *                        tables is used, with the Default schema's tables
- *                        winning on name collisions)
- *             Default  — the one schema that Live Shared Schema / linked-
- *                        file sync / GitHub sync automatically update; the
- *                        Default schema is always included in the Active
- *                        set and can't be deactivated directly (change the
- *                        Default first). getActiveId()/getActiveSchema()
- *                        (V10.7.1 single-schema API) now resolve to the
- *                        Default schema / the merged Active view
- *                        respectively, so every pre-V11.1 call site keeps
- *                        working unmodified.
- *             Inactive — stored but currently excluded from use — nothing
- *                        is ever deleted by deactivating a schema.
+ * V10.7 — Manages MULTIPLE named, independently-stored schemas. Each entry
+ *         tracks its own metadata (name, version, source, last/next sync
+ *         time, sync status) so Used Schema / Update Schema can display
+ *         and act on them independently; a sync failure on one schema
+ *         never affects any other (each entry's status is isolated).
+ * V11.1 — ADDITIVE multi-schema state model layered on top, without
+ *         changing any V10.7/V10.7.1 method's existing behavior:
+ *           Stored   — exists in the repository (every listed entry)
+ *           Active   — included in SQL generation / both Query Builders /
+ *                      Error Rectifier (a schema can be Active without
+ *                      being Default; multiple schemas can be Active at
+ *                      once — a merged view of every Active schema's
+ *                      tables is used, with the Default schema's tables
+ *                      winning on name collisions)
+ *           Default  — the one schema Live Shared Schema / linked-file
+ *                      sync / GitHub sync automatically update; always
+ *                      included in the Active set and can't be
+ *                      deactivated directly (change the Default first).
+ *                      getActiveId()/getActiveSchema() (the V10.7.1
+ *                      single-schema API) now resolve to the Default
+ *                      schema / the merged Active view respectively, so
+ *                      every pre-V11.1 call site keeps working unmodified.
+ *           Inactive — stored but currently excluded from use — nothing
+ *                      is ever deleted by deactivating a schema.
  */
 (function (root) {
   'use strict';
@@ -113,9 +112,6 @@
     function getActiveId() { return state.defaultId; }
     function getActiveEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
     function getActiveSchema() {
-      // V11.1: resolves to the MERGED view of every Active schema (a strict
-      // superset of the old single-schema behavior — every table that used
-      // to be visible still is, plus any from other Active schemas).
       var merged = getMergedActiveSchema();
       return merged && merged.tables.length ? merged : (getActiveEntry() ? getActiveEntry().schema : null);
     }
@@ -164,7 +160,7 @@
     }
     function setEntryActive(id, active) {
       if (!getEntry(id)) return false;
-      if (!active && id === state.defaultId) return false; // Default is always Active; change Default first
+      if (!active && id === state.defaultId) return false;
       var idx = state.activeIds.indexOf(id);
       if (active && idx === -1) state.activeIds.push(id);
       if (!active && idx !== -1) state.activeIds.splice(idx, 1);
@@ -190,13 +186,11 @@
     }
 
     return {
-      // V10.7 / V10.7.1 API (unchanged signatures/behavior)
       count: count, listEntries: listEntries, getEntry: getEntry,
       addEntry: addEntry, updateEntry: updateEntry, renameEntry: renameEntry, removeEntry: removeEntry,
       getActiveId: getActiveId, getActiveEntry: getActiveEntry, getActiveSchema: getActiveSchema, setActiveId: setActiveId,
       recordSyncResult: recordSyncResult, importLegacySingleSchema: importLegacySingleSchema,
       persist: persist,
-      // V11.1 additive multi-schema API
       isDefault: isDefault, isActive: isActive, getSchemaState: getSchemaState,
       setDefaultId: setDefaultId, setEntryActive: setEntryActive,
       getDefaultId: getDefaultId, getActiveIds: getActiveIds, getMergedActiveSchema: getMergedActiveSchema

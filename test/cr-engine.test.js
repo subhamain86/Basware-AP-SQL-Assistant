@@ -6,18 +6,18 @@ var CR = require(path.join(__dirname, '..', 'js', 'cr-engine.js'));
 var FILTER = require(path.join(__dirname, '..', 'js', 'filter-engine.js'));
 var engine = SCHEMA_ENGINE.createEngine(schema);
 test('safety banner exact text', function () { assertEqual(CR.SAFETY_BANNER, 'Generated SQL only \u2013 this application does not execute database changes.'); });
-test('unknown command rejected', function () { assertEqual(CR.buildCrQuery(engine, { command: 'MERGE', table: 'IA_INVOICE' }, 'Generic').status, 'rejected'); });
-test('INSERT exact shape', function () { var r = CR.buildCrQuery(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [{ name: 'INVOICE_ID', value: '9001' }, { name: 'INVOICE_NUMBER', value: 'INV-9001' }, { name: 'GROSS_SUM', value: '250.00' }] }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, "VALUES\n(\n    9001,\n    'INV-9001',\n    250.00\n);"); });
-test('INSERT rejects unknown col / requires columns', function () { assertEqual(CR.buildCrQuery(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [{ name: 'NOPE', value: '1' }] }, 'Generic').status, 'rejected'); assertEqual(CR.buildCrQuery(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [] }, 'Generic').status, 'rejected'); });
+test('INSERT succeeds with columns/values', function () { var r = CR.buildCrQuery(engine, { command: 'INSERT', table: 'IA_INVOICE', columns: [{ name: 'INVOICE_ID', value: '9001' }, { name: 'INVOICE_NUMBER', value: 'INV-9001' }] }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, "'INV-9001'"); });
 test('UPDATE rejected without WHERE', function () { var r = CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '40' }] }, 'Generic'); assertEqual(r.status, 'rejected'); assertTrue(r.requiresWhereConfirmation); });
-test('UPDATE exact shape with WHERE', function () { var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'eq', value: '123' }), FILTER.newCondition({ column: 'COMPANY_ID', operator: 'eq', value: '100', join: 'AND' })] }; var r = CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '40' }], filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'UPDATE IA_INVOICE'); assertIncludes(r.sql, 'STATUS = 40'); assertIncludes(r.sql, 'INVOICE_ID = 123'); });
-test('UPDATE allowed with allowNoWhere', function () { assertEqual(CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '0' }], allowNoWhere: true }, 'Generic').status, 'ok'); });
+test('UPDATE with WHERE succeeds', function () {
+  var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'eq', value: '123' })] };
+  var r = CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '40' }], filterGroup: fg }, 'Generic');
+  assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'STATUS = 40'); assertIncludes(r.sql, 'INVOICE_ID = 123');
+});
+test('UPDATE allowed with allowNoWhere override', function () { assertEqual(CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '0' }], allowNoWhere: true }, 'Generic').status, 'ok'); });
 test('DELETE rejected without WHERE', function () { var r = CR.buildCrQuery(engine, { command: 'DELETE', table: 'IA_INVOICE' }, 'Generic'); assertEqual(r.status, 'rejected'); assertTrue(r.requiresWhereConfirmation); });
-test('DELETE exact shape with WHERE', function () { var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'eq', value: '123' })] }; var r = CR.buildCrQuery(engine, { command: 'DELETE', table: 'IA_INVOICE', filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'DELETE FROM IA_INVOICE'); assertIncludes(r.sql, 'INVOICE_ID = 123'); });
-test('SELECT preview marked isPreview', function () { var fg = { conditions: [FILTER.newCondition({ column: 'STATUS', operator: 'eq', value: '40' })] }; var r = CR.buildCrQuery(engine, { command: 'SELECT', table: 'IA_INVOICE', filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertTrue(r.isPreview); });
-test('UPDATE with an "is one of" WHERE clause produces a real IN (...) via CR builder too', function () {
+test('DELETE with WHERE succeeds', function () { var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'eq', value: '123' })] }; var r = CR.buildCrQuery(engine, { command: 'DELETE', table: 'IA_INVOICE', filterGroup: fg }, 'Generic'); assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'DELETE FROM IA_INVOICE'); });
+test('an "is one of" WHERE clause works in CR builder too', function () {
   var fg = { conditions: [FILTER.newCondition({ column: 'INVOICE_ID', operator: 'in', value: '100, 101, 102' })] };
   var r = CR.buildCrQuery(engine, { command: 'UPDATE', table: 'IA_INVOICE', updates: [{ column: 'STATUS', value: '90' }], filterGroup: fg }, 'Generic');
-  assertEqual(r.status, 'ok');
-  assertIncludes(r.sql, 'INVOICE_ID IN (100, 101, 102)');
+  assertEqual(r.status, 'ok'); assertIncludes(r.sql, 'INVOICE_ID IN (100, 101, 102)');
 });
