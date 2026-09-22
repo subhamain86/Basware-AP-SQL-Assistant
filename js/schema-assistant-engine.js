@@ -1,14 +1,16 @@
 /**
- * schema-assistant-engine.js — AP-SQL Assistant
+ * schema-assistant-engine.js — AP-SQL Assistant V11.8
  * AI Schema Assistant. Answers plain-language questions about the active
  * schema strictly from schema metadata that already exists (table notes,
  * column descriptions, PK/FK, decode definitions) — never invented. Every
- * answer is tagged with where the fact came from.
+ * answer is tagged with where the fact came from, so schema-derived facts
+ * are always clearly distinguished from any interpretive narration.
  */
 (function (root) {
   'use strict';
   function up(s) { return String(s || '').toUpperCase(); }
   function tokenize(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').split(' ').filter(Boolean); }
+
   function findMentionedTable(question, engine) {
     var qUpper = up(question);
     var tables = engine.getAllTables();
@@ -20,7 +22,7 @@
     tables.forEach(function (t) {
       var bare = t.name.replace(/^[A-Z]+_/, '').toLowerCase();
       var score = qWords.filter(function (w) { return bare.indexOf(w) !== -1 || w.indexOf(bare) !== -1; }).length;
-      if (score > bestScore) { best = t; bestScore = score; }
+      if (score > bestScore) { bestScore = score; best = t; }
     });
     return bestScore > 0 ? best : null;
   }
@@ -47,7 +49,7 @@
     if (incoming.length) facts.push({ fact: 'Referenced by', value: incoming.join(', ') });
     facts.push({ fact: 'Column count', value: String(table.columns.length) });
     var narrative = table.notes
-      ? ('Based on the schema description, ' + table.name + ' ' + (/[A-Z]/.test(table.notes) ? table.notes.charAt(0).toLowerCase() + table.notes.slice(1) : table.notes) + '.')
+      ? ('Based on the schema description, ' + table.name + ' ' + (/^[A-Z]/.test(table.notes) ? table.notes.charAt(0).toLowerCase() + table.notes.slice(1) : table.notes) + '.')
       : ('The active schema does not include a description for ' + table.name + '; the facts below are derived only from its structure (columns, primary key, and relationships).');
     return { found: true, subject: table.name, subjectType: 'table', facts: facts, narrative: narrative, groundedInSchema: !!table.notes };
   }

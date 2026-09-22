@@ -26,11 +26,11 @@ test('buildConditionSql: "in" with empty value produces a validation error', fun
 });
 test('buildWhereSql combines multiple conditions with AND', function () {
   var fg = { conditions: [
-    { table: 'IA_INVOICE', column: 'SUPPLIER_ID', operator: 'eq', value: '100', join: 'AND' },
+    { table: 'IA_INVOICE', column: 'COMPANY_ID', operator: 'eq', value: '100', join: 'AND' },
     { table: 'IA_INVOICE', column: 'STATUS', operator: 'in', value: '10, 40', join: 'AND' }
   ] };
   var built = F.buildWhereSql(fg, 'Generic');
-  assertEqual(built.sql, 'IA_INVOICE.SUPPLIER_ID = 100 AND IA_INVOICE.STATUS IN (10, 40)');
+  assertEqual(built.sql, 'IA_INVOICE.COMPANY_ID = 100 AND IA_INVOICE.STATUS IN (10, 40)');
 });
 test('every core operator behaves correctly', function () {
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'eq', value: '5' }, 'Generic', []), 'T.C = 5');

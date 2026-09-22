@@ -1,5 +1,5 @@
 /**
- * credential-vault-engine.js — AP-SQL Assistant
+ * credential-vault-engine.js — AP-SQL Assistant V10.7
  * Passphrase-based encryption of the GitHub connection configuration
  * (owner/repo/branch/path/token) using the browser's native Web Crypto API
  * (AES-256-GCM with a PBKDF2-derived key), so the token is never written to

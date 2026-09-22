@@ -80,11 +80,11 @@
   }
   function describeSyncStatus(state) {
     state = state || {};
-    if (!state.supported) return { level: 'unsupported', text: 'This browser does not support linking a shared schema file (this needs Chrome, Edge, or another Chromium-based browser). The schema will stay saved only in this browser.' };
+    if (!state.supported) return { level: 'unsupported', text: 'This browser does not support linking a shared schema file (this needs Chrome, Edge, or another Chromium-based browser). The schema will stay saved only in this browser, as in previous versions.' };
     if (state.error) return { level: 'error', text: state.error };
-    if (state.needsReconnect) return { level: 'reconnect', text: 'Linked to "' + (state.fileName || 'a shared file') + '", but this browser needs you to reconnect before it can read or write it again.' };
-    if (!state.linked) return { level: 'unlinked', text: 'Not linked to a shared file yet. The schema is currently saved only in this browser.' };
-    return { level: 'linked', text: 'Linked to "' + state.fileName + '". Every schema update also updates this shared file.' };
+    if (state.needsReconnect) return { level: 'reconnect', text: 'Linked to "' + (state.fileName || 'a shared file') + '", but this browser needs you to reconnect before it can read or write it again (this can happen after closing and reopening the browser).' };
+    if (!state.linked) return { level: 'unlinked', text: 'Not linked to a shared file yet. The schema is currently saved only in this browser. Link a file in a shared location (SharePoint, OneDrive, or a network drive) to sync it across browsers, devices, and users.' };
+    return { level: 'linked', text: 'Linked to "' + state.fileName + '". Every Apply / Delete / Save Relationship action also updates this shared file, and this browser automatically checks it for updates made elsewhere.' };
   }
   var API = {
     isFileSystemAccessSupported: isFileSystemAccessSupported,

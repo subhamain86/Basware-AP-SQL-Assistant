@@ -40,7 +40,7 @@ test('resetToDefault restores the original hardcoded password, never displaying 
     return pm.verifyCurrentPassword('P@assw0rd');
   }).then(function (works) { assertTrue(works); });
 });
-test('the changed password is never stored in plain text \u2014 only its SHA-256 hash', function () {
+test('the changed password is never stored in plain text — only its SHA-256 hash', function () {
   var storage = makeFakeStorage();
   var pm = PWM.createPasswordManager(storage);
   return pm.changePassword('P@assw0rd', 'PlainTextCheck1', 'PlainTextCheck1').then(function () {

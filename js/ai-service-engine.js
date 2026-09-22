@@ -1,16 +1,18 @@
 /**
- * ai-service-engine.js — AP-SQL Assistant
+ * ai-service-engine.js — AP-SQL Assistant V11.8
  * ================================================================
  * THE AI SERVICE LAYER: Application -> AI Service Layer -> AI Provider -> Model
- * Every AI-powered feature in the app goes through createAIService(...).
+ *
+ * Every AI-powered feature in the app goes through `createAIService(...)`.
  * The default, always-on provider is a fully local, deterministic
  * "Schema-Grounded Heuristic Provider" that composes the schema/NL/
  * validation/optimize/error-rectifier engines already grounded in the
  * active schema — it never calls a network endpoint, never times out,
  * never requires an API key, and never hallucinates a table or column
  * that doesn't exist in the active schema.
- * A RemoteAIProvider seam exists for a future hosted model, wired via
- * configureRemoteProvider(...), but stays inactive unless configured,
+ *
+ * A `RemoteAIProvider` seam exists for a future hosted model, wired via
+ * `configureRemoteProvider(...)`, but stays inactive unless configured,
  * and falls back to the local provider automatically on any failure.
  */
 (function (root) {
@@ -19,6 +21,8 @@
   var OPTIMIZE = (typeof module === 'object' && module.exports) ? require('./optimize-engine.js') : root.APSQL_OPTIMIZE;
   var ERRFIX = (typeof module === 'object' && module.exports) ? require('./error-rectifier-engine.js') : root.APSQL_ERROR_RECTIFIER;
   var DECODE = (typeof module === 'object' && module.exports) ? require('./decode-engine.js') : root.APSQL_DECODE;
+
+  function nowMs() { return Date.now(); }
 
   function createLocalProvider(engine, decodeStore) {
     function analyzeIntent(requestText, opts) {
@@ -39,6 +43,9 @@
       steps.push('Entities: ' + (interpretation.tables || []).join(', ') || '(none identified)');
       if (interpretation.bridgeTables && interpretation.bridgeTables.length) steps.push('Join path includes bridge table(s): ' + interpretation.bridgeTables.join(', '));
       if (interpretation.filterConditions && interpretation.filterConditions.length) steps.push('Filters: ' + interpretation.filterConditions.length);
+      if (interpretation.aggregates && interpretation.aggregates.length) steps.push('Aggregations: ' + interpretation.aggregates.map(function (a) { return a.aggregate; }).join(', '));
+      if (interpretation.groupBy && interpretation.groupBy.length) steps.push('Grouping: ' + interpretation.groupBy.length + ' column(s)');
+      if (interpretation.orderBy && interpretation.orderBy.length) steps.push('Sorting: ' + interpretation.orderBy.length + ' column(s)');
       return Promise.resolve({ provider: 'local-heuristic', steps: steps });
     }
     function reviewSql(sql, meta) {
@@ -53,7 +60,8 @@
       }
       if (meta.interpretation) {
         var interp = meta.interpretation;
-        if (interp.filterConditions && interp.filterConditions.length && !/WHERE/i.test(sql)) findings.push('The request implied filter condition(s), but the generated SQL has no WHERE clause \u2014 please confirm this is intentional.');
+        if (interp.filterConditions && interp.filterConditions.length && !/WHERE/i.test(sql)) findings.push('The request implied filter condition(s), but the generated SQL has no WHERE clause — please confirm this is intentional.');
+        if (interp.aggregates && interp.aggregates.length && !/(COUNT|SUM|AVG|MIN|MAX)\s*\(/i.test(sql)) findings.push('The request implied an aggregation, but no aggregate function was found in the SQL.');
         if (interp.orderBy && interp.orderBy.length && !/ORDER BY/i.test(sql)) findings.push('The request implied a sort order, but no ORDER BY clause was found in the SQL.');
       }
       var perf = [];
@@ -66,14 +74,15 @@
         logicFindings: findings,
         performanceFindings: perf,
         errors: errors,
-        narrative: passed ? 'Every table and column referenced in this query exists in the active schema, and the query structure matches what was requested.' : 'One or more issues were found \u2014 see details below.'
+        narrative: passed ? 'Every table and column referenced in this query exists in the active schema, and the query structure matches what was requested.' : 'One or more issues were found — see details below.'
       });
     }
     function rectifyError(sql, errorText, dialect) {
       var result = ERRFIX.rectify(sql, errorText, engine, dialect);
+      var analysis = result.errorIdentified;
       return Promise.resolve({
         provider: 'local-heuristic',
-        analysis: result.errorIdentified,
+        analysis: analysis,
         correctedSql: result.correctedSql,
         changed: result.changed,
         explanation: result.correctionApplied,
@@ -94,27 +103,28 @@
       var ranked = NLQ.scoreAllTablesEnhanced(requestText, engine).filter(function (s) { return s.score >= 1; }).slice(0, 8);
       return Promise.resolve({
         provider: 'local-heuristic',
-        tables: ranked.map(function (r) { return r.table.name; })
+        tables: ranked.map(function (r) { return { table: r.table.name, score: r.score, notes: r.table.notes || '' }; })
       });
     }
     function parseFilterFromText(requestText, tableNames) {
       var conditions = NLQ.matchFilters(requestText, engine, tableNames || engine.getAllTables().map(function (t) { return t.name; }), new Date());
-      return Promise.resolve({ provider: 'local-heuristic', conditions: conditions, ambiguities: [] });
+      var bool = NLQ.matchBooleanFlagFilters(requestText, engine, tableNames || engine.getAllTables().map(function (t) { return t.name; }));
+      return Promise.resolve({ provider: 'local-heuristic', conditions: conditions.concat(bool.filters), ambiguities: bool.ambiguities });
     }
     function proposeCaseDecode(table, column, hintText) {
       var existing = DECODE.resolveDecode(engine, decodeStore, table, column);
       if (existing.source) {
-        return Promise.resolve({ provider: 'local-heuristic', reused: true, source: existing.source, values: existing.values, narrative: 'A ' + (existing.source === 'schema' ? 'schema-defined' : 'previously user-defined') + ' CASE/DECODE definition already exists for this column \u2014 reusing it instead of creating a duplicate.' });
+        return Promise.resolve({ provider: 'local-heuristic', reused: true, source: existing.source, values: existing.values, narrative: 'A ' + (existing.source === 'schema' ? 'schema-defined' : 'previously user-defined') + ' CASE/DECODE definition already exists for this column — reusing it instead of creating a duplicate.' });
       }
       var pairs = [];
       var text = String(hintText || '');
-      var re = /([\w'-]+)\s*(?:=|means|is|:)\s*([A-Za-z][A-Za-z0-9 _-]{0,40})/g;
+      var re = /([\w'\-]+)\s*(?:=|means|is|:)\s*([A-Za-z][A-Za-z0-9 _\-]{0,40})/g;
       var m;
       while ((m = re.exec(text))) pairs.push({ code: m[1].replace(/'/g, ''), label: m[2].trim() });
       if (!pairs.length) {
         return Promise.resolve({ provider: 'local-heuristic', reused: false, values: [], narrative: 'No existing definition was found, and no code=label pairs could be identified in the text provided. Describe the mapping explicitly, e.g. "0 means Draft, 1 means Approved".' });
       }
-      return Promise.resolve({ provider: 'local-heuristic', reused: false, values: pairs, narrative: 'No existing definition was found in the active schema. Proposed ' + pairs.length + ' value(s) based on the description provided \u2014 review before saving.' });
+      return Promise.resolve({ provider: 'local-heuristic', reused: false, values: pairs, narrative: 'No existing definition was found in the active schema. Proposed ' + pairs.length + ' value(s) based on the description provided — review before saving (administrative approval required).' });
     }
     return {
       name: 'local-heuristic', isRemote: false,
@@ -167,48 +177,48 @@
     var decodeStore = opts.decodeStore;
     var localProvider = createLocalProvider(engine, decodeStore);
     var remoteProvider = null;
+    var remoteConfig = null;
     var cache = {};
     var CACHE_TTL_MS = opts.cacheTtlMs || 15000;
 
-    function isRemoteConfigured() { return !!(remoteProvider && remoteProvider.isConfigured()); }
-    function getStatus() { return { localAvailable: true, remoteConfigured: isRemoteConfigured() }; }
-    function configureRemoteProvider(remoteConfig, fetchImpl) { remoteProvider = createRemoteProvider(remoteConfig, fetchImpl); }
-
-    function withFallback(opName, args, cacheKey) {
-      if (cacheKey && cache[cacheKey] && (Date.now() - cache[cacheKey].ts) < CACHE_TTL_MS) {
-        var cached = cache[cacheKey].value;
-        return Promise.resolve(Object.assign({}, cached, { meta: Object.assign({}, cached.meta, { cached: true }) }));
-      }
-      var useRemote = isRemoteConfigured();
-      var attempt = useRemote
-        ? remoteProvider[opName].apply(remoteProvider, args).then(function (res) {
-            return Object.assign({}, res, { meta: { providerUsed: 'remote', fallenBack: false, cached: false } });
-          }).catch(function () {
-            return localProvider[opName].apply(localProvider, args).then(function (res) {
-              return Object.assign({}, res, { meta: { providerUsed: 'local-heuristic', fallenBack: true, cached: false } });
-            });
-          })
-        : localProvider[opName].apply(localProvider, args).then(function (res) {
-            return Object.assign({}, res, { meta: { providerUsed: 'local-heuristic', fallenBack: false, cached: false } });
-          });
-      return attempt.then(function (res) {
-        if (cacheKey) cache[cacheKey] = { ts: Date.now(), value: res };
-        return res;
-      });
+    function configureRemoteProvider(config, fetchImpl) {
+      remoteConfig = config || null;
+      remoteProvider = config ? createRemoteProvider(config, fetchImpl) : null;
     }
-
-    function analyzeIntent(requestText, opts2) { return withFallback('analyzeIntent', [requestText, opts2], 'analyzeIntent:' + requestText); }
-    function planQuery(interpretation) { return withFallback('planQuery', [interpretation]); }
-    function reviewSql(sql, meta) { return withFallback('reviewSql', [sql, meta]); }
-    function rectifyError(sql, errorText, dialect) { return withFallback('rectifyError', [sql, errorText, dialect]); }
-    function optimizeSql(generateResult) { return withFallback('optimizeSql', [generateResult]); }
-    function explainSchemaObject(question) { return withFallback('explainSchemaObject', [question]); }
-    function recommendEntities(requestText) { return withFallback('recommendEntities', [requestText]); }
-    function parseFilterFromText(requestText, tableNames) { return withFallback('parseFilterFromText', [requestText, tableNames]); }
-    function proposeCaseDecode(table, column, hintText) { return withFallback('proposeCaseDecode', [table, column, hintText]); }
+    function isRemoteConfigured() { return !!(remoteProvider && remoteProvider.isConfigured()); }
+    function cacheKey(method, args) { return method + '::' + JSON.stringify(args); }
+    function withCache(method, args, fn) {
+      var key = cacheKey(method, args);
+      var hit = cache[key];
+      if (hit && (nowMs() - hit.at) < CACHE_TTL_MS) return Promise.resolve(Object.assign({}, hit.value, { meta: Object.assign({}, hit.value.meta, { cached: true }) }));
+      return fn().then(function (value) { cache[key] = { at: nowMs(), value: value }; return value; });
+    }
+    function callWithFallback(method, args) {
+      var start = nowMs();
+      var useRemoteFirst = isRemoteConfigured();
+      function finish(result, providerUsed, fellBack) {
+        return Object.assign({}, result, { meta: { providerUsed: providerUsed, fallenBack: !!fellBack, elapsedMs: nowMs() - start, cached: false } });
+      }
+      if (!useRemoteFirst) {
+        return localProvider[method].apply(null, args).then(function (r) { return finish(r, 'local-heuristic', false); });
+      }
+      return remoteProvider[method].apply(null, args).then(function (r) { return finish(r, 'remote', false); })
+        .catch(function () { return localProvider[method].apply(null, args).then(function (r) { return finish(r, 'local-heuristic', true); }); });
+    }
+    function analyzeIntent(requestText, requestOpts) { return withCache('analyzeIntent', [requestText], function () { return callWithFallback('analyzeIntent', [requestText, requestOpts]); }); }
+    function planQuery(interpretation) { return callWithFallback('planQuery', [interpretation]); }
+    function reviewSql(sql, meta) { return callWithFallback('reviewSql', [sql, meta]); }
+    function rectifyError(sql, errorText, dialect) { return callWithFallback('rectifyError', [sql, errorText, dialect]); }
+    function optimizeSql(generateResult) { return callWithFallback('optimizeSql', [generateResult]); }
+    function explainSchemaObject(question) { return callWithFallback('explainSchemaObject', [question]); }
+    function recommendEntities(requestText) { return withCache('recommendEntities', [requestText], function () { return callWithFallback('recommendEntities', [requestText]); }); }
+    function parseFilterFromText(requestText, tableNames) { return callWithFallback('parseFilterFromText', [requestText, tableNames]); }
+    function proposeCaseDecode(table, column, hintText) { return callWithFallback('proposeCaseDecode', [table, column, hintText]); }
+    function clearCache() { cache = {}; }
+    function getStatus() { return { localAvailable: true, remoteConfigured: isRemoteConfigured(), remoteEndpoint: remoteConfig ? remoteConfig.endpoint : null }; }
 
     return {
-      isRemoteConfigured: isRemoteConfigured, getStatus: getStatus, configureRemoteProvider: configureRemoteProvider,
+      configureRemoteProvider: configureRemoteProvider, isRemoteConfigured: isRemoteConfigured, getStatus: getStatus, clearCache: clearCache,
       analyzeIntent: analyzeIntent, planQuery: planQuery, reviewSql: reviewSql, rectifyError: rectifyError,
       optimizeSql: optimizeSql, explainSchemaObject: explainSchemaObject, recommendEntities: recommendEntities,
       parseFilterFromText: parseFilterFromText, proposeCaseDecode: proposeCaseDecode

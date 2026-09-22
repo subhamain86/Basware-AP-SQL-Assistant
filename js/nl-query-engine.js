@@ -149,7 +149,33 @@
         usedColumns[dateCol.table + '.' + dateCol.column] = true;
       }
     }
+    var lastMonthsMatch = textLower.match(/last\s+(\d+)\s+months?/);
+    if (lastMonthsMatch && DATATYPE) {
+      var nm = parseInt(lastMonthsMatch[1], 10);
+      var dateCol2 = findBestDateColumn(engine, tableNames, usedColumns);
+      if (dateCol2) {
+        var nowDate2 = now || new Date();
+        var cutoff2 = new Date(nowDate2.getFullYear(), nowDate2.getMonth() - nm, nowDate2.getDate());
+        var iso2 = cutoff2.toISOString().slice(0, 10);
+        conditions.push({ table: dateCol2.table, column: dateCol2.column, operator: 'gte', value: iso2 });
+        usedColumns[dateCol2.table + '.' + dateCol2.column] = true;
+      }
+    }
     return conditions;
+  }
+  function matchSort(text, engine, tableNames) {
+    var textLower = String(text || '').toLowerCase();
+    var re = /(?:sorted by|order(?:ed)? by|sort by)\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|\s+ascending|\s+asc\b|\s+descending|\s+desc\b|\s+newest|\s+oldest|\s+highest|\s+lowest|\s+largest|\s+smallest|[.;]|$))/g;
+    var out = []; var m;
+    while ((m = re.exec(textLower))) {
+      var phrase = normalizeSpaces(m[1]);
+      var col = findColumnByPhrase(engine, tableNames, phrase);
+      if (!col) continue;
+      var tail = textLower.slice(m.index, m.index + m[0].length + 24);
+      var direction = /descending|desc\b|newest|highest|largest|most recent/.test(tail) ? 'DESC' : 'ASC';
+      out.push({ table: col.table, column: col.column, direction: direction });
+    }
+    return out;
   }
   function findColumnByPhrase(engine, tableNames, phrase) {
     var best = null;
@@ -173,20 +199,6 @@
       });
     });
     return best;
-  }
-  function matchSort(text, engine, tableNames) {
-    var textLower = String(text || '').toLowerCase();
-    var re = /(?:sorted by|order(?:ed)? by|sort by)\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|\s+ascending|\s+asc\b|\s+descending|\s+desc\b|\s+newest|\s+oldest|\s+highest|\s+lowest|\s+largest|\s+smallest|[.;]|$))/g;
-    var out = []; var m;
-    while ((m = re.exec(textLower))) {
-      var phrase = normalizeSpaces(m[1]);
-      var col = findColumnByPhrase(engine, tableNames, phrase);
-      if (!col) continue;
-      var tail = textLower.slice(m.index, m.index + m[0].length + 24);
-      var direction = /descending|desc\b|newest|highest|largest|most recent/.test(tail) ? 'DESC' : 'ASC';
-      out.push({ table: col.table, column: col.column, direction: direction });
-    }
-    return out;
   }
   function matchLimit(text) {
     var m = String(text || '').toLowerCase().match(/\b(?:top|first|only)\s+(\d+)\b/);
@@ -292,6 +304,26 @@
     }
     return { command: command, table: table, insertColumns: insertColumns, updateColumns: updateColumns, filterConditions: filterConditions, matched: matched, warnings: [] };
   }
+  function mergeTableLists(manualTables, nlTables) {
+    var seen = {}; var out = [];
+    (manualTables || []).concat(nlTables || []).forEach(function (s) { var k = String(s).toUpperCase(); if (!seen[k]) { seen[k] = true; out.push(s); } });
+    return out;
+  }
+  function mergeColumnLists(manualColumns, nlColumns) {
+    var tablesWithManual = {};
+    (manualColumns || []).forEach(function (c) { tablesWithManual[String(c.table).toUpperCase()] = true; });
+    var existingKeys = {};
+    (manualColumns || []).forEach(function (c) { existingKeys[String(c.table).toUpperCase() + '.' + String(c.column).toUpperCase()] = true; });
+    var additions = (nlColumns || []).filter(function (c) {
+      var tKey = String(c.table).toUpperCase();
+      var cKey = tKey + '.' + String(c.column).toUpperCase();
+      if (tablesWithManual[tKey]) return false;
+      if (existingKeys[cKey]) return false;
+      existingKeys[cKey] = true;
+      return true;
+    });
+    return (manualColumns || []).concat(additions);
+  }
   function mergeFilterConditions(manualConditions, nlConditions) {
     function keyOf(c) { return [c.table, c.column, c.operator, c.value, c.value2].map(function (x) { return String(x == null ? '' : x).toUpperCase(); }).join('|'); }
     var existing = {}; (manualConditions || []).forEach(function (c) { existing[keyOf(c)] = true; });
@@ -312,6 +344,44 @@
   function normalizeThousandsSeparators(text) {
     return String(text || '').replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, function (m) { return m.replace(/,/g, ''); });
   }
+  var CATEGORICAL_NAME_MARKERS = ['group', 'category', 'type', 'class', 'department', 'team', 'organization', 'organisation'];
+  function scoreColumnAgainstPhrase(col, phraseNormalized) {
+    if (!phraseNormalized) return 0;
+    var score = 0;
+    var namePhrase = normalizeSpaces(col.name);
+    var aliasPhrase = col.alias ? normalizeSpaces(col.alias) : '';
+    var descPhrase = col.description ? normalizeSpaces(col.description) : '';
+    if (namePhrase && phraseNormalized === namePhrase) score += 12;
+    else if (namePhrase && (phraseNormalized.indexOf(namePhrase) !== -1 || namePhrase.indexOf(phraseNormalized) !== -1)) score += 7;
+    if (aliasPhrase && phraseNormalized === aliasPhrase) score += 11;
+    else if (aliasPhrase && (phraseNormalized.indexOf(aliasPhrase) !== -1 || aliasPhrase.indexOf(phraseNormalized) !== -1)) score += 6;
+    var phraseWords = tokenize(phraseNormalized);
+    var nameWords = tokenize(namePhrase);
+    var aliasWords = aliasPhrase ? tokenize(aliasPhrase) : [];
+    var descWords = descPhrase ? tokenize(descPhrase) : [];
+    var nameOverlap = phraseWords.filter(function (w) { return nameWords.indexOf(w) !== -1 || nameWords.indexOf(singularize(w)) !== -1; }).length;
+    var aliasOverlap = phraseWords.filter(function (w) { return aliasWords.indexOf(w) !== -1; }).length;
+    var descOverlap = phraseWords.filter(function (w) { return descWords.indexOf(w) !== -1; }).length;
+    score += nameOverlap * 3 + aliasOverlap * 2.5 + descOverlap * 1.5;
+    var isCategoricalColumn = CATEGORICAL_NAME_MARKERS.some(function (w) { return namePhrase.indexOf(w) !== -1; });
+    var phraseWantsCategorical = CATEGORICAL_NAME_MARKERS.some(function (w) { return phraseNormalized.indexOf(w) !== -1; });
+    if (isCategoricalColumn && !phraseWantsCategorical) score -= 5;
+    return score;
+  }
+  function findColumnByPhraseScored(engine, tableNames, phrase, minScore) {
+    minScore = minScore == null ? 3 : minScore;
+    var phraseNorm = normalizeSpaces(phrase);
+    if (!phraseNorm) return null;
+    var best = null, bestScore = 0;
+    tableNames.forEach(function (tname) {
+      var table = engine.getTable(tname); if (!table) return;
+      table.columns.forEach(function (col) {
+        var s = scoreColumnAgainstPhrase(col, phraseNorm);
+        if (s > bestScore) { bestScore = s; best = { table: tname, column: col.name, score: s }; }
+      });
+    });
+    return (best && bestScore >= minScore) ? best : null;
+  }
   function scoreAllTablesEnhanced(text, engine) {
     var base = scoreAllTables(text, engine);
     var textContentWords = normalizeWordSet(contentTokens(text));
@@ -320,21 +390,18 @@
       var score = entry.score;
       var bareWords = normalizeWordSet(tokenize(bareTableName(t.name)));
       var nameOverlap = bareWords.filter(function (w) { return textContentWords.indexOf(w) !== -1; }).length;
-      if (nameOverlap > 0) score += nameOverlap * 3;
-      // Column-name overlap: a strong, low-noise signal that a table is the
-      // intended subject (unlike free-text notes, which can accidentally
-      // mention words belonging to a *different* table's own name). Words
-      // are collected into a single de-duplicated set across all columns
-      // first, so a repeated prefix (e.g. every SUPPLIER_* column) doesn't
-      // inflate the score once per column.
-      var allColWords = {};
-      t.columns.forEach(function (c) {
-        normalizeWordSet(tokenize(c.name)).forEach(function (w) {
-          if (w.length >= 4 && w !== bareTableName(t.name).replace(/ /g, '')) allColWords[w] = true;
-        });
+      if (nameOverlap > 0) score += nameOverlap * 2.2;
+      if (t.notes) {
+        var notesWords = normalizeWordSet(tokenize(t.notes));
+        var notesOverlap = textContentWords.filter(function (w) { return notesWords.indexOf(w) !== -1; }).length;
+        if (notesOverlap > 0) score += notesOverlap * 1.2;
+      }
+      t.columns.forEach(function (col) {
+        if (!col.alias) return;
+        var aliasNorm = normalizeSpaces(col.alias);
+        var distinctive = aliasNorm.indexOf(' ') !== -1 || aliasNorm.length >= 5;
+        if (aliasNorm && distinctive && new RegExp('\\b' + escapeRegExp(aliasNorm).replace(/ /g, '\\s+') + '\\b', 'i').test(text)) score += 4;
       });
-      var colOverlap = Object.keys(allColWords).filter(function (w) { return textContentWords.indexOf(w) !== -1; }).length;
-      if (colOverlap > 0) score += colOverlap * 0.8;
       return { table: t, score: score };
     }).sort(function (a, b) { return b.score - a.score; });
   }
@@ -361,6 +428,226 @@
       });
     });
     return base;
+  }
+  function matchSortEnhanced(text, engine, tableNames) {
+    var textLower = String(text || '').toLowerCase();
+    var re = /\b(?:sorted|order(?:ed)?|sort)\b(?:[^.;]{0,25}?)\bby\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|\s+ascending|\s+asc\b|\s+descending|\s+desc\b|\s+newest|\s+oldest|\s+highest|\s+lowest|\s+largest|\s+smallest|[.;]|$))/g;
+    var out = []; var m;
+    while ((m = re.exec(textLower))) {
+      var phrase = normalizeSpaces(m[1]);
+      var col = findColumnByPhraseScored(engine, tableNames, phrase, 3);
+      if (!col) continue;
+      var tail = textLower.slice(m.index, m.index + m[0].length + 24);
+      var direction = /descending|desc\b|newest|highest|largest|most recent/.test(tail) ? 'DESC' : 'ASC';
+      out.push({ table: col.table, column: col.column, direction: direction });
+    }
+    return out;
+  }
+  var BOOL_STATE_WORDS = ['ACTIVE', 'ALLOWED', 'ENABLED', 'APPROVED', 'VALID', 'LOCKED', 'DELETED', 'BLOCKED'];
+  function deriveBooleanConcept(colName) {
+    var upper = String(colName || '').toUpperCase();
+    var prefixStripped = upper.replace(/^(IS_|HAS_)/, '');
+    var parts = prefixStripped.split('_').filter(Boolean);
+    if (!parts.length) return null;
+    var last = parts[parts.length - 1];
+    if (BOOL_STATE_WORDS.indexOf(last) !== -1) {
+      return { qualifier: last.toLowerCase(), concept: normalizeSpaces(parts.slice(0, parts.length - 1).join(' ')) };
+    }
+    if (upper !== prefixStripped && parts.length) {
+      return { qualifier: normalizeSpaces(last), concept: normalizeSpaces(parts.slice(0, parts.length - 1).join(' ')) };
+    }
+    return null;
+  }
+  var BOOL_NEGATIVE_SYNONYMS = { active: 'inactive', allowed: 'disallowed', enabled: 'disabled', approved: 'unapproved', valid: 'invalid', locked: 'unlocked', blocked: 'unblocked' };
+  var TRUE_LABEL_WORDS = ['yes', 'true', 'active', 'allowed', 'enabled', 'approved', 'valid', 'y', '1'];
+  var FALSE_LABEL_WORDS = ['no', 'false', 'inactive', 'disallowed', 'disabled', 'unapproved', 'invalid', 'n', '0'];
+  function resolveBooleanCode(engine, tableName, columnName, wantTrue) {
+    var decode = engine.getValueMap(tableName, columnName);
+    if (decode && decode.length) {
+      var wordSet = wantTrue ? TRUE_LABEL_WORDS : FALSE_LABEL_WORDS;
+      for (var i = 0; i < decode.length; i++) { if (wordSet.indexOf(String(decode[i].label).toLowerCase()) !== -1) return decode[i].code; }
+    }
+    return wantTrue ? '1' : '0';
+  }
+  function matchBooleanFlagFilters(text, engine, tableNames) {
+    var textLower = String(text || '').toLowerCase();
+    var filters = [], ambiguities = [];
+    var consideredQualifiers = {};
+    tableNames.forEach(function (tname) {
+      var table = engine.getTable(tname); if (!table) return;
+      table.columns.forEach(function (col) {
+        var concept = deriveBooleanConcept(col.name);
+        if (!concept) return;
+        var qualifier = concept.qualifier;
+        if (consideredQualifiers[qualifier]) return;
+        var posPatterns = [];
+        if (concept.concept) posPatterns.push(new RegExp('\\b' + escapeRegExp(concept.concept).replace(/ /g, '\\s+') + '\\s+is\\s+' + escapeRegExp(qualifier) + '\\b', 'i'));
+        posPatterns.push(new RegExp('\\b' + escapeRegExp(qualifier) + '\\b', 'i'));
+        var negWord = BOOL_NEGATIVE_SYNONYMS[qualifier];
+        var negPatterns = [new RegExp('\\bis\\s+not\\s+' + escapeRegExp(qualifier) + '\\b', 'i'), new RegExp('\\bnot\\s+' + escapeRegExp(qualifier) + '\\b', 'i')];
+        if (negWord) negPatterns.push(new RegExp('\\b' + escapeRegExp(negWord) + '\\b', 'i'));
+        var isNegative = negPatterns.some(function (re) { return re.test(text); });
+        var isPositive = !isNegative && posPatterns.some(function (re) { return re.test(text); });
+        if (!isPositive && !isNegative) return;
+        var tiedCandidates = [];
+        tableNames.forEach(function (tn2) {
+          var t2 = engine.getTable(tn2); if (!t2) return;
+          t2.columns.forEach(function (c2) {
+            var concept2 = deriveBooleanConcept(c2.name);
+            if (concept2 && concept2.qualifier === qualifier) tiedCandidates.push({ table: tn2, column: c2.name, concept: concept2.concept });
+          });
+        });
+        consideredQualifiers[qualifier] = true;
+        if (tiedCandidates.length > 1) {
+          var withConceptMatch = tiedCandidates.filter(function (c) { return c.concept && textLower.indexOf(c.concept) !== -1; });
+          if (withConceptMatch.length === 1) {
+            var chosen = withConceptMatch[0];
+            filters.push({ table: chosen.table, column: chosen.column, operator: 'eq', value: resolveBooleanCode(engine, chosen.table, chosen.column, isPositive) });
+            return;
+          }
+          if (withConceptMatch.length === 0) {
+            ambiguities.push({ term: qualifier, options: tiedCandidates.map(function (c) { var sc = engine.getColumn(c.table, c.column); return { table: c.table, column: c.column, description: sc ? sc.description : '' }; }) });
+            return;
+          }
+        }
+        filters.push({ table: tname, column: col.name, operator: 'eq', value: resolveBooleanCode(engine, tname, col.name, isPositive) });
+      });
+    });
+    return { filters: filters, ambiguities: ambiguities };
+  }
+  function matchExclusionFilters(text, engine, tableNames) {
+    var out = [];
+    var re = /\b(?:exclude|excluding|without|except|not including)\s+([a-z][a-z0-9 _\-]{1,40}?)\s+(?:users?|suppliers?|records?|invoices?|rows?|entries?|orders?|customers?)\b/ig;
+    var m;
+    while ((m = re.exec(text))) {
+      var descriptor = normalizeSpaces(m[1]);
+      if (!descriptor) continue;
+      var emailCol = null;
+      var orderedTables = tableNames.slice();
+      orderedTables.forEach(function (tname) {
+        if (emailCol) return;
+        var table = engine.getTable(tname); if (!table) return;
+        table.columns.forEach(function (col) { if (!emailCol && /email/i.test(col.name)) emailCol = { table: tname, column: col.name }; });
+      });
+      var decodeMatch = null;
+      tableNames.forEach(function (tname) {
+        if (decodeMatch) return;
+        var table = engine.getTable(tname); if (!table) return;
+        table.columns.forEach(function (col) {
+          if (decodeMatch || !Array.isArray(col.decode)) return;
+          col.decode.forEach(function (pair) { if (!decodeMatch && String(pair.label).toLowerCase().indexOf(descriptor) !== -1) decodeMatch = { table: tname, column: col.name, code: pair.code }; });
+        });
+      });
+      if (emailCol) { out.push({ table: emailCol.table, column: emailCol.column, operator: 'not_contains', value: descriptor }); }
+      else if (decodeMatch) { out.push({ table: decodeMatch.table, column: decodeMatch.column, operator: 'neq', value: decodeMatch.code }); }
+    }
+    return out;
+  }
+  var CATEGORY_WORDS = ['group', 'organization', 'organisation', 'department', 'team', 'division', 'unit'];
+  function matchMembershipFilters(text, engine, tableNames) {
+    var out = [];
+    var catAlt = CATEGORY_WORDS.join('|');
+    var re = new RegExp('\\bbelongs?\\s+to\\s+(?:the\\s+)?([A-Za-z][A-Za-z0-9 ]*?)\\s+(?:' + catAlt + ')\\b', 'ig');
+    var m;
+    while ((m = re.exec(text))) {
+      var value = normalizeSpaces(m[1]);
+      if (!value) continue;
+      var best = null, bestScore = 0;
+      tableNames.forEach(function (tname) {
+        var table = engine.getTable(tname); if (!table) return;
+        table.columns.forEach(function (col) {
+          var nameL = col.name.toLowerCase(), descL = (col.description || '').toLowerCase();
+          var isCategorical = CATEGORY_WORDS.some(function (w) { return nameL.indexOf(w) !== -1 || descL.indexOf(w) !== -1; }) && /name/i.test(col.name);
+          if (!isCategorical) return;
+          var s = 5;
+          if (s > bestScore) { bestScore = s; best = { table: tname, column: col.name }; }
+        });
+      });
+      if (best) out.push({ table: best.table, column: best.column, operator: 'eq', value: value.replace(/\b\w/g, function (c) { return c.toUpperCase(); }) });
+    }
+    return out;
+  }
+  var MONTH_NAMES = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12, jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  function daysInMonth(year, month) { return new Date(year, month, 0).getDate(); }
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+  function matchDateRangeFilters(text, engine, tableNames, usedColumns) {
+    var m = String(text || '').match(/\bbetween\s+([a-z]+)\s+and\s+([a-z]+)\s+(\d{4})\b/i);
+    if (!m) return null;
+    var m1 = MONTH_NAMES[m[1].toLowerCase()], m2 = MONTH_NAMES[m[2].toLowerCase()], year = parseInt(m[3], 10);
+    if (!m1 || !m2) return null;
+    var candidates = [];
+    tableNames.forEach(function (tname) {
+      var table = engine.getTable(tname); if (!table) return;
+      table.columns.forEach(function (col) {
+        var key = tname + '.' + col.name;
+        if (usedColumns && usedColumns[key]) return;
+        var category = DATATYPE ? DATATYPE.classify(col.type) : 'unknown';
+        if (category === 'date' || category === 'timestamp') candidates.push({ table: tname, column: col.name, name: col.name });
+      });
+    });
+    if (!candidates.length) return null;
+    var beforeBetween = String(text || '').toLowerCase().slice(0, m.index);
+    var preferred = candidates.filter(function (c) { var w = c.name.toLowerCase(); return (w.indexOf('creat') !== -1 && beforeBetween.indexOf('creat') !== -1) || (w.indexOf('due') !== -1 && beforeBetween.indexOf('due') !== -1); });
+    var chosen = preferred[0] || candidates.filter(function (c) { return /creat/i.test(c.name); })[0] || candidates[0];
+    var from = year + '-' + pad2(m1) + '-01';
+    var to = year + '-' + pad2(m2) + '-' + pad2(daysInMonth(year, m2));
+    return { table: chosen.table, column: chosen.column, operator: 'between', value: from, value2: to };
+  }
+  function matchDecodeRequests(text, engine, tableNames) {
+    var out = [];
+    var re = /\bshow\s+(?:the\s+|all\s+)?([a-z0-9 _]+?)\s+as\s+(?:its\s+|the\s+)?(?:description|label|name|text)\b/ig;
+    var m;
+    while ((m = re.exec(text))) {
+      var phrase = normalizeSpaces(m[1]);
+      var best = findColumnByPhraseScored(engine, tableNames, phrase, 4);
+      if (best) out.push({ table: best.table, column: best.column });
+    }
+    return out;
+  }
+  var AGG_PATTERNS = [
+    { fn: 'COUNT', re: /\b(?:count of|how many|number of)\s*([a-z0-9 _]*)/i },
+    { fn: 'SUM', re: /\b(?:sum of|total)\s+([a-z0-9 _]+)/i },
+    { fn: 'AVG', re: /\b(?:average|avg)\s+(?:of\s+)?([a-z0-9 _]+)/i },
+    { fn: 'MIN', re: /\b(?:minimum|lowest|smallest)\s+([a-z0-9 _]+)/i },
+    { fn: 'MAX', re: /\b(?:maximum|highest|largest)\s+([a-z0-9 _]+)/i }
+  ];
+  function matchAggregations(text, engine, tableNames) {
+    var results = [];
+    AGG_PATTERNS.forEach(function (p) {
+      var m = text.match(p.re);
+      if (!m) return;
+      var phrase = normalizeSpaces(m[1] || '');
+      if (p.fn === 'COUNT' && (!phrase || !findColumnByPhraseScored(engine, tableNames, phrase, 5))) {
+        results.push({ aggregate: 'COUNT', table: tableNames[0], column: '*', alias: 'record_count' });
+        return;
+      }
+      var best = findColumnByPhraseScored(engine, tableNames, phrase, 4);
+      if (best) results.push({ aggregate: p.fn, table: best.table, column: best.column, alias: (p.fn.toLowerCase() + '_' + best.column.toLowerCase()) });
+    });
+    return results;
+  }
+  function matchGroupBy(text, engine, tableNames) {
+    var re = /\bgroup(?:ed)?\s+by\s+([a-z0-9 _]+?)(?=(?:\s*,|\s+and\b|[.;]|$))/ig;
+    var out = []; var m;
+    while ((m = re.exec(text))) {
+      var phrase = normalizeSpaces(m[1]);
+      var best = findColumnByPhraseScored(engine, tableNames, phrase, 3);
+      if (best) out.push({ table: best.table, column: best.column });
+    }
+    return out;
+  }
+  var HAVING_FN_MAP = { count: 'COUNT', sum: 'SUM', average: 'AVG', avg: 'AVG', total: 'SUM', minimum: 'MIN', maximum: 'MAX' };
+  var HAVING_OP_MAP = { 'more than': '>', 'greater than': '>', 'at least': '>=', 'less than': '<', 'at most': '<=', 'equal to': '=', '=': '=' };
+  function matchHaving(text, aggregates) {
+    var m = String(text || '').match(/\bhaving\s+(count|sum|average|avg|total|minimum|maximum)\b(?:\s+of\s+[a-z0-9 _]+)?\s*(more than|greater than|at least|less than|at most|equal to|=)\s+([\d.]+)/i);
+    if (!m) return null;
+    var fn = HAVING_FN_MAP[m[1].toLowerCase()];
+    var op = HAVING_OP_MAP[m[2].toLowerCase()];
+    var val = m[3];
+    if (!fn || !op) return null;
+    var matchedAgg = (aggregates || []).filter(function (a) { return a.aggregate === fn; })[0];
+    var expr = matchedAgg ? (fn + '(' + (matchedAgg.column === '*' ? '*' : (matchedAgg.table + '.' + matchedAgg.column)) + ')') : (fn + '(*)');
+    return expr + ' ' + op + ' ' + val;
   }
   function buildAdjacency(engine) {
     var tables = engine.getAllTables();
@@ -428,6 +715,28 @@
     var unresolved = unresolvedUpper.map(function (u) { var tbl = engine.getTable(u); return tbl ? tbl.name : u; });
     return { tables: orderedTables, bridgeTables: bridgeTables, unresolved: unresolved };
   }
+  var AMBIGUOUS_TRIGGER_WORDS = ['active', 'enabled', 'valid', 'approved', 'current', 'open'];
+  function findAmbiguousTerms(text, engine, tableNames, resolvedFilters) {
+    var textLower = String(text || '').toLowerCase();
+    var resolvedKeys = {};
+    (resolvedFilters || []).forEach(function (f) { resolvedKeys[f.table + '.' + f.column] = true; });
+    var ambiguities = [];
+    AMBIGUOUS_TRIGGER_WORDS.forEach(function (word) {
+      if (textLower.indexOf(word) === -1) return;
+      var candidates = [];
+      tableNames.forEach(function (tname) {
+        var table = engine.getTable(tname); if (!table) return;
+        table.columns.forEach(function (col) {
+          var key = tname + '.' + col.name;
+          if (resolvedKeys[key]) return;
+          var nameL = col.name.toLowerCase(), descL = (col.description || '').toLowerCase();
+          if (nameL.indexOf(word) !== -1 || descL.indexOf(word) !== -1) candidates.push({ table: tname, column: col.name, description: col.description || '' });
+        });
+      });
+      if (candidates.length >= 2) ambiguities.push({ term: word, options: candidates });
+    });
+    return ambiguities;
+  }
   function computeConfidence(finalTables, finalColumns, unresolvedJoins, ambiguities) {
     return {
       tableIdentified: finalTables.length > 0,
@@ -441,10 +750,11 @@
   function buildMatchedSummary(tables, columns, filters, orderBy, groupBy, aggregates, limit, distinct, bridgeTables) {
     var matched = [];
     tables.forEach(function (t) { matched.push('Table: ' + t + (bridgeTables && bridgeTables.indexOf(t) !== -1 ? ' (connected automatically)' : '')); });
-    columns.forEach(function (c) { matched.push('Column: ' + c.table + '.' + c.column + (c.alias ? (' (as ' + c.alias + ')') : '')); });
+    columns.forEach(function (c) { matched.push('Column: ' + c.table + '.' + c.column + (c.alias ? (' (as ' + c.alias + ')') : '') + (c.decode ? ' (decoded)' : '')); });
     filters.forEach(function (c) { matched.push('Filter: ' + c.table + '.' + c.column + ' ' + describeOperatorForDisplay(c)); });
+    (aggregates || []).forEach(function (a) { matched.push('Aggregate: ' + a.aggregate + '(' + (a.column === '*' ? '*' : (a.table + '.' + a.column)) + ')'); });
     (groupBy || []).forEach(function (g) { matched.push('Grouped by: ' + g.table + '.' + g.column); });
-    orderBy.forEach(function (o) { matched.push('Sort: ' + o.table + '.' + o.column); });
+    orderBy.forEach(function (o) { matched.push('Sort: ' + o.table + '.' + o.column + ' (' + (o.direction === 'DESC' ? 'largest/latest first' : 'smallest/earliest first') + ')'); });
     if (limit) matched.push('Limit: ' + limit);
     if (distinct) matched.push('Remove duplicates: yes');
     return matched;
@@ -455,7 +765,10 @@
     if (interpretation.tables.length === 1) lines.push('Retrieves data from ' + interpretation.tables[0] + '.');
     else lines.push('Retrieves data from ' + interpretation.tables[0] + ', joined with ' + interpretation.tables.slice(1).join(', ') + '.');
     (interpretation.filterConditions || []).forEach(function (f) { lines.push('Filters where ' + f.table + '.' + f.column + ' ' + describeOperatorForDisplay(f) + '.'); });
-    if (interpretation.orderBy && interpretation.orderBy.length) lines.push('Sorts the results by ' + interpretation.orderBy.map(function (o) { return o.table + '.' + o.column; }).join(', ') + '.');
+    if (interpretation.groupBy && interpretation.groupBy.length) lines.push('Groups the results by ' + interpretation.groupBy.map(function (g) { return g.table + '.' + g.column; }).join(', ') + '.');
+    (interpretation.aggregates || []).forEach(function (a) { lines.push('Calculates the ' + a.aggregate + ' of ' + (a.column === '*' ? 'matching records' : (a.table + '.' + a.column)) + '.'); });
+    if (interpretation.having) lines.push('Only keeps groups where ' + interpretation.having + '.');
+    if (interpretation.orderBy && interpretation.orderBy.length) lines.push('Sorts the results by ' + interpretation.orderBy.map(function (o) { return o.table + '.' + o.column + ' (' + (o.direction === 'DESC' ? 'highest first' : 'lowest first') + ')'; }).join(', ') + '.');
     if (interpretation.distinct) lines.push('Removes duplicate rows from the result.');
     if (interpretation.limit) lines.push('Limits the result to the first ' + interpretation.limit + ' rows.');
     return lines;
@@ -494,49 +807,102 @@
     var candidateNames = preliminaryNames;
     if (!ranked.length) return emptyRichInterpretation(['Could not identify any tables mentioned in your description. Try naming a specific concept from your data (e.g. "invoices", "suppliers", "users"), or select tables manually below.']);
     var columns = matchColumnsEnhanced(normalizedText, engine, candidateNames);
+    var decodeRequestCols = matchDecodeRequests(normalizedText, engine, candidateNames);
+    decodeRequestCols.forEach(function (d) {
+      var existing = columns.filter(function (c) { return c.table === d.table && c.column === d.column; })[0];
+      if (existing) existing.decode = true; else columns.push({ table: d.table, column: d.column, decode: true });
+    });
+    var usedCols = {};
+    var boolResult = matchBooleanFlagFilters(normalizedText, engine, candidateNames);
+    boolResult.filters.forEach(function (f) { usedCols[f.table + '.' + f.column] = true; });
     var opFilters = matchFilters(normalizedText, engine, candidateNames, now);
-    var filterConditions = dedupeFilterConditions(opFilters);
-    var orderBy = matchSort(normalizedText, engine, candidateNames);
+    var exclusionFilters = matchExclusionFilters(normalizedText, engine, candidateNames);
+    var membershipFilters = matchMembershipFilters(normalizedText, engine, candidateNames);
+    var dateRangeFilter = matchDateRangeFilters(normalizedText, engine, candidateNames, usedCols);
+    var filterConditions = dedupeFilterConditions(boolResult.filters.concat(opFilters).concat(exclusionFilters).concat(membershipFilters).concat(dateRangeFilter ? [dateRangeFilter] : []));
+    var orderBy = matchSortEnhanced(normalizedText, engine, candidateNames);
     var limit = matchLimit(normalizedText);
     var distinct = matchDistinct(normalizedText);
+    var aggregates = matchAggregations(normalizedText, engine, candidateNames);
+    var groupBy = matchGroupBy(normalizedText, engine, candidateNames);
+    var having = matchHaving(normalizedText, aggregates);
+    if (aggregates.length && !groupBy.length && columns.length) {
+      groupBy = columns.filter(function (c) { return !c.decode; }).map(function (c) { return { table: c.table, column: c.column }; });
+    }
     var tablesWithPurpose = {};
     columns.forEach(function (c) { tablesWithPurpose[c.table] = true; });
     filterConditions.forEach(function (c) { tablesWithPurpose[c.table] = true; });
     orderBy.forEach(function (o) { tablesWithPurpose[o.table] = true; });
+    groupBy.forEach(function (g) { tablesWithPurpose[g.table] = true; });
+    aggregates.forEach(function (a) { if (a.column !== '*') tablesWithPurpose[a.table] = true; });
     tablesWithPurpose[ranked[0].table.name] = true;
     var requiredTables = candidateNames.filter(function (t) { return tablesWithPurpose[t]; });
+    if (aggregates.some(function (a) { return a.column === '*'; }) && requiredTables.indexOf(ranked[0].table.name) === -1) requiredTables.push(ranked[0].table.name);
     var closure = resolveJoinClosure(engine, requiredTables);
     var finalTables = closure.tables;
+    var ambiguities = boolResult.ambiguities.concat(findAmbiguousTerms(normalizedText, engine, finalTables, filterConditions));
     var finalColumns = columns.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalFilters = filterConditions.filter(function (c) { return finalTables.indexOf(c.table) !== -1; });
     var finalOrderBy = orderBy.filter(function (o) { return finalTables.indexOf(o.table) !== -1; });
-    var matched = buildMatchedSummary(finalTables, finalColumns, finalFilters, finalOrderBy, [], [], limit, distinct, closure.bridgeTables);
-    var confidence = computeConfidence(finalTables, finalColumns, closure.unresolved, []);
+    var finalGroupBy = groupBy.filter(function (g) { return finalTables.indexOf(g.table) !== -1; });
+    var finalAggregates = aggregates.filter(function (a) { return a.column === '*' || finalTables.indexOf(a.table) !== -1; });
+    var matched = buildMatchedSummary(finalTables, finalColumns, finalFilters, finalOrderBy, finalGroupBy, finalAggregates, limit, distinct, closure.bridgeTables);
+    var confidence = computeConfidence(finalTables, finalColumns, closure.unresolved, ambiguities);
     var warnings = [];
     if (closure.unresolved.length) warnings.push('Could not automatically connect: ' + closure.unresolved.join(', ') + '. You can connect these manually in Advanced Options.');
+    ambiguities.forEach(function (a) { warnings.push('"' + a.term + '" could refer to more than one column \u2014 please clarify below.'); });
     return {
       tables: finalTables, columns: finalColumns, filterConditions: finalFilters, orderBy: finalOrderBy,
       limit: limit, distinct: distinct, hierarchyTable: null,
-      aggregates: [], groupBy: [], having: null,
+      aggregates: finalAggregates, groupBy: finalGroupBy, having: having,
       bridgeTables: closure.bridgeTables, unresolvedJoins: closure.unresolved,
-      ambiguities: [], confidence: confidence, matched: matched, warnings: warnings
+      ambiguities: ambiguities, confidence: confidence, matched: matched, warnings: warnings
     };
   }
   function interpretCrRequirement(text, engine, opts) {
-    return interpretCrDescription(normalizeThousandsSeparators(String(text || '')), engine, opts || {});
+    opts = opts || {};
+    var normalizedText = normalizeThousandsSeparators(String(text || ''));
+    var base = interpretCrDescription(normalizedText, engine, opts);
+    if (base.table && (base.command === 'UPDATE' || base.command === 'DELETE')) {
+      var whereMatch = normalizedText.match(/\bwhere\b/i);
+      var filterText = whereMatch ? normalizedText.slice(whereMatch.index) : normalizedText;
+      var extra = matchExclusionFilters(filterText, engine, [base.table]);
+      if (extra.length) {
+        base.filterConditions = dedupeFilterConditions(base.filterConditions.concat(extra));
+        extra.forEach(function (c) { base.matched.push('Filter: ' + c.table + '.' + c.column + ' ' + describeOperatorForDisplay(c)); });
+      }
+    }
+    return base;
+  }
+  function mergeAggregates(existing, incoming) {
+    var seen = {}; (existing || []).forEach(function (a) { seen[a.aggregate + '|' + a.table + '|' + a.column] = true; });
+    var out = (existing || []).slice();
+    (incoming || []).forEach(function (a) { var k = a.aggregate + '|' + a.table + '|' + a.column; if (!seen[k]) { seen[k] = true; out.push(a); } });
+    return out;
+  }
+  function mergeGroupBy(existing, incoming) {
+    var seen = {}; (existing || []).forEach(function (g) { seen[g.table + '|' + g.column] = true; });
+    var out = (existing || []).slice();
+    (incoming || []).forEach(function (g) { var k = g.table + '|' + g.column; if (!seen[k]) { seen[k] = true; out.push(g); } });
+    return out;
   }
   var API = {
     scoreAllTables: scoreAllTables, matchColumns: matchColumns, matchFilters: matchFilters,
     matchSort: matchSort, matchLimit: matchLimit, matchDistinct: matchDistinct, matchHierarchy: matchHierarchy,
     detectCrCommand: detectCrCommand, matchColumnValueAssignments: matchColumnValueAssignments, interpretCrDescription: interpretCrDescription,
-    mergeFilterConditions: mergeFilterConditions,
+    mergeTableLists: mergeTableLists, mergeColumnLists: mergeColumnLists, mergeFilterConditions: mergeFilterConditions,
     bareTableName: bareTableName, normalizeSpaces: normalizeSpaces,
-    normalizeThousandsSeparators: normalizeThousandsSeparators,
-    scoreAllTablesEnhanced: scoreAllTablesEnhanced, matchColumnsEnhanced: matchColumnsEnhanced,
+    normalizeThousandsSeparators: normalizeThousandsSeparators, scoreColumnAgainstPhrase: scoreColumnAgainstPhrase,
+    findColumnByPhraseScored: findColumnByPhraseScored, scoreAllTablesEnhanced: scoreAllTablesEnhanced,
+    matchColumnsEnhanced: matchColumnsEnhanced, matchSortEnhanced: matchSortEnhanced,
+    deriveBooleanConcept: deriveBooleanConcept, matchBooleanFlagFilters: matchBooleanFlagFilters,
+    matchExclusionFilters: matchExclusionFilters, matchMembershipFilters: matchMembershipFilters,
+    matchDateRangeFilters: matchDateRangeFilters, matchDecodeRequests: matchDecodeRequests,
+    matchAggregations: matchAggregations, matchGroupBy: matchGroupBy, matchHaving: matchHaving,
     buildAdjacency: buildAdjacency, shortestPath: shortestPath, resolveJoinClosure: resolveJoinClosure,
-    computeConfidence: computeConfidence, explainInterpretation: explainInterpretation,
+    findAmbiguousTerms: findAmbiguousTerms, computeConfidence: computeConfidence, explainInterpretation: explainInterpretation,
     interpretRequirement: interpretRequirement, interpretCrRequirement: interpretCrRequirement,
-    dedupeFilterConditions: dedupeFilterConditions,
+    mergeAggregates: mergeAggregates, mergeGroupBy: mergeGroupBy, dedupeFilterConditions: dedupeFilterConditions,
     describeOperatorForDisplay: describeOperatorForDisplay
   };
   if (typeof module === 'object' && module.exports) module.exports = API;

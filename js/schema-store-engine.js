@@ -1,10 +1,19 @@
 /**
  * schema-store-engine.js — AP-SQL Assistant
- * Manages MULTIPLE named, independently-stored schemas. Each entry has its
- * own Active/Inactive state; exactly one entry is always the Default
- * (which is always Active and cannot be deactivated directly). The
- * merged Active schema (Default + any other Active entries) is what the
- * rest of the app consumes as "the active schema".
+ * V10.7 — Manages MULTIPLE named, independently-stored schemas. Each entry
+ *         tracks its own metadata (name, version, source, last/next sync
+ *         time, sync status) so Used Schema / Update Schema can display
+ *         and act on them independently; a sync failure on one schema
+ *         never affects any other (each entry's status is isolated).
+ * V11.1 — ADDITIVE multi-schema state model layered on top, without
+ *         changing any V10.7/V10.7.1 method's existing behavior:
+ *           Stored / Active / Default / Inactive states. Multiple schemas
+ *           can be Active at once — a merged view of every Active
+ *           schema's tables is used, Default winning on collisions.
+ *           Default is always Active and can't be deactivated directly.
+ *           getActiveId()/getActiveSchema() (the V10.7.1 single-schema
+ *           API) now resolve to the Default schema / merged Active view,
+ *           so every pre-V11.1 call site keeps working unmodified.
  */
 (function (root) {
   'use strict';
@@ -32,34 +41,29 @@
     storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
     var state = { entries: [], defaultId: null, activeIds: [] };
 
+    (function load() {
+      if (!storageImpl) return;
+      var raw; try { raw = storageImpl.getItem(STORAGE_KEY); } catch (e) { raw = null; }
+      if (!raw) return;
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.entries)) {
+          state.entries = parsed.entries;
+          state.defaultId = parsed.defaultId || parsed.activeId || (parsed.entries[0] && parsed.entries[0].id) || null;
+          state.activeIds = Array.isArray(parsed.activeIds) ? parsed.activeIds : (state.defaultId ? [state.defaultId] : []);
+          if (state.defaultId && state.activeIds.indexOf(state.defaultId) === -1) state.activeIds.push(state.defaultId);
+        }
+      } catch (e) { /* tolerate corrupted storage: start with a clean, empty store */ }
+    })();
+
     function persist() {
       if (!storageImpl) return;
       try { storageImpl.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
     }
-    function load() {
-      if (!storageImpl) return;
-      var raw = null;
-      try { raw = storageImpl.getItem(STORAGE_KEY); } catch (e) { raw = null; }
-      if (!raw) return;
-      try {
-        var parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.entries)) state = parsed;
-      } catch (e) {}
-    }
-    load();
 
     function count() { return state.entries.length; }
     function listEntries() { return state.entries.slice(); }
     function getEntry(id) { return state.entries.filter(function (e) { return e.id === id; })[0] || null; }
-    function getActiveId() { return state.activeIds.length ? state.activeIds[0] : state.defaultId; }
-    function getDefaultId() { return state.defaultId; }
-    function isDefault(id) { return state.defaultId === id; }
-    function isActive(id) { return state.activeIds.indexOf(id) !== -1 || state.defaultId === id; }
-    function getSchemaState(id) {
-      if (isDefault(id)) return 'default';
-      if (isActive(id)) return 'active';
-      return 'inactive';
-    }
 
     function addEntry(opts) {
       var entry = createEntry(opts);
@@ -73,33 +77,35 @@
     }
 
     function updateEntry(id, patch) {
-      var entry = getEntry(id);
-      if (!entry) return null;
-      Object.keys(patch || {}).forEach(function (k) { entry[k] = patch[k]; });
+      var e = getEntry(id);
+      if (!e) return false;
+      Object.keys(patch || {}).forEach(function (k) { e[k] = patch[k]; });
       persist();
-      return entry;
+      return true;
     }
+    function renameEntry(id, name) { return updateEntry(id, { name: name }); }
 
     function removeEntry(id) {
-      if (state.entries.length <= 1) return false;
-      state.entries = state.entries.filter(function (e) { return e.id !== id; });
-      state.activeIds = state.activeIds.filter(function (aid) { return aid !== id; });
-      if (state.defaultId === id) state.defaultId = state.entries.length ? state.entries[0].id : null;
-      if (!state.activeIds.length && state.defaultId) state.activeIds = [state.defaultId];
+      var idx = state.entries.findIndex(function (e) { return e.id === id; });
+      if (idx === -1) return false;
+      state.entries.splice(idx, 1);
+      state.activeIds = state.activeIds.filter(function (a) { return a !== id; });
+      if (state.defaultId === id) {
+        state.defaultId = state.entries.length ? state.entries[0].id : null;
+        if (state.defaultId && state.activeIds.indexOf(state.defaultId) === -1) state.activeIds.push(state.defaultId);
+      }
       persist();
       return true;
     }
 
-    function setEntryActive(id, active) {
-      if (isDefault(id) && !active) return false; // cannot deactivate the Default schema directly
-      var idx = state.activeIds.indexOf(id);
-      if (active && idx === -1) state.activeIds.push(id);
-      if (!active && idx !== -1) state.activeIds.splice(idx, 1);
-      persist();
-      return true;
+    // ---- V10.7.1 single-active-schema API (preserved exactly) ----
+    function getActiveId() { return state.defaultId; }
+    function getActiveEntry() { return state.defaultId ? getEntry(state.defaultId) : null; }
+    function getActiveSchema() {
+      var merged = getMergedActiveSchema();
+      return merged && merged.tables.length ? merged : (getActiveEntry() ? getActiveEntry().schema : null);
     }
-
-    function setDefaultId(id) {
+    function setActiveId(id) {
       if (!getEntry(id)) return false;
       state.defaultId = id;
       if (state.activeIds.indexOf(id) === -1) state.activeIds.push(id);
@@ -107,70 +113,79 @@
       return true;
     }
 
-    function setActiveId(id) {
-      // Convenience: make this the sole "primary" active entry (used when a single-schema view is required)
-      if (!getEntry(id)) return false;
-      if (state.activeIds.indexOf(id) === -1) state.activeIds.unshift(id); else {
-        state.activeIds = [id].concat(state.activeIds.filter(function (a) { return a !== id; }));
+    function recordSyncResult(id, result) {
+      var e = getEntry(id); if (!e) return false;
+      if (result && result.ok) {
+        e.lastSyncStatus = 'ok';
+        e.lastSyncAt = nowIso();
+        e.lastSyncError = null;
+        if (result.nextSyncAt) e.nextSyncAt = result.nextSyncAt;
+      } else {
+        e.lastSyncStatus = 'error';
+        e.lastSyncError = (result && result.error) || 'Unknown synchronization error.';
       }
       persist();
       return true;
     }
 
-    function getActiveEntry() {
-      var id = getActiveId();
-      return id ? getEntry(id) : null;
+    function importLegacySingleSchema(legacySchema, name) {
+      var entry = addEntry({ name: name || legacySchema.schema_name || 'Migrated Schema', schema: legacySchema, source: 'embedded' });
+      return entry;
     }
 
+    // ---- V11.1 multi-schema state model (additive) ----
+    function isDefault(id) { return state.defaultId === id; }
+    function isActive(id) { return state.activeIds.indexOf(id) !== -1; }
+    function getSchemaState(id) {
+      if (isDefault(id)) return 'default';
+      if (isActive(id)) return 'active';
+      return 'inactive';
+    }
+    function setDefaultId(id) {
+      if (!getEntry(id)) return false;
+      state.defaultId = id;
+      if (state.activeIds.indexOf(id) === -1) state.activeIds.push(id);
+      persist();
+      return true;
+    }
+    function setEntryActive(id, active) {
+      if (!getEntry(id)) return false;
+      if (!active && id === state.defaultId) return false;
+      var idx = state.activeIds.indexOf(id);
+      if (active && idx === -1) state.activeIds.push(id);
+      if (!active && idx !== -1) state.activeIds.splice(idx, 1);
+      persist();
+      return true;
+    }
+    function getDefaultId() { return state.defaultId; }
+    function getActiveIds() { return state.activeIds.slice(); }
     function getMergedActiveSchema() {
-      var activeEntries = state.entries.filter(function (e) { return isActive(e.id); });
-      if (!activeEntries.length) return { tables: [] };
-      var defaultEntry = getEntry(state.defaultId);
-      var ordered = defaultEntry ? [defaultEntry].concat(activeEntries.filter(function (e) { return e.id !== defaultEntry.id; })) : activeEntries;
+      var merged = { schema_name: 'Merged Active Schema', schema_version: 'merged', module_labels: {}, tables: [] };
       var byName = {};
-      var order = [];
-      ordered.forEach(function (entry) {
-        (entry.schema.tables || []).forEach(function (t) {
+      state.activeIds.forEach(function (id) {
+        var e = getEntry(id);
+        if (!e || !e.schema) return;
+        Object.assign(merged.module_labels, e.schema.module_labels || {});
+        (e.schema.tables || []).forEach(function (t) {
           var key = String(t.name).toUpperCase();
-          if (!byName[key]) { byName[key] = t; order.push(key); }
+          if (!byName[key] || id === state.defaultId) byName[key] = t;
         });
       });
-      var moduleLabels = {};
-      ordered.forEach(function (entry) { Object.assign(moduleLabels, entry.schema.module_labels || {}); });
-      return {
-        schema_name: defaultEntry ? defaultEntry.schema.schema_name : (ordered[0] && ordered[0].schema.schema_name),
-        schema_version: defaultEntry ? defaultEntry.schema.schema_version : (ordered[0] && ordered[0].schema.schema_version),
-        module_labels: moduleLabels,
-        tables: order.map(function (k) { return byName[k]; })
-      };
-    }
-
-    function getActiveSchema() { return getMergedActiveSchema(); }
-
-    function recordSyncResult(id, result) {
-      var entry = getEntry(id);
-      if (!entry) return;
-      entry.lastSyncAt = nowIso();
-      entry.lastSyncStatus = result && result.ok ? 'ok' : 'error';
-      entry.lastSyncError = result && result.error ? result.error : null;
-      persist();
-    }
-
-    function importLegacySingleSchema(schemaObj, name) {
-      return addEntry({ name: name || (schemaObj && schemaObj.schema_name) || 'Migrated Schema', schema: schemaObj, source: 'migrated' });
+      merged.tables = Object.keys(byName).map(function (k) { return byName[k]; });
+      return merged;
     }
 
     return {
-      count: count, listEntries: listEntries, getEntry: getEntry, addEntry: addEntry, updateEntry: updateEntry,
-      removeEntry: removeEntry, setEntryActive: setEntryActive, setDefaultId: setDefaultId, setActiveId: setActiveId,
-      isDefault: isDefault, isActive: isActive, getSchemaState: getSchemaState,
-      getActiveId: getActiveId, getDefaultId: getDefaultId, getActiveEntry: getActiveEntry,
-      getMergedActiveSchema: getMergedActiveSchema, getActiveSchema: getActiveSchema,
+      count: count, listEntries: listEntries, getEntry: getEntry,
+      addEntry: addEntry, updateEntry: updateEntry, renameEntry: renameEntry, removeEntry: removeEntry,
+      getActiveId: getActiveId, getActiveEntry: getActiveEntry, getActiveSchema: getActiveSchema, setActiveId: setActiveId,
       recordSyncResult: recordSyncResult, importLegacySingleSchema: importLegacySingleSchema,
-      persist: persist
+      persist: persist,
+      isDefault: isDefault, isActive: isActive, getSchemaState: getSchemaState,
+      setDefaultId: setDefaultId, setEntryActive: setEntryActive,
+      getDefaultId: getDefaultId, getActiveIds: getActiveIds, getMergedActiveSchema: getMergedActiveSchema
     };
   }
-
   var API = { STORAGE_KEY: STORAGE_KEY, createEntry: createEntry, createStore: createStore };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_SCHEMA_STORE = API;
