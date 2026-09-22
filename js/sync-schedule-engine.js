@@ -1,9 +1,8 @@
 /**
- * sync-schedule-engine.js — AP-SQL Assistant V10.7
+ * sync-schedule-engine.js — AP-SQL Assistant
  * Provides a small, fixed set of predefined "Schema Synchronization Time"
- * options (a dropdown, per the requirement), persists the selected option,
- * and computes next-run timestamps consistently for every configured
- * schema's automatic synchronization.
+ * options (a dropdown), persists the selected option, and computes
+ * intervals for automatic synchronization checks.
  */
 (function (root) {
   'use strict';
@@ -25,7 +24,8 @@
   function loadSelectedOptionId(storageImpl) {
     storageImpl = storageImpl || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!storageImpl) return DEFAULT_OPTION_ID;
-    var stored; try { stored = storageImpl.getItem(STORAGE_KEY); } catch (e) { stored = null; }
+    var stored = null;
+    try { stored = storageImpl.getItem(STORAGE_KEY); } catch (e) { stored = null; }
     return (stored && getOption(stored)) ? stored : DEFAULT_OPTION_ID;
   }
   function saveSelectedOptionId(storageImpl, id) {

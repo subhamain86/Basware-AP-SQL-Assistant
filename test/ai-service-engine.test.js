@@ -52,7 +52,7 @@ test('reviewSql passes when every table/column referenced genuinely exists', fun
 });
 test('reviewSql flags a logic mismatch: filters were implied but no WHERE clause exists', function () {
   var svc = makeService();
-  var interp = { filterConditions: [{ table: 'IA_INVOICE', column: 'STATUS', operator: 'eq', value: '40' }], aggregates: [], orderBy: [] };
+  var interp = { filterConditions: [{ table: 'IA_INVOICE', column: 'STATUS', operator: 'eq', value: '40' }], orderBy: [] };
   return svc.reviewSql('SELECT IA_INVOICE.INVOICE_NUMBER FROM IA_INVOICE', { tablesUsed: ['IA_INVOICE'], columnsUsed: [{ table: 'IA_INVOICE', column: 'INVOICE_NUMBER' }], interpretation: interp }).then(function (res) {
     assertTrue(res.logicFindings.length > 0);
   });
@@ -85,7 +85,7 @@ test('recommendEntities returns only tables that genuinely exist in the active s
   var svc = makeService();
   return svc.recommendEntities('supplier invoices').then(function (res) {
     assertTrue(res.tables.length > 0);
-    res.tables.forEach(function (t) { assertTrue(engine.tableExists(t.table)); });
+    res.tables.forEach(function (t) { assertTrue(engine.tableExists(t)); });
   });
 });
 test('parseFilterFromText converts a natural-language filter into a structured condition', function () {

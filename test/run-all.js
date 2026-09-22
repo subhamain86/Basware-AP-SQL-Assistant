@@ -17,10 +17,10 @@ global.test = function (name, fn) {
   }
   passed++; console.log('  \u2713 ' + name);
 };
-global.assertEqual = function (actual, expected, msg) { var a = JSON.stringify(actual), e = JSON.stringify(expected); if (a !== e) throw new Error((msg ? msg + ' — ' : '') + 'expected ' + e + ' but got ' + a); };
+global.assertEqual = function (actual, expected, msg) { var a = JSON.stringify(actual), e = JSON.stringify(expected); if (a !== e) throw new Error((msg ? msg + ' \u2014 ' : '') + 'expected ' + e + ' but got ' + a); };
 global.assertTrue = function (value, msg) { if (!value) throw new Error(msg || 'expected truthy value'); };
 global.assertFalse = function (value, msg) { if (value) throw new Error(msg || 'expected falsy value'); };
-global.assertIncludes = function (haystack, needle, msg) { if (String(haystack).indexOf(needle) === -1) throw new Error((msg ? msg + ' — ' : '') + 'expected to find "' + needle + '" in: ' + haystack); };
+global.assertIncludes = function (haystack, needle, msg) { if (String(haystack).indexOf(needle) === -1) throw new Error((msg ? msg + ' \u2014 ' : '') + 'expected to find "' + needle + '" in: ' + haystack); };
 global.assertThrows = function (fn, msg) { var threw = false; try { fn(); } catch (e) { threw = true; } if (!threw) throw new Error(msg || 'expected function to throw'); };
 if (typeof global.crypto === 'undefined') global.crypto = require('crypto').webcrypto;
 var files = fs.readdirSync(__dirname).filter(function (f) { return f.endsWith('.test.js'); }).sort();

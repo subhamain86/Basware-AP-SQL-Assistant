@@ -3,218 +3,35 @@
    -----------------------------------------------------------------------------
    Purpose: (1) fix the Hamburger Menu / Navbar distortion, and
             (2) upgrade Navbar icons to a modern 3D "fluid" style.
-
-   Integration: load this file AFTER css/styles.css in index.html:
-       <link rel="stylesheet" href="css/styles.css">
-       <link rel="stylesheet" href="css/navbar-v11.8.2-patch.css">
-
-   This file is intentionally ADDITIVE/override-only — it does not remove or
-   rewrite a single rule in the existing styles.css, so every other page,
-   card, and control keeps its current V11.8.1 appearance untouched.
+   This file is additive/override-only — it does not remove or rewrite a
+   single rule in styles.css.
    ============================================================================= */
-
-/* -----------------------------------------------------------------------
-   1) NAVBAR STABILITY FIX
-   Root causes addressed:
-     - flex-wrap allowed the brand/hamburger row to reflow oddly once the
-       offcanvas/collapse opened, distorting icon + text alignment.
-     - No explicit min-width:0 on flex children meant long labels or the
-       theme/sync controls could force the row to overflow instead of
-       truncating, which visually "pushed" the hamburger and brand icons.
-     - The offcanvas panel and any Bootstrap dropdowns inside the navbar
-       shared close z-index values with page content, causing the menu to
-       render beneath/behind cards on some pages once opened.
-   ----------------------------------------------------------------------- */
-
-.navbar {
-  z-index: 1045; /* keep the bar itself above page content at all times */
-}
-
-.navbar .container-fluid {
-  flex-wrap: nowrap;              /* stop the brand/hamburger row from reflowing */
-  align-items: center;
-  gap: .5rem;
-  min-width: 0;                   /* allow children to shrink instead of overflow */
-}
-
-.navbar .container-fluid > * {
-  min-width: 0;                   /* every direct flex child may shrink/truncate */
-}
-
-.navbar .hero-brand-row,
-.navbar .navbar-brand {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-.navbar .hero-brand-row .builder-heading,
-.navbar .hero-brand-row span,
-.navbar .hero-brand-row a {
-  min-width: 0;
-}
-
-/* Hamburger + logo badge never shrink or distort, regardless of how narrow
-   the viewport gets or how long the brand text is. */
-.navbar .navbar-toggler,
-.navbar .app-logo-badge,
-.navbar .logo-3d-wrap {
-  flex: 0 0 auto;
-  width: auto;
-}
-
-.navbar .navbar-toggler {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  box-shadow: none;
-  border-radius: 10px;
-  transition: background-color .15s ease, transform .15s ease;
-}
+.navbar { z-index: 1045; }
+.navbar .container-fluid { flex-wrap: nowrap; align-items: center; gap: .5rem; min-width: 0; }
+.navbar .container-fluid > * { min-width: 0; }
+.navbar .hero-brand-row, .navbar .navbar-brand { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+.navbar .hero-brand-row .builder-heading, .navbar .hero-brand-row span, .navbar .hero-brand-row a { min-width: 0; }
+.navbar .navbar-toggler, .navbar .app-logo-badge, .navbar .logo-3d-wrap { flex: 0 0 auto; width: auto; }
+.navbar .navbar-toggler { display: flex; align-items: center; justify-content: center; line-height: 1; box-shadow: none; border-radius: 10px; transition: background-color .15s ease, transform .15s ease; }
 .navbar .navbar-toggler:hover { background-color: rgba(47,111,237,.10); }
 .navbar .navbar-toggler:active { transform: scale(.94); }
-.navbar .navbar-toggler:focus-visible {
-  outline: 2px solid var(--brand, #2f6fed);
-  outline-offset: 2px;
-  box-shadow: none;
-}
-
-/* Any secondary controls in the bar (sync-schedule select, Guided
-   Walkthrough button, signature) must be allowed to wrap onto their own
-   row on narrow screens WITHOUT dragging the brand/hamburger row along
-   with them, and without overlapping once wrapped. */
-.navbar .sync-schedule-row,
-.navbar [data-tour="theme-toggle"],
-.navbar .creator-signature-wrap {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
+.navbar .navbar-toggler:focus-visible { outline: 2px solid var(--brand, #2f6fed); outline-offset: 2px; box-shadow: none; }
+.navbar .sync-schedule-row, .navbar [data-tour="theme-toggle"], .navbar .creator-signature-wrap { flex: 0 1 auto; min-width: 0; }
 @media (max-width: 991.98px) {
-  .navbar .container-fluid {
-    row-gap: .5rem;
-  }
-  /* When the collapsible content opens on tablet/mobile, force it onto a
-     clean, full-width row below brand+hamburger — never beside it, and
-     never overlapping it. */
-  .navbar .navbar-collapse,
-  .navbar #navbarFitCollapse {
-    flex-basis: 100%;
-    width: 100%;
-    max-width: 100%;
-    order: 3;
-    margin-top: .35rem;
-    box-sizing: border-box;
-  }
-  .navbar .sync-schedule-row {
-    flex-wrap: wrap;
-    width: 100%;
-  }
+  .navbar .container-fluid { row-gap: .5rem; }
+  .navbar .navbar-collapse, .navbar #navbarFitCollapse { flex-basis: 100%; width: 100%; max-width: 100%; order: 3; margin-top: .35rem; box-sizing: border-box; }
+  .navbar .sync-schedule-row { flex-wrap: wrap; width: 100%; }
 }
-
-@media (max-width: 420px) {
-  /* Reclaim horizontal space on small phones without changing behavior:
-     hide the text label only, the control itself remains fully usable. */
-  .navbar .sync-schedule-row .sync-schedule-label-text {
-    display: none;
-  }
-}
-
-@media (max-width: 360px) {
-  .navbar .hero-brand-row .small {
-    display: none;
-  }
-}
-
-/* Offcanvas main menu: keep it above everything, and make sure closing it
-   never leaves a stale backdrop or shifted body padding behind. */
-.offcanvas {
-  z-index: 1050;
-}
-.offcanvas-backdrop {
-  z-index: 1049;
-}
-body {
-  overflow-x: hidden; /* belt-and-braces: no horizontal scroll from any
-                          transient state while the menu opens/closes */
-}
-
-
-/* -----------------------------------------------------------------------
-   2) 3D FLUID NAVBAR ICONS
-   Builds on the existing .icon-badge / .app-logo-badge 3D system already
-   defined in styles.css, applying it consistently to every icon inside
-   the navbar (hamburger, brand logo, nav-link icons, theme icon, sync
-   icon, tour icon) with a subtle, professional depth effect, smooth
-   hover/active states, and a clear "currently selected" state.
-   ----------------------------------------------------------------------- */
-
-.navbar .icon-badge,
-.navbar .app-logo-badge {
-  transform-style: preserve-3d;
-  transition: transform .16s cubic-bezier(.2,.8,.3,1.2),
-              box-shadow .16s ease,
-              filter .16s ease;
-}
-
-/* Consistent sizing + vertical alignment with the adjoining text. */
-.navbar .nav-link .icon-badge,
-.navbar .menu-item-label .icon-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  margin-right: .5rem;
-  vertical-align: -6px;
-}
-
-/* Subtle depth: a soft top highlight + bottom shadow, rather than a flat
-   fill — this is what reads as "3D fluid" without looking cartoonish. */
-.navbar .icon-badge {
-  box-shadow:
-    0 3px 7px rgba(20,30,70,.20),
-    inset 0 1px 0 rgba(255,255,255,.45),
-    inset 0 -3px 5px rgba(0,0,0,.14);
-}
-
-/* Hover: gentle lift + tilt, fast and smooth — no bounce, no spin. */
-.navbar .nav-link:hover .icon-badge,
-.navbar button:hover > .icon-badge,
-.navbar .icon-badge:hover {
-  transform: translateY(-2px) scale(1.08) rotate(-1.5deg);
-  box-shadow:
-    0 7px 14px rgba(20,30,70,.24),
-    inset 0 1px 0 rgba(255,255,255,.5),
-    inset 0 -3px 5px rgba(0,0,0,.12);
-  filter: saturate(1.1) brightness(1.03);
-}
-.navbar .icon-badge:active {
-  transform: translateY(0) scale(.96);
-}
-
-/* Active / currently-selected nav item: same icon shape and 3D language,
-   just a clear accent ring so it reads as "selected" at a glance. */
-.navbar .nav-link.active .icon-badge,
-.offcanvas .nav-link.active .icon-badge {
-  box-shadow:
-    0 0 0 2px rgba(255,255,255,.55),
-    0 3px 7px rgba(20,30,70,.22),
-    inset 0 1px 0 rgba(255,255,255,.45);
-}
-
-/* Keyboard accessibility: a visible focus ring that doesn't fight the
-   3D shadow above. */
-.navbar .nav-link:focus-visible .icon-badge,
-.navbar button:focus-visible > .icon-badge {
-  outline: 2px solid var(--brand, #2f6fed);
-  outline-offset: 2px;
-}
-
-/* Respect users who prefer reduced motion. */
-@media (prefers-reduced-motion: reduce) {
-  .navbar .icon-badge,
-  .navbar .app-logo-badge,
-  .navbar .navbar-toggler {
-    transition: none !important;
-  }
-}
+@media (max-width: 420px) { .navbar .sync-schedule-row .sync-schedule-label-text { display: none; } }
+@media (max-width: 360px) { .navbar .hero-brand-row .small { display: none; } }
+.offcanvas { z-index: 1050; }
+.offcanvas-backdrop { z-index: 1049; }
+body { overflow-x: hidden; }
+.navbar .icon-badge, .navbar .app-logo-badge { transform-style: preserve-3d; transition: transform .16s cubic-bezier(.2,.8,.3,1.2), box-shadow .16s ease, filter .16s ease; }
+.navbar .nav-link .icon-badge, .navbar .menu-item-label .icon-badge { width: 26px; height: 26px; border-radius: 8px; margin-right: .5rem; vertical-align: -6px; }
+.navbar .icon-badge { box-shadow: 0 3px 7px rgba(20,30,70,.20), inset 0 1px 0 rgba(255,255,255,.45), inset 0 -3px 5px rgba(0,0,0,.14); }
+.navbar .nav-link:hover .icon-badge, .navbar button:hover > .icon-badge, .navbar .icon-badge:hover { transform: translateY(-2px) scale(1.08) rotate(-1.5deg); box-shadow: 0 7px 14px rgba(20,30,70,.24), inset 0 1px 0 rgba(255,255,255,.5), inset 0 -3px 5px rgba(0,0,0,.12); filter: saturate(1.1) brightness(1.03); }
+.navbar .icon-badge:active { transform: translateY(0) scale(.96); }
+.navbar .nav-link.active .icon-badge, .offcanvas .nav-link.active .icon-badge { box-shadow: 0 0 0 2px rgba(255,255,255,.55), 0 3px 7px rgba(20,30,70,.22), inset 0 1px 0 rgba(255,255,255,.45); }
+.navbar .nav-link:focus-visible .icon-badge, .navbar button:focus-visible > .icon-badge { outline: 2px solid var(--brand, #2f6fed); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .navbar .icon-badge, .navbar .app-logo-badge, .navbar .navbar-toggler { transition: none !important; } }

@@ -38,14 +38,14 @@
     return { primary: primary, joined: joined, all: (primary ? [primary] : []).concat(joined) };
   }
   function quoteIdentifierVariants(name) {
-    return new RegExp('(["\'\\[`]?)\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b\\1', 'g');
+    return new RegExp('(["\'\\[\\`]?)\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b\\1', 'g');
   }
   var RULE_CASE_ELSE_DATATYPE = {
     id: 'case-else-datatype',
     matchError: /inconsistent datatype|conversion failed|cannot convert|type mismatch|invalid.*use of|ORA-00932/i,
     apply: function (sql, ctx) {
       if (!DATATYPE) return null;
-      var caseRe = /\bCASE\b[\s\S]*?\bELSE\s+([A-Za-z_][\w\.]*)\s*(?=\bEND\b)/gi;
+      var caseRe = /\bCASE\b[\s\S]*?\bELSE\s+([A-Za-z_][\w.]*)\s*(?=\bEND\b)/gi;
       var changes = []; var newSql = sql; var m; var anyFound = false;
       while ((m = caseRe.exec(sql))) {
         var colRef = m[1];
@@ -155,6 +155,16 @@
     }
   };
   var AGG_FUNCS = /^(COUNT|SUM|AVG|MIN|MAX)\s*\(/i;
+  function splitTopLevel(text) {
+    var parts = []; var depth = 0; var current = '';
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (ch === '(') depth++; if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) { parts.push(current); current = ''; } else current += ch;
+    }
+    if (current.trim()) parts.push(current);
+    return parts;
+  }
   var RULE_GROUP_BY = {
     id: 'group-by-missing-column',
     matchError: /not a group by expression|not contained in either an aggregate function or the group by clause|must appear in the group by clause|ORA-00979/i,
@@ -188,16 +198,6 @@
       };
     }
   };
-  function splitTopLevel(text) {
-    var parts = []; var depth = 0; var current = '';
-    for (var i = 0; i < text.length; i++) {
-      var ch = text[i];
-      if (ch === '(') depth++; if (ch === ')') depth--;
-      if (ch === ',' && depth === 0) { parts.push(current); current = ''; } else current += ch;
-    }
-    if (current.trim()) parts.push(current);
-    return parts;
-  }
   var RULE_DATE_FORMAT = {
     id: 'date-format',
     matchError: /does not match the format string|literal does not match|conversion failed when converting date|invalid datetime format|date\/time field value out of range|ORA-01861|ORA-01858/i,
@@ -300,7 +300,7 @@
       var onRe = /JOIN\s+([A-Za-z_][\w]*)[\s\S]*?\bON\s+([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)\s*=\s*([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)/i;
       var m = sql.match(onRe);
       if (!m) return null;
-      var joinedTable = m[1], leftTable = m[2], leftCol = m[3], rightTable = m[4], rightCol = m[5];
+      var leftTable = m[2], leftCol = m[3], rightTable = m[4], rightCol = m[5];
       var leftOk = ctx.engine.columnExists(leftTable, leftCol);
       var rightOk = ctx.engine.columnExists(rightTable, rightCol);
       if (leftOk && rightOk) return null;
