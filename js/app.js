@@ -27,9 +27,17 @@
     var entry = schemaStore.getActiveEntry();
     if (entry) schemaStore.updateEntry(entry.id, { schema: schemaObj });
   }
-  function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); }
-  rebuildEngine();
+  function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); rebuildAiService(); }
   var decodeStore = APSQL_DECODE.createDecodeStore();
+  /* ================================================================
+     V11.8 — AI SERVICE LAYER
+     Every AI-powered feature below goes through `aiService`, which
+     always uses the CURRENT active schema (rebuilt whenever the
+     schema changes) — AI never silently uses a stale schema.
+     ================================================================ */
+  var aiService = null;
+  function rebuildAiService() { aiService = APSQL_AI.createAIService({ engine: engine, decodeStore: decodeStore }); }
+  rebuildEngine();
   var sharedSchemaChecked = false, sharedSchemaFound = false, sharedSchemaError = null;
   var SHARED_SCHEMA_PATH = APSQL_SHARED_SCHEMA.DEFAULT_SHARED_SCHEMA_PATH;
   function renderSharedSchemaStrip(elId) {
@@ -350,9 +358,7 @@
   }
   renderSchemaPersistenceStatus();
   function syncStatusBadgeClass(status) { return 'status-' + (status || 'idle'); }
-  function schemaStateBadgeHtml(state) {
-    return '<span class="badge schema-state-badge state-' + state + ' text-uppercase">' + state + '</span>';
-  }
+  function schemaStateBadgeHtml(state) { return '<span class="badge schema-state-badge state-' + state + ' text-uppercase">' + state + '</span>'; }
   function renderSchemaStoreList() {
     var box = $('schemaStoreList'); if (!box) return;
     box.innerHTML = '';
@@ -374,24 +380,12 @@
       var activeToggleWrap = document.createElement('div'); activeToggleWrap.className = 'form-check form-switch schema-store-active-toggle';
       var activeToggle = document.createElement('input'); activeToggle.type = 'checkbox'; activeToggle.className = 'form-check-input'; activeToggle.checked = schemaStore.isActive(e.id); activeToggle.disabled = schemaStore.isDefault(e.id);
       var activeToggleLabel = document.createElement('label'); activeToggleLabel.className = 'form-check-label small'; activeToggleLabel.textContent = 'Active';
-      activeToggle.addEventListener('change', function () {
-        schemaStore.setEntryActive(e.id, activeToggle.checked);
-        rebuildEngine();
-        refreshAllViewsAfterSchemaChange();
-        renderSchemaStoreList();
-      });
+      activeToggle.addEventListener('change', function () { schemaStore.setEntryActive(e.id, activeToggle.checked); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaStoreList(); });
       activeToggleWrap.appendChild(activeToggle); activeToggleWrap.appendChild(activeToggleLabel);
       actions.appendChild(activeToggleWrap);
       if (!isActive) {
-        var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm schema-store-select-btn'; selectBtn.setAttribute('data-entry-id', e.id);
-        selectBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Set Active';
-        selectBtn.addEventListener('click', function () {
-          schemaStore.setActiveId(e.id);
-          rebuildEngine();
-          refreshAllViewsAfterSchemaChange();
-          renderSchemaPersistenceStatus();
-          renderSchemaStoreList();
-        });
+        var selectBtn = document.createElement('button'); selectBtn.type = 'button'; selectBtn.className = 'btn btn-outline-primary btn-sm'; selectBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i>Set Active';
+        selectBtn.addEventListener('click', function () { schemaStore.setActiveId(e.id); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); });
         actions.appendChild(selectBtn);
       }
       item.appendChild(main); item.appendChild(actions);
@@ -443,14 +437,7 @@
       return '<div class="form-check"><input class="form-check-input" type="radio" name="defaultSchemaRadio" value="' + e.id + '" id="defRadio_' + e.id + '" ' + (schemaStore.isDefault(e.id) ? 'checked' : '') + '><label class="form-check-label small" for="defRadio_' + e.id + '">' + esc(e.name) + '</label></div>';
     }).join('') || '<p class="text-body-secondary small mb-0">No schemas stored yet.</p>';
     defaultBox.querySelectorAll('input[name="defaultSchemaRadio"]').forEach(function (r) {
-      r.addEventListener('change', function () {
-        schemaStore.setDefaultId(r.value);
-        rebuildEngine();
-        refreshAllViewsAfterSchemaChange();
-        renderSchemaPersistenceStatus();
-        renderSchemaStoreList();
-        renderDefaultActiveSchemaChoices();
-      });
+      r.addEventListener('change', function () { schemaStore.setDefaultId(r.value); rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaPersistenceStatus(); renderSchemaStoreList(); renderDefaultActiveSchemaChoices(); });
     });
     activeBox.innerHTML = entries.map(function (e) {
       return '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + e.id + '" id="actChk_' + e.id + '" ' + (schemaStore.isActive(e.id) ? 'checked' : '') + ' ' + (schemaStore.isDefault(e.id) ? 'disabled' : '') + '><label class="form-check-label small" for="actChk_' + e.id + '">' + esc(e.name) + (schemaStore.isDefault(e.id) ? ' (Default — always Active)' : '') + '</label></div>';
@@ -461,10 +448,7 @@
   if (saveActiveSelBtn) saveActiveSelBtn.addEventListener('click', function () {
     var activeBox = $('activeSchemaChoices'); if (!activeBox) return;
     activeBox.querySelectorAll('input[type=checkbox]').forEach(function (cb) { schemaStore.setEntryActive(cb.value, cb.checked); });
-    rebuildEngine();
-    refreshAllViewsAfterSchemaChange();
-    renderSchemaStoreList();
-    renderDefaultActiveSchemaChoices();
+    rebuildEngine(); refreshAllViewsAfterSchemaChange(); renderSchemaStoreList(); renderDefaultActiveSchemaChoices();
     var resultEl = $('activeSchemaSaveResult');
     if (resultEl) { resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Active schema selection saved.</span>'; setTimeout(function () { resultEl.innerHTML = ''; }, 2500); }
   });
@@ -480,7 +464,7 @@
   function closeMenu() { if (offcanvasInstance) offcanvasInstance.hide(); }
   var currentView = 'quickstart';
   function showView(view) {
-    document.querySelectorAll('.offcanvas-body > button.nav-link, .menu-submenu .nav-link, [data-view]').forEach(function (b) { if (b.hasAttribute && b.hasAttribute('data-view')) b.classList.toggle('active', b.getAttribute('data-view') === view); });
+    document.querySelectorAll('[data-view]').forEach(function (b) { if (b.hasAttribute('data-view')) b.classList.toggle('active', b.getAttribute('data-view') === view); });
     document.querySelectorAll('.app-view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + view); });
     window.scrollTo(0, 0);
     currentView = view;
@@ -560,7 +544,19 @@
     var existing = decodeStore.getManualDecode(tname, colName) || [];
     var container = document.createElement('div'); container.className = 'decode-editor-box mt-2';
     function render() {
-      container.innerHTML = '<div class="fw-semibold small mb-2">Manual decode for ' + esc(colName) + '</div>';
+      container.innerHTML = '<div class="fw-semibold small mb-2">Manual decode for ' + esc(colName) + '</div><div class="mb-2"><button type="button" class="btn btn-outline-primary btn-sm ai-propose-decode-btn"><span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Propose from description</button></div>';
+      var aiPropose = container.querySelector('.ai-propose-decode-btn');
+      aiPropose.addEventListener('click', function () {
+        var hint = prompt('Describe the mapping in plain language (e.g. "0 means Draft, 1 means Approved"):', '');
+        if (!hint) return;
+        aiPropose.disabled = true; aiPropose.innerHTML = '<span class="ai-spinner me-1" style="display:inline-block;width:12px;height:12px;"></span>Thinking\u2026';
+        aiService.proposeCaseDecode(tname, colName, hint).then(function (res) {
+          aiPropose.disabled = false; aiPropose.innerHTML = '<span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Propose from description';
+          if (res.reused) { alert('A definition already exists for this column (' + res.source + ') — reusing it instead of creating a duplicate.'); return; }
+          if (res.values && res.values.length) { res.values.forEach(function (v) { existing.push(v); }); decodeStore.setManualDecode(tname, colName, existing); render(); if (onValuesChanged) onValuesChanged(); }
+          else alert(res.narrative || 'No values could be proposed from that description.');
+        });
+      });
       var list = document.createElement('div');
       existing.forEach(function (pair, idx) {
         var row = document.createElement('div'); row.className = 'decode-value-row';
@@ -807,6 +803,7 @@
       body.innerHTML = '<div class="alert ' + alertClass + ' mb-2"><strong>' + titleText + '</strong><br>' + esc(res.message) + '</div>' + renderSuggestedFixes(res.message);
       $('copyBtn').classList.add('d-none'); $('optimizeBtn').classList.add('d-none'); $('optimizeReportBox').innerHTML = '';
       $('explainBtn').classList.add('d-none'); $('explanationReportBox').innerHTML = ''; $('explanationReportBox').classList.add('d-none');
+      $('aiReviewBtn').classList.add('d-none'); $('aiReviewReportBox').innerHTML = '';
       return;
     }
     var tables = (res.tablesUsed || []).map(function (t) { return '<span class="badge text-bg-light border me-1">' + t + '</span>'; }).join('');
@@ -814,10 +811,16 @@
     var filters = (res.filtersApplied || []).map(function (f) { return '<li>' + esc(f) + '</li>'; }).join('') || '<li class="text-body-secondary">None</li>';
     var assumptions = (res.assumptions || []).map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('');
     body.innerHTML = '<div class="alert alert-success py-2 mb-2"><small>&#9989; Query validated against active schema (' + esc(res.dialect || '') + ', read-only)</small></div><pre class="sql-output mb-3">' + highlight(res.sql) + '</pre><div class="small mb-2"><strong>Tables Used:</strong><br>' + (tables || '<span class="text-body-secondary">None</span>') + '</div><div class="small mb-2"><strong>Columns Used:</strong><br>' + (cols || '<span class="text-body-secondary">None (aggregated query)</span>') + '</div><div class="small mb-2"><strong>Filters Applied:</strong><ul class="mb-0">' + filters + '</ul></div><div class="small"><strong>Assumptions:</strong><ul class="mb-0">' + assumptions + '</ul></div>';
-    $('copyBtn').classList.remove('d-none'); $('optimizeBtn').classList.remove('d-none'); $('optimizeReportBox').innerHTML = ''; $('explainBtn').classList.remove('d-none');
+    $('copyBtn').classList.remove('d-none'); $('optimizeBtn').classList.remove('d-none'); $('optimizeReportBox').innerHTML = ''; $('explainBtn').classList.remove('d-none'); $('aiReviewBtn').classList.remove('d-none'); $('aiReviewReportBox').innerHTML = '';
   }
   $('copyBtn').addEventListener('click', function () { if (lastResult && lastResult.status === 'ok') { navigator.clipboard && navigator.clipboard.writeText(lastResult.sql); var old = $('copyBtn').innerHTML; $('copyBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('copyBtn').innerHTML = old; }, 1300); } });
-  $('optimizeBtn').addEventListener('click', function () { if (!lastResult || lastResult.status !== 'ok') return; var opt = APSQL_OPTIMIZE.optimizeSql(engine, lastResult); if (opt.hasChanges) { lastResult = Object.assign({}, lastResult, { sql: opt.optimizedSql }); renderResult(lastResult); } renderOptimizeReport('optimizeReportBox', opt); });
+  $('optimizeBtn').addEventListener('click', function () {
+    if (!lastResult || lastResult.status !== 'ok') return;
+    aiService.optimizeSql(lastResult).then(function (aiRes) {
+      if (aiRes.hasChanges) { lastResult = Object.assign({}, lastResult, { sql: aiRes.optimizedSql }); renderResult(lastResult); }
+      renderOptimizeReport('optimizeReportBox', { changesApplied: aiRes.changesApplied, recommendations: aiRes.recommendations });
+    });
+  });
   var lastInterpretation = null;
   $('explainBtn').addEventListener('click', function () {
     var box = $('explanationReportBox'); var isHidden = box.classList.contains('d-none');
@@ -826,6 +829,34 @@
     if (!lines.length) box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small">This query was built manually (or nothing to explain yet). Describe your requirement above and click Build Query to see a plain-language explanation here.</div>';
     else box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><strong><i class="bi bi-lightbulb-fill me-1"></i>This query:</strong><ul class="mt-1 mb-0">' + lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul></div>';
     box.classList.remove('d-none');
+  });
+  /* ---- V11.8: AI Self-Review of generated SQL (spec section 21) ---- */
+  $('aiReviewBtn').addEventListener('click', function () {
+    if (!lastResult || lastResult.status !== 'ok') return;
+    $('aiReviewLoadingLine').classList.remove('d-none'); $('aiReviewReportBox').innerHTML = '';
+    var meta = { tablesUsed: lastResult.tablesUsed, columnsUsed: lastResult.columnsUsed, interpretation: lastInterpretation, unresolvedTables: (lastInterpretation && lastInterpretation.unresolvedJoins) || [] };
+    aiService.optimizeSql(lastResult).then(function (optRes) {
+      meta.optimizeResult = { recommendations: optRes.recommendations };
+      return aiService.reviewSql(lastResult.sql, meta);
+    }).then(function (review) {
+      $('aiReviewLoadingLine').classList.add('d-none');
+      var items = [
+        { ok: review.schemaCorrect, label: 'Schema correctness' },
+        { ok: review.relationshipCorrect, label: 'Relationship correctness' },
+        { ok: !(review.logicFindings && review.logicFindings.length), label: 'Logic matches request' },
+        { ok: true, label: 'Dialect: ' + ($('dialectSel').value || 'Generic') }
+      ];
+      var html = '<div class="ai-review-box"><div class="ai-review-heading"><span class="ai-badge"><span class="ai-badge-dot"></span>AI Self-Review</span></div>';
+      html += '<ul class="ai-review-check-list">' + items.map(function (it) { return '<li class="' + (it.ok ? 'ok' : 'warn') + '"><i class="bi ' + (it.ok ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill') + '"></i>' + esc(it.label) + '</li>'; }).join('') + '</ul>';
+      var allNotes = (review.errors || []).concat(review.logicFindings || []).concat(review.performanceFindings || []);
+      if (allNotes.length) html += '<ul class="mt-2 mb-0 small">' + allNotes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
+      else html += '<div class="mt-2 small text-body-secondary">' + esc(review.narrative) + '</div>';
+      html += '</div>';
+      $('aiReviewReportBox').innerHTML = html;
+    }).catch(function () {
+      $('aiReviewLoadingLine').classList.add('d-none');
+      $('aiReviewReportBox').innerHTML = '<div class="alert alert-warning py-2 mb-0 small">AI review is temporarily unavailable. The generated SQL above was already validated against the active schema at generation time.</div>';
+    });
   });
   function renderConfidenceChecklist(interpretation) {
     var box = $('confidenceChecklistBox');
@@ -943,8 +974,11 @@
     box.innerHTML = '<div class="alert alert-info py-2 mb-0 small">' + parts.join('') + '</div>';
   }
   function runGenerate() {
-    applyDescriptionToSelection();
     var promptText = $('promptInput').value.trim();
+    var showLoading = !!promptText;
+    if (showLoading) $('aiIntentLoadingLine').classList.remove('d-none');
+    applyDescriptionToSelection();
+    if (showLoading) $('aiIntentLoadingLine').classList.add('d-none');
     var opts = buildOptions();
     var res = APSQL_ENGINE.generateSql(promptText, opts, engine, decodeStore);
     renderResult(res);
@@ -964,8 +998,8 @@
     lastInterpretation = null; lastResult = null;
     $('descriptionInterpretationBox').innerHTML = ''; $('confidenceChecklistBox').innerHTML = '';
     $('ambiguityBox').classList.add('d-none'); $('ambiguityBox').innerHTML = '';
-    $('explanationReportBox').classList.add('d-none'); $('explanationReportBox').innerHTML = ''; $('optimizeReportBox').innerHTML = '';
-    $('copyBtn').classList.add('d-none'); $('optimizeBtn').classList.add('d-none'); $('explainBtn').classList.add('d-none');
+    $('explanationReportBox').classList.add('d-none'); $('explanationReportBox').innerHTML = ''; $('optimizeReportBox').innerHTML = ''; $('aiReviewReportBox').innerHTML = '';
+    $('copyBtn').classList.add('d-none'); $('optimizeBtn').classList.add('d-none'); $('explainBtn').classList.add('d-none'); $('aiReviewBtn').classList.add('d-none');
     $('resultBody').innerHTML = '<p class="text-body-secondary small mb-0">Your generated SQL will appear here as soon as you click Build Query.</p>';
     refreshTablesColumnsUI();
   }
@@ -1020,7 +1054,13 @@
     $('crCopyBtn').classList.remove('d-none'); $('crOptimizeBtn').classList.remove('d-none'); $('crOptimizeReportBox').innerHTML = '';
   }
   $('crCopyBtn').addEventListener('click', function () { if (crLastResult && crLastResult.status === 'ok') { navigator.clipboard && navigator.clipboard.writeText(crLastResult.sql); var old = $('crCopyBtn').innerHTML; $('crCopyBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('crCopyBtn').innerHTML = old; }, 1300); } });
-  $('crOptimizeBtn').addEventListener('click', function () { if (!crLastResult || crLastResult.status !== 'ok') return; var opt = APSQL_OPTIMIZE.optimizeSql(engine, crLastResult); if (opt.hasChanges) { crLastResult = Object.assign({}, crLastResult, { sql: opt.optimizedSql }); crRenderResult(crLastResult); } renderOptimizeReport('crOptimizeReportBox', opt); });
+  $('crOptimizeBtn').addEventListener('click', function () {
+    if (!crLastResult || crLastResult.status !== 'ok') return;
+    aiService.optimizeSql(crLastResult).then(function (aiRes) {
+      if (aiRes.hasChanges) { crLastResult = Object.assign({}, crLastResult, { sql: aiRes.optimizedSql }); crRenderResult(crLastResult); }
+      renderOptimizeReport('crOptimizeReportBox', { changesApplied: aiRes.changesApplied, recommendations: aiRes.recommendations });
+    });
+  });
   function crApplyDescriptionToSelection() {
     var text = $('crDescriptionInput').value.trim();
     if (!text) { $('crDescriptionInterpretationBox').innerHTML = ''; return; }
@@ -1081,10 +1121,34 @@
   }
   $('schemaSearchInput').addEventListener('input', function (e) { schemaSearchTerm = e.target.value; renderUsedSchema(); });
   $('schemaSearchClearBtn').addEventListener('click', function () { $('schemaSearchInput').value = ''; schemaSearchTerm = ''; renderUsedSchema(); });
+  /* ---- V11.8: AI Schema Assistant (Used Schema page) ---- */
+  function renderAiFactTable(facts) {
+    return '<table class="ai-fact-table"><tbody>' + facts.map(function (f) { return '<tr><td>' + esc(f.fact) + '</td><td>' + esc(f.value) + '</td></tr>'; }).join('') + '</tbody></table>';
+  }
+  function askSchemaAssistant() {
+    var q = ($('schemaAssistantInput').value || '').trim();
+    if (!q) return;
+    $('schemaAssistantLoadingLine').classList.remove('d-none'); $('schemaAssistantAnswerBox').classList.add('d-none');
+    aiService.explainSchemaObject(q).then(function (answer) {
+      $('schemaAssistantLoadingLine').classList.add('d-none');
+      var box = $('schemaAssistantAnswerBox'); box.classList.remove('d-none');
+      var sourceTag = answer.groundedInSchema ? '<span class="ai-source-tag from-schema">From schema</span>' : '<span class="ai-source-tag from-ai">AI interpretation</span>';
+      var html = '<div class="d-flex align-items-center gap-2 mb-1"><strong>' + esc(answer.subject || 'Answer') + '</strong>' + sourceTag + '</div>';
+      html += '<div class="ai-assistant-answer mb-2">' + esc(answer.narrative) + '</div>';
+      if (answer.facts && answer.facts.length) html += renderAiFactTable(answer.facts);
+      box.innerHTML = html;
+    }).catch(function () {
+      $('schemaAssistantLoadingLine').classList.add('d-none');
+      var box = $('schemaAssistantAnswerBox'); box.classList.remove('d-none');
+      box.innerHTML = '<div class="alert alert-warning py-2 mb-0 small">The AI Schema Assistant is temporarily unavailable. Browse the schema tree below instead.</div>';
+    });
+  }
+  $('schemaAssistantAskBtn').addEventListener('click', askSchemaAssistant);
+  $('schemaAssistantInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') askSchemaAssistant(); });
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap ? new window.bootstrap.Modal(aboutModalEl) : null;
   $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.7'], ['Purpose', 'Version 11.7 restores the application UI to the original Version 10.7.1 visual design (navbar, cards, 3D logo badge, signature, gradients) while retaining every feature consolidated through Version 11.5 underneath it: multiple stored schemas with independent Default/Active/Inactive states, the encrypted GitHub connection vault, a selectable synchronization schedule, and operational password management. Describe What You Need remains an intelligent, schema-aware assistant, and the structured Query Builder remains fully available for precise manual control.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key; because this is a client-side-only application with no server-side secret store, the vault passphrase itself is the real access boundary and must be shared with authorized users separately \u2014 it is never stored alongside the encrypted vault. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.8'], ['Purpose', 'Version 11.8 restores the application UI to the original Version 10.7.1 visual design (navbar, cards, 3D logo badge, signature, gradients), refines it with a professional fluid 3D icon system, and layers a schema-grounded AI service architecture across SQL generation review, Error Rectification, Query Optimization, and a new Schema Assistant. AI is always routed through a single AI Service Layer so the provider can change later without touching any UI code; the default provider is a fully local, deterministic engine that never invents schema objects and never requires a network call or API key. If AI is ever unavailable, every existing non-AI workflow (manual table/column selection, filters, CR builder, password-protected schema management) continues to work exactly as before.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. AI recommendations are always reviewable and are never saved to the schema without the operational password. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
   var WORKFLOW_STEPS = ['Upload Document', 'Read Document', 'Detect Format', 'Detect Modules', 'Detect Tables', 'Detect Columns', 'Extract Metadata', 'Normalize Schema', 'Validate Schema', 'Show Preview', 'User Reviews Changes', 'Generate JSON', 'Validate JSON', 'Apply Schema Update'];
@@ -1189,9 +1253,10 @@
   var errLastResult = null;
   function renderErrorRectifierResult(result) {
     errLastResult = result;
+    $('errAiAnalysisBody').innerHTML = '<p class="mb-0">' + esc(result.analysis || result.errorIdentified || '') + '</p>';
     $('errRectifiedSqlBody').innerHTML = '<pre class="sql-output mb-0">' + highlight(result.correctedSql) + '</pre>';
     $('errCopySqlBtn').classList.remove('d-none');
-    $('errExplanationBody').innerHTML = '<div class="explanation-heading"><i class="bi bi-search me-1"></i>Error Identified</div><p class="mb-2">' + esc(result.errorIdentified) + '</p><div class="explanation-heading"><i class="bi bi-check2-circle me-1"></i>Correction Applied</div><p class="mb-0">' + esc(result.correctionApplied) + '</p>';
+    $('errExplanationBody').innerHTML = '<p class="mb-0">' + esc(result.explanation || result.correctionApplied || '') + '</p>';
     $('errCopyExplanationBtn').classList.remove('d-none');
     var changedCard = $('errWhatChangedCard'); var changedBody = $('errWhatChangedBody');
     if (result.changed && result.changes && result.changes.length) { changedCard.classList.remove('d-none'); changedBody.innerHTML = result.changes.map(function (c) { return '<div class="change-row"><code class="change-from">' + esc(c.from) + '</code><span class="change-arrow">&rarr;</span><code class="change-to">' + esc(c.to) + '</code></div>'; }).join(''); }
@@ -1201,18 +1266,32 @@
     var errorText = $('errErrorInput').value; var sqlText = $('errSqlInput').value;
     var detected = window.APSQL_ERROR_RECTIFIER.detectDialectFromError(errorText); if (detected) $('errDialectSel').value = detected;
     var dialect = $('errDialectSel').value;
-    var result = window.APSQL_ERROR_RECTIFIER.rectify(sqlText, errorText, engine, dialect);
-    renderErrorRectifierResult(result);
+    $('errRectifyLoadingLine').classList.remove('d-none');
+    aiService.rectifyError(sqlText, errorText, dialect).then(function (result) {
+      $('errRectifyLoadingLine').classList.add('d-none');
+      renderErrorRectifierResult(result);
+    }).catch(function () {
+      $('errRectifyLoadingLine').classList.add('d-none');
+      var fallback = window.APSQL_ERROR_RECTIFIER.rectify(sqlText, errorText, engine, dialect);
+      renderErrorRectifierResult({ analysis: fallback.errorIdentified, correctedSql: fallback.correctedSql, changed: fallback.changed, explanation: fallback.correctionApplied, changes: fallback.changes });
+    });
   });
   $('errCopySqlBtn').addEventListener('click', function () { if (!errLastResult) return; navigator.clipboard && navigator.clipboard.writeText(errLastResult.correctedSql); var old = $('errCopySqlBtn').innerHTML; $('errCopySqlBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopySqlBtn').innerHTML = old; }, 1300); });
-  $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'Error Identified: ' + errLastResult.errorIdentified + '\n\nCorrection Applied: ' + errLastResult.correctionApplied; navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
+  $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'AI Analysis: ' + (errLastResult.analysis || '') + '\n\nExplanation: ' + (errLastResult.explanation || ''); navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
   var TOURS = {
-    quickstart: [{ sel: '[data-tour="hamburger"]', place: 'bottom', title: 'What this application does', body: '<p>Store multiple schemas, describe requirements in plain language, and build queries safely.</p>' }],
-    builder: [{ sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query.</p>' }],
-    crbuilder: [{ sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: '<p>Choose INSERT, UPDATE, or DELETE.</p>' }],
-    usedschema: [{ sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: '<p>Switch between stored schemas above.</p>' }],
-    updateschema: [{ sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Multiple schemas', body: '<p>Add, update, or delete individual schemas without affecting others.</p>' }],
-    errorrectifier: [{ sel: '[data-tour="err-safety"]', place: 'bottom', title: 'What Error Rectifier does', body: '<p>Helps you fix SQL after a database error.</p>' }],
+    quickstart: [{ sel: '[data-tour="hamburger"]', place: 'bottom', title: 'What this application does', body: '<p>Store multiple schemas, describe requirements in plain language, and build queries safely — with AI assistance grounded in your active schema throughout.</p>' }],
+    builder: [
+      { sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query. This step uses AI intent understanding to identify tables, columns, and filters automatically.</p>' },
+      { sel: '#resultBody', place: 'top', title: 'Generated SQL', body: '<p>Your validated SQL appears here. Use AI Self-Review to have the AI check schema correctness, relationships, and logic.</p>' },
+      { sel: '#manualTabs', place: 'top', title: 'Manual Configuration', body: '<p>Tables, Columns, Filters, and Advanced Options remain fully available for precise manual control.</p>' }
+    ],
+    crbuilder: [{ sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: '<p>Choose INSERT, UPDATE, or DELETE. AI can help draft these from a description, but the WHERE-condition safeguard always applies.</p>' }],
+    usedschema: [
+      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: '<p>Switch between stored schemas above.</p>' },
+      { sel: '#schemaAssistantInput', place: 'bottom', title: 'AI Schema Assistant', body: '<p>Ask about any table, column, or relationship — answers are grounded strictly in your schema\u2019s own metadata.</p>' }
+    ],
+    updateschema: [{ sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Multiple schemas', body: '<p>Add, update, or delete individual schemas without affecting others. Synchronization options are further below.</p>' }],
+    errorrectifier: [{ sel: '#errErrorInput', place: 'bottom', title: 'AI Error Rectifier', body: '<p>Paste the error and SQL — AI analyzes the likely cause against your active schema, corrects it, and explains the change.</p>' }],
     about: []
   };
   var TOUR = TOURS.quickstart; var tourIdx = 0, tourOpen = false;

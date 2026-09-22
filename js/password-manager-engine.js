@@ -54,7 +54,6 @@
       });
     }
 
-    // Resets to the documented original hardcoded default. Never displays it.
     function resetToDefault() { clearCustomHash(); }
 
     return {

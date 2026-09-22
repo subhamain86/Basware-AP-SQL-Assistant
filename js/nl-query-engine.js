@@ -149,6 +149,18 @@
         usedColumns[dateCol.table + '.' + dateCol.column] = true;
       }
     }
+    var lastMonthsMatch = textLower.match(/last\s+(\d+)\s+months?/);
+    if (lastMonthsMatch && DATATYPE) {
+      var nm = parseInt(lastMonthsMatch[1], 10);
+      var dateCol2 = findBestDateColumn(engine, tableNames, usedColumns);
+      if (dateCol2) {
+        var nowDate2 = now || new Date();
+        var cutoff2 = new Date(nowDate2.getFullYear(), nowDate2.getMonth() - nm, nowDate2.getDate());
+        var iso2 = cutoff2.toISOString().slice(0, 10);
+        conditions.push({ table: dateCol2.table, column: dateCol2.column, operator: 'gte', value: iso2 });
+        usedColumns[dateCol2.table + '.' + dateCol2.column] = true;
+      }
+    }
     return conditions;
   }
   function matchSort(text, engine, tableNames) {
@@ -890,7 +902,8 @@
     buildAdjacency: buildAdjacency, shortestPath: shortestPath, resolveJoinClosure: resolveJoinClosure,
     findAmbiguousTerms: findAmbiguousTerms, computeConfidence: computeConfidence, explainInterpretation: explainInterpretation,
     interpretRequirement: interpretRequirement, interpretCrRequirement: interpretCrRequirement,
-    mergeAggregates: mergeAggregates, mergeGroupBy: mergeGroupBy, dedupeFilterConditions: dedupeFilterConditions
+    mergeAggregates: mergeAggregates, mergeGroupBy: mergeGroupBy, dedupeFilterConditions: dedupeFilterConditions,
+    describeOperatorForDisplay: describeOperatorForDisplay
   };
   if (typeof module === 'object' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.APSQL_NLQUERY = API;

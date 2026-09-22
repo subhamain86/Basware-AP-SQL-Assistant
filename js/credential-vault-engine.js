@@ -4,12 +4,6 @@
  * (owner/repo/branch/path/token) using the browser's native Web Crypto API
  * (AES-256-GCM with a PBKDF2-derived key), so the token is never written to
  * the repository, localStorage, or any file in plain text.
- *
- * HONEST SECURITY DISCLOSURE: this is a static, serverless, client-side-only
- * application with no backend secret store. The passphrase itself is the
- * real access-control boundary and must be communicated to authorized users
- * out-of-band (the same way the Update Schema operational password is) —
- * it is intentionally NEVER stored anywhere alongside the vault.
  */
 (function (root) {
   'use strict';

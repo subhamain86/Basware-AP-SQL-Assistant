@@ -1,8 +1,8 @@
 {
   "name": "ap-sql-assistant",
   "private": true,
-  "version": "11.7.0",
-  "description": "AP-SQL Assistant — Version 11.7. Restores the application UI to the original Version 10.7.1 visual design (navbar, 3D logo badge, cards, gradients, signature) verbatim, while retaining every feature consolidated through Version 11.5 underneath it: the V10.7 Multiple Schema Store, the V11.1 additive Stored/Active/Default/Inactive schema state model, the V10.7.1 Secure GitHub Connection Vault (with its anonymous-read fix), the selectable Schema Synchronization Schedule, and operational password management with a non-disclosing Forgot Password reset.",
+  "version": "11.8.0",
+  "description": "AP-SQL Assistant — Version 11.8. A careful restoration and enhancement release: V10.7.1 is the UI baseline (navbar, cards, 3D logo badge, signature, gradients restored, then professionally refined with a fluid 3D icon system), while the latest working functionality (Multiple Schema Store, V11.1 Stored/Active/Default/Inactive states, GitHub sync + encrypted vault, sync schedule, password management, CR builder, CASE/DECODE, Error Rectifier) remains the functional baseline — nothing was rolled back. New in V11.8: a schema-grounded AI Service Layer (Application -> AI Service Layer -> AI Provider -> Model) powers AI Self-Review of generated SQL, an AI Error Rectifier with an explicit AI Analysis step, AI-assisted query optimization, and a new AI Schema Assistant that answers questions strictly from schema metadata. The default provider is a fully local, deterministic engine that never invents schema objects, requires no API key, and keeps every non-AI workflow fully functional if AI is ever unavailable.",
   "scripts": {
     "test": "node test/run-all.js"
   },

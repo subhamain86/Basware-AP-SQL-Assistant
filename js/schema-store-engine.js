@@ -7,23 +7,13 @@
  *         never affects any other (each entry's status is isolated).
  * V11.1 — ADDITIVE multi-schema state model layered on top, without
  *         changing any V10.7/V10.7.1 method's existing behavior:
- *           Stored   — exists in the repository (every listed entry)
- *           Active   — included in SQL generation / both Query Builders /
- *                      Error Rectifier (a schema can be Active without
- *                      being Default; multiple schemas can be Active at
- *                      once — a merged view of every Active schema's
- *                      tables is used, with the Default schema's tables
- *                      winning on name collisions)
- *           Default  — the one schema Live Shared Schema / linked-file
- *                      sync / GitHub sync automatically update; always
- *                      included in the Active set and can't be
- *                      deactivated directly (change the Default first).
- *                      getActiveId()/getActiveSchema() (the V10.7.1
- *                      single-schema API) now resolve to the Default
- *                      schema / the merged Active view respectively, so
- *                      every pre-V11.1 call site keeps working unmodified.
- *           Inactive — stored but currently excluded from use — nothing
- *                      is ever deleted by deactivating a schema.
+ *           Stored / Active / Default / Inactive states. Multiple schemas
+ *           can be Active at once — a merged view of every Active
+ *           schema's tables is used, Default winning on collisions.
+ *           Default is always Active and can't be deactivated directly.
+ *           getActiveId()/getActiveSchema() (the V10.7.1 single-schema
+ *           API) now resolve to the Default schema / merged Active view,
+ *           so every pre-V11.1 call site keeps working unmodified.
  */
 (function (root) {
   'use strict';

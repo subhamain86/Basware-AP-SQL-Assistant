@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AP-SQL Assistant · Version 11.7</title>
+<title>AP-SQL Assistant · Version 11.8</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
 <link rel="stylesheet" href="css/styles.css">
@@ -25,6 +25,7 @@
         <span class="text-white-50 small">Schema Synchronization Schedule</span>
         <select class="form-select form-select-sm" id="syncScheduleSelect" title="Schema Synchronization Schedule" aria-label="Schema Synchronization Schedule"></select>
       </div>
+      <span class="ai-badge d-none d-md-inline-flex" title="AI-powered engines throughout this application"><span class="ai-badge-dot"></span>AI-Powered</span>
       <button class="btn btn-sm btn-outline-light" id="tourBtn" type="button"><i class="bi bi-signpost-2"></i> Guided Walkthrough</button>
       <span class="creator-signature-wrap d-none d-lg-inline-flex"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></span>
     </div>
@@ -72,12 +73,12 @@
 <section class="app-view active" id="view-quickstart">
   <div class="hero-brand-row mb-2">
     <span class="logo-3d-wrap"><span class="app-logo-badge app-logo-badge-lg icon-badge badge-indigo"><i class="bi bi-diagram-3-fill fs-3"></i></span></span>
-    <h1 class="h4 builder-heading mb-0">AP-SQL Assistant · Version 11.7</h1>
+    <h1 class="h4 builder-heading mb-0">AP-SQL Assistant · Version 11.8 <span class="ai-badge"><span class="ai-badge-dot"></span>AI-Powered</span></h1>
   </div>
   <div id="sharedSchemaStripQuickstart" class="shared-schema-strip"></div>
   <div class="card mb-3"><div class="card-body">
     <h2 class="h5">Welcome — what does this tool do?</h2>
-    <p class="mb-0">This assistant writes database queries for you — both read-only reports and Change Request SQL — using your organization's approved database schema(s) as its single source of truth. This build (Version 11.7) restores the application UI exactly to the original Version 10.7.1 look and feel while consolidating every feature added through Version 11.5 underneath it: multiple stored schemas with independent Default/Active/Inactive states, the encrypted GitHub connection vault, a selectable synchronization schedule, and a genuine operational password change option. Describe What You Need remains an intelligent, schema-aware assistant, and the structured Query Builder remains fully available for precise manual control.</p>
+    <p class="mb-0">This assistant writes database queries for you — both read-only reports and Change Request SQL — using your organization's approved database schema(s) as its single source of truth. Version 11.8 restores the original Version 10.7.1 look and feel as its visual baseline, keeps every feature added since then fully working, and adds a schema-grounded AI layer across SQL generation, query review, error rectification, optimization, and schema assistance. AI never invents tables or columns that are not in your active schema, and never bypasses password protection or CR safeguards.</p>
   </div></div>
   <h2 class="h6"><span class="icon-badge badge-teal"><i class="bi bi-diagram-3"></i></span>Areas covered by the active schema</h2>
   <div id="qsModuleChips" class="d-flex flex-wrap gap-2 mb-3"></div>
@@ -97,11 +98,11 @@
     </div></div></div>
     <div class="col-md-6 col-lg-3"><div class="card h-100"><div class="card-body">
       <h3 class="h6"><span class="icon-badge icon-badge-sm badge-orange"><i class="bi bi-magic"></i></span>Error Rectifier</h3>
-      <p class="small text-body-secondary">Paste a database error and the SQL that caused it, and get a corrected query with a plain-language explanation.</p>
+      <p class="small text-body-secondary">Paste a database error and the SQL that caused it, and get an AI-analyzed, corrected query with a plain-language explanation.</p>
       <button class="btn btn-sm btn-outline-primary" data-view="errorrectifier">Open Error Rectifier</button>
     </div></div></div>
     <div class="col-md-6 col-lg-3"><div class="card h-100"><div class="card-body">
-      <h3 class="h6"><span class="icon-badge icon-badge-sm badge-teal"><i class="bi bi-hdd-stack"></i></span>Multiple Schemas <span class="badge text-bg-light border">New in V10.7</span></h3>
+      <h3 class="h6"><span class="icon-badge icon-badge-sm badge-teal"><i class="bi bi-hdd-stack"></i></span>Multiple Schemas <span class="badge text-bg-light border">Since V10.7</span></h3>
       <p class="small text-body-secondary">Store several schemas side by side and choose which ones are Active at any time.</p>
       <button class="btn btn-sm btn-outline-primary" data-view="usedschema">Open Used Schema</button>
     </div></div></div>
@@ -115,7 +116,7 @@
   <div class="builder-row">
     <div class="builder-col-half">
       <div class="card"><div class="card-body">
-        <h2 class="h6">Describe What You Need (no manual selection required)</h2>
+        <h2 class="h6">Describe What You Need <span class="ai-badge"><span class="ai-badge-dot"></span>AI</span></h2>
         <textarea class="form-control mb-2" id="promptInput" rows="2" placeholder="e.g. Show all invoices from supplier ABC that were approved during the last three months." data-tour="prompt"></textarea>
         <div class="row g-2 mb-2">
           <div class="col-7 col-md-6"><select class="form-select" id="dialectSel"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select></div>
@@ -128,6 +129,7 @@
             <button class="btn btn-primary btn-sm" id="generateFromDescriptionBtn">Build Query</button>
           </div>
         </div>
+        <div id="aiIntentLoadingLine" class="ai-loading-line d-none"><span class="ai-spinner"></span>AI is analyzing your request&hellip;</div>
         <div id="descriptionInterpretationBox" class="description-interpretation-box"></div>
         <div id="confidenceChecklistBox" class="confidence-checklist-box"></div>
         <div id="ambiguityBox" class="ambiguity-box d-none"></div>
@@ -140,7 +142,7 @@
           <li class="nav-item"><button class="nav-link" data-tab="requirements">Selected / Described Requirements</button></li>
         </ul>
         <div class="tab-content-wrap">
-          <p class="small text-body-secondary">Optional — for users who prefer precise manual control. Configure using the tabs below, and/or use the description above, then build.</p>
+          <p class="small text-body-secondary">Optional — for users who prefer precise manual control. The AI engine can determine tables/columns automatically above; use this only when you want direct control.</p>
           <div class="d-grid mb-3"><button class="btn btn-primary" id="generateBtn">Build Query</button></div>
 
           <div class="tab-pane-manual active" id="pane-tables">
@@ -164,7 +166,7 @@
             <div id="columnListBody" style="max-height:280px;overflow-y:auto;"></div>
 
             <h3 class="h6 mt-3">Filters</h3>
-            <p class="small text-body-secondary">Conditions that determine which records appear in the result. Use "Is one of" / "Is not one of" with a comma-separated list of values for SQL <code>IN</code> / <code>NOT IN</code>. SQL: WHERE</p>
+            <p class="small text-body-secondary">Conditions that determine which records appear in the result. Use "Is one of" / "Is not one of" with a comma-separated list of values for SQL <code>IN</code> / <code>NOT IN</code>.</p>
             <div id="readOnlyFilterGroup"></div>
             <div class="d-flex gap-2 mt-2"><button class="btn btn-sm btn-outline-primary" id="readOnlyAddFilterBtn">Add Filter</button><button class="btn btn-sm btn-outline-secondary" id="readOnlyClearFiltersBtn">Clear all filters</button></div>
           </div>
@@ -172,7 +174,6 @@
           <div class="tab-pane-manual d-none" id="pane-advanced">
             <div class="adv-option-card card mb-2 d-none" id="joinOptionCard"><div class="card-body">
               <div class="adv-option-title"><strong>How should tables be connected?</strong></div>
-              <p class="adv-option-explainer">This only appears because your query uses more than one table.</p>
               <div class="join-choice" id="optJoinInnerLabel"><div class="form-check"><input class="form-check-input" type="radio" name="joinType" id="optJoinInner" checked><label class="form-check-label">Only show records that match in every table</label></div></div>
               <div class="join-choice" id="optJoinLeftLabel"><div class="form-check"><input class="form-check-input" type="radio" name="joinType" id="optJoinLeft"><label class="form-check-label">Also show records that don't have a match</label></div></div>
               <button class="btn btn-sm btn-outline-secondary adv-reset-btn" id="joinResetBtn">Reset to default</button>
@@ -232,9 +233,12 @@
         <div id="resultBody"><p class="text-body-secondary small mb-0">Your generated SQL will appear here as soon as you click Build Query.</p></div>
         <div class="d-flex flex-wrap gap-2 mt-2">
           <button class="btn btn-sm btn-outline-primary d-none" id="copyBtn">Copy Result</button>
-          <button class="btn btn-sm btn-outline-secondary d-none" id="optimizeBtn">Optimize</button>
+          <button class="btn btn-sm btn-outline-secondary d-none" id="optimizeBtn"><span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Optimize</button>
           <button class="btn btn-sm btn-outline-secondary d-none" id="explainBtn">Explain This Query</button>
+          <button class="btn btn-sm btn-outline-secondary d-none" id="aiReviewBtn"><span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Self-Review</button>
         </div>
+        <div id="aiReviewLoadingLine" class="ai-loading-line d-none"><span class="ai-spinner"></span>AI is validating the generated SQL&hellip;</div>
+        <div id="aiReviewReportBox" class="mt-2"></div>
         <div id="optimizeReportBox" class="optimize-report-box mt-2"></div>
         <div id="explanationReportBox" class="explanation-report-box d-none"></div>
       </div></div>
@@ -245,7 +249,7 @@
 <section class="app-view" id="view-crbuilder">
   <h1 class="h4 builder-heading"><span class="icon-badge badge-orange"><i class="bi bi-pencil-square"></i></span>Query Builder for CR</h1>
   <div id="sharedSchemaStripCr" class="shared-schema-strip"></div>
-  <div class="alert alert-warning cr-safety-banner">Generated SQL only — this application does not execute database changes.</div>
+  <div class="alert alert-warning cr-safety-banner">Generated SQL only — this application does not execute database changes. AI assistance never bypasses the WHERE-condition safeguard below.</div>
 
   <div class="card cr-query-type-card mb-3"><div class="card-body">
     <label class="form-label small fw-semibold">Query Type</label>
@@ -259,7 +263,7 @@
   <div class="builder-row">
     <div class="builder-col-half">
       <div class="card"><div class="card-body">
-        <h2 class="h6">Describe What You Need (optional)</h2>
+        <h2 class="h6">Describe What You Need <span class="ai-badge"><span class="ai-badge-dot"></span>AI</span> <span class="text-body-secondary small fw-normal">(optional)</span></h2>
         <textarea class="form-control mb-2" id="crDescriptionInput" rows="2"></textarea>
         <div class="row g-2 mb-2"><div class="col-7"><select class="form-select" id="crDialectSel"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select></div></div>
         <p class="small text-body-secondary">Works from your description alone, your manual selections alone, or both together.</p>
@@ -303,7 +307,7 @@
         <div id="crResultBody"><p class="text-body-secondary small mb-0">Choose a query type, select a table, and click Build Query.</p></div>
         <div class="d-flex gap-2 mt-2">
           <button class="btn btn-sm btn-outline-primary d-none" id="crCopyBtn">Copy Result</button>
-          <button class="btn btn-sm btn-outline-secondary d-none" id="crOptimizeBtn">Optimize</button>
+          <button class="btn btn-sm btn-outline-secondary d-none" id="crOptimizeBtn"><span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Optimize</button>
         </div>
         <div id="crOptimizeReportBox" class="mt-2"></div>
       </div></div>
@@ -318,8 +322,18 @@
     <div class="row g-2" id="usedSchemaSummary"></div>
   </div></div>
   <div class="card mb-3"><div class="card-body">
-    <h2 class="h6">Stored Schemas <span class="badge text-bg-light border">New in V10.7</span></h2>
-    <p class="small text-body-secondary">All schemas stored in this browser. Tick which ones should be Active — this takes effect immediately, no password required — the merged Active schema(s) are used consistently by SQL generation, both Query Builders, and the Error Rectifier.</p>
+    <h2 class="h6">AI Schema Assistant <span class="ai-badge"><span class="ai-badge-dot"></span>AI</span></h2>
+    <p class="small text-body-secondary">Ask about a table, column, or relationship — answers are grounded strictly in the active schema's own descriptions and structure, and every fact is labeled by where it came from.</p>
+    <div class="input-group input-group-sm mb-2">
+      <input type="text" class="form-control" id="schemaAssistantInput" placeholder='e.g. "What is IA_INVOICE used for?" or "How are IA_INVOICE and IA_SUPPLIER related?"'>
+      <button class="btn btn-outline-primary" id="schemaAssistantAskBtn">Ask</button>
+    </div>
+    <div id="schemaAssistantLoadingLine" class="ai-loading-line d-none"><span class="ai-spinner"></span>AI is checking the active schema&hellip;</div>
+    <div id="schemaAssistantAnswerBox" class="ai-assistant-box d-none"></div>
+  </div></div>
+  <div class="card mb-3"><div class="card-body">
+    <h2 class="h6">Stored Schemas <span class="badge text-bg-light border">Since V10.7</span></h2>
+    <p class="small text-body-secondary">All schemas stored in this browser. Tick which ones should be Active — this takes effect immediately, no password required — the merged Active schema(s) are used consistently by SQL generation, both Query Builders, the AI engines, and the Error Rectifier.</p>
     <div id="schemaStoreList" class="schema-store-list"></div>
   </div></div>
   <div class="card"><div class="card-body">
@@ -335,7 +349,7 @@
 
 <section class="app-view" id="view-updateschema">
   <h1 class="h4 builder-heading"><span class="icon-badge badge-purple"><i class="bi bi-shield-lock"></i></span>Update Schema</h1>
-  <p class="text-body-secondary small">This is a password-protected administrator action. It never connects to a production database.</p>
+  <p class="text-body-secondary small">This is a password-protected administrator action. It never connects to a production database. AI recommendations are never saved to the schema without this password.</p>
 
   <div class="card" id="updateSchemaPasswordStep"><div class="card-body">
     <label class="form-label small fw-semibold">Operational Password</label>
@@ -347,7 +361,7 @@
     <div class="schema-persistence-status mb-3" id="schemaPersistenceStatus"></div>
 
     <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Manage Stored Schemas <span class="badge text-bg-light border">New in V10.7</span></h2>
+      <h2 class="h6">Manage Stored Schemas <span class="badge text-bg-light border">Since V10.7</span></h2>
       <p class="small text-body-secondary">Add a brand-new named schema, or choose an existing one below to update it — updating one schema never affects any other stored schema.</p>
       <div class="row g-2 align-items-center mb-2">
         <div class="col-12 col-md-6">Working with: <select class="form-select form-select-sm d-inline-block w-auto" id="targetSchemaSelect"></select></div>
@@ -361,12 +375,12 @@
 
     <div class="row g-3 mb-3">
       <div class="col-12 col-md-6"><div class="card h-100"><div class="card-body">
-        <h2 class="h6">Select Default Schema <span class="badge text-bg-light border">New in V11.1</span></h2>
+        <h2 class="h6">Select Default Schema <span class="badge text-bg-light border">Since V11.1</span></h2>
         <p class="small text-body-secondary mb-2">Exactly one schema is the Default at a time — it is always Active and is the target for Live Shared Schema / linked-file / GitHub sync.</p>
         <div id="defaultSchemaChoices"></div>
       </div></div></div>
       <div class="col-12 col-md-6"><div class="card h-100"><div class="card-body">
-        <h2 class="h6">Select Active Schemas <span class="badge text-bg-light border">New in V11.1</span></h2>
+        <h2 class="h6">Select Active Schemas <span class="badge text-bg-light border">Since V11.1</span></h2>
         <p class="small text-body-secondary mb-2">Choose any number of schemas to include (merged) in SQL generation. The Default schema is always included.</p>
         <div id="activeSchemaChoices"></div>
         <button class="btn btn-sm btn-outline-primary mt-2" id="saveActiveSchemaSelectionBtn">Save Active Schema Selection</button>
@@ -375,7 +389,7 @@
     </div>
 
     <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Schema Synchronization Schedule <span class="badge text-bg-light border">New in V10.7</span></h2>
+      <h2 class="h6">Schema Synchronization Schedule <span class="badge text-bg-light border">Since V10.7</span></h2>
       <p class="small text-body-secondary mb-0">Choose how often every configured schema automatically checks its source (Live Shared Schema, linked file, or GitHub) for updates. This applies to all stored schemas. Adjust this in the top navbar dropdown.</p>
     </div></div>
 
@@ -396,7 +410,7 @@
 
     <div class="card mb-3" id="githubSyncCard"><div class="card-body">
       <h2 class="h6">GitHub-Hosted Schema Sync (Administrator) <span class="badge text-bg-light border">Option B</span></h2>
-      <p class="small text-body-secondary">Connect with your repository details and a Personal Access Token. This connection can now be saved to an encrypted vault below, so any authorized user can restore it on any machine without re-typing the token.</p>
+      <p class="small text-body-secondary">Connect with your repository details and a Personal Access Token. This connection can be saved to an encrypted vault below, so any authorized user can restore it on any machine without re-typing the token.</p>
       <div id="githubSyncStatusBody"></div>
       <div class="github-token-warning d-none" id="githubTokenWarningBox">Your Personal Access Token is stored only in this browser's local storage and sent only to <code>api.github.com</code> over HTTPS. Use a fine-grained token scoped only to this one repository with Contents: Read and write permission.</div>
       <div class="github-sync-form" id="githubSyncConfigForm">
@@ -409,14 +423,13 @@
       <div class="github-sync-actions" id="githubSyncActionsBody"></div>
       <div class="github-sync-lastcheck" id="githubSyncLastCheck"></div>
 
-      <h3 class="h6 mt-3">Secure GitHub Connection Vault <span class="badge text-bg-light border">New in V10.7</span></h3>
+      <h3 class="h6 mt-3">Secure GitHub Connection Vault <span class="badge text-bg-light border">Since V10.7</span></h3>
       <p class="small text-body-secondary">Encrypt the GitHub connection above (owner, repository, branch, path, and token) with a passphrase, and publish it to the project repository as an encrypted vault file, so any authorized user on any machine can unlock the exact same connection just by knowing the passphrase — without ever seeing or re-typing the token.</p>
-      <div class="vault-disclosure-box">Please note: this is a browser-only application with no server. The vault is genuinely encrypted (AES-256-GCM), and the token is never stored or shown in plain text anywhere — but because this app has no server-side secret store, the passphrase itself (never stored alongside the vault) is the real access boundary and must be shared with authorized users separately, exactly like the operational password below.</div>
+      <div class="vault-disclosure-box">This is a browser-only application with no server. The vault is genuinely encrypted (AES-256-GCM), and the token is never stored or shown in plain text anywhere — but because there is no server-side secret store, the passphrase itself (never stored alongside the vault) is the real access boundary and must be shared with authorized users separately, exactly like the operational password below.</div>
       <div id="vaultStatusBody" class="mb-2"></div>
       <div class="vault-unsupported-note d-none" id="vaultUnsupportedNote"></div>
       <div id="vaultControls">
         <div class="vault-form-row"><input type="password" class="form-control form-control-sm" id="vaultPassphraseInput" placeholder="Vault passphrase"><button class="btn btn-sm btn-outline-primary" id="publishVaultBtn">Encrypt &amp; Publish Vault</button></div>
-        <div class="vault-hint-note">Fill in the Owner / Repo / Branch / File Path fields above before unlocking — a Personal Access Token is only needed here if the repository is private; public repositories can be read anonymously.</div>
         <div class="vault-form-row"><input type="password" class="form-control form-control-sm" id="vaultUnlockPassphraseInput" placeholder="Vault passphrase to unlock"><button class="btn btn-sm btn-outline-primary" id="unlockVaultBtn">Fetch &amp; Unlock Vault (this machine)</button></div>
       </div>
       <div id="vaultResultBox"></div>
@@ -466,7 +479,7 @@
     </div></div>
 
     <div class="card mb-3"><div class="card-body">
-      <h2 class="h6">Operational Password <span class="badge text-bg-light border">New in V10.7</span></h2>
+      <h2 class="h6">Operational Password <span class="badge text-bg-light border">Since V10.7</span></h2>
       <p class="small text-body-secondary" id="passwordCustomStatusNote">Change the password required to unlock this Update Schema section, in this browser.</p>
       <div class="password-change-box">
         <div class="password-change-row"><input type="password" class="form-control form-control-sm" id="currentPasswordInput" placeholder="Current password"><input type="password" class="form-control form-control-sm" id="newPasswordInput" placeholder="New password"><input type="password" class="form-control form-control-sm" id="confirmNewPasswordInput" placeholder="Confirm new password"></div>
@@ -485,15 +498,21 @@
 </section>
 
 <section class="app-view" id="view-errorrectifier">
-  <h1 class="h4 builder-heading"><span class="icon-badge badge-orange"><i class="bi bi-magic"></i></span>Error Rectifier</h1>
-  <div class="alert alert-light border small error-rectifier-safety-banner">SQL generated for review only. AP-SQL Assistant does not execute database changes.</div>
+  <h1 class="h4 builder-heading"><span class="icon-badge badge-orange"><i class="bi bi-magic"></i></span>Error Rectifier <span class="ai-badge"><span class="ai-badge-dot"></span>AI</span></h1>
+  <div class="alert alert-light border small">SQL generated for review only. AP-SQL Assistant does not execute database changes.</div>
   <div class="card mb-3"><div class="card-body">
-    <h2 class="h6">Enter Database Error</h2>
+    <h2 class="h6">Original SQL &amp; Error</h2>
+    <label class="form-label small fw-semibold mt-1">Error</label>
     <textarea class="form-control error-editor-textarea" id="errErrorInput" rows="2"></textarea>
-    <h2 class="h6 mt-3">Enter Current SQL Query</h2>
+    <label class="form-label small fw-semibold mt-2">Original SQL</label>
     <div class="row g-2 mb-2"><div class="col-12 col-md-4"><select class="form-select form-select-sm" id="errDialectSel"><option>Generic</option><option>Oracle</option><option>SQL Server</option><option>PostgreSQL</option><option>MySQL</option></select><div class="form-text">SQL dialect. Auto-detected from the pasted error where possible.</div></div></div>
     <textarea class="form-control sql-editor-textarea" id="errSqlInput" rows="4"></textarea>
-    <button class="btn btn-primary mt-2" id="errRectifyBtn">Rectify SQL</button>
+    <button class="btn btn-primary mt-2" id="errRectifyBtn"><span class="ai-badge me-1"><span class="ai-badge-dot"></span>AI</span>Rectify SQL</button>
+    <div id="errRectifyLoadingLine" class="ai-loading-line d-none"><span class="ai-spinner"></span>AI is analyzing the error against the active schema&hellip;</div>
+  </div></div>
+  <div class="card mb-3"><div class="card-body">
+    <h2 class="h6">AI Analysis</h2>
+    <div id="errAiAnalysisBody"><p class="text-body-secondary small mb-0">A brief analysis of the likely cause will appear here after you click Rectify SQL.</p></div>
   </div></div>
   <div class="card mb-3"><div class="card-body">
     <h2 class="h6">Rectified SQL</h2>
@@ -502,7 +521,7 @@
   </div></div>
   <div class="card mb-3"><div class="card-body">
     <h2 class="h6">Explanation</h2>
-    <div id="errExplanationBody"><p class="text-body-secondary small mb-0">The error identified and the correction applied will be explained here.</p></div>
+    <div id="errExplanationBody"><p class="text-body-secondary small mb-0">The correction applied will be explained here.</p></div>
     <button class="btn btn-sm btn-outline-primary mt-2 d-none" id="errCopyExplanationBtn">Copy Explanation</button>
   </div></div>
   <div class="card d-none" id="errWhatChangedCard"><div class="card-body">
@@ -514,7 +533,7 @@
 </main>
 
 <footer class="text-center py-3 small text-body-secondary">
-  AP-SQL Assistant · Version 11.7
+  AP-SQL Assistant · Version 11.8
   <div class="creator-signature-wrap"><span class="creator-signature-label">Crafted by</span><span class="creator-signature">Subham Ain</span></div>
 </footer>
 
@@ -597,6 +616,8 @@
 <script src="js/error-rectifier-engine.js"></script>
 <script src="js/optimize-engine.js"></script>
 <script src="js/suggestion-engine.js"></script>
+<script src="js/schema-assistant-engine.js"></script>
+<script src="js/ai-service-engine.js"></script>
 <script src="js/shared-schema-loader.js"></script>
 <script src="js/schema-sync-engine.js"></script>
 <script src="js/github-sync-engine.js"></script>

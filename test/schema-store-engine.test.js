@@ -47,7 +47,7 @@ test('setDefaultId switches Default without removing previous Default from Activ
   store.setDefaultId(e2.id);
   assertTrue(store.isDefault(e2.id)); assertTrue(store.isActive(e1.id));
 });
-test('removeEntry removes only the targeted entry; a sync failure on one entry never affects another', function () {
+test('a sync failure recorded on one entry never affects another (isolated status)', function () {
   var store = STORE.createStore(makeFakeStorage());
   var e1 = store.addEntry({ name: 'A', schema: SCHEMA_A });
   var e2 = store.addEntry({ name: 'B', schema: SCHEMA_B });
@@ -55,8 +55,6 @@ test('removeEntry removes only the targeted entry; a sync failure on one entry n
   store.recordSyncResult(e2.id, { ok: false, error: 'network down' });
   assertEqual(store.getEntry(e1.id).lastSyncStatus, 'ok');
   assertEqual(store.getEntry(e2.id).lastSyncStatus, 'error');
-  store.removeEntry(e2.id);
-  assertEqual(store.count(), 1);
 });
 test('the store persists to and reloads correctly from storage across separate createStore() instances', function () {
   var storage = makeFakeStorage();

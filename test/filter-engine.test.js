@@ -36,4 +36,7 @@ test('every core operator behaves correctly', function () {
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'eq', value: '5' }, 'Generic', []), 'T.C = 5');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'between', value: '1', value2: '10' }, 'Generic', []), 'T.C BETWEEN 1 AND 10');
   assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'is_null' }, 'Generic', []), 'T.C IS NULL');
+  assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'gt', value: '5' }, 'Generic', []), 'T.C > 5');
+  assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'lt', value: '5' }, 'Generic', []), 'T.C < 5');
+  assertEqual(F.buildConditionSql({ table: 'T', column: 'C', operator: 'contains', value: 'ab' }, 'Generic', []), "T.C LIKE '%ab%'");
 });
