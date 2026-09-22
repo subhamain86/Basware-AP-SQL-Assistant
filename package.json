@@ -1,8 +1,8 @@
 {
   "name": "ap-sql-assistant",
   "private": true,
-  "version": "11.8.1",
-  "description": "AP-SQL Assistant — Version 11.8.1. A UI/UX-focused refinement release for the Read Only Query Builder and CR Query Builder. Describe What You Need and Generated SQL now sit side by side on desktop (stacking on mobile), followed by a single full-width Manual Selectors card with three tabs: Tables & Columns, Advanced Options, and Selected/Described Requirements. The Tables & Columns tab splits into three compact, scrollable sub-cards — Select Tables, Select Columns, and Filters — arranged side by side on desktop. This is purely a layout/styling change: every underlying engine (SQL generation, the AI service layer, schema management, CASE/DECODE, Error Rectifier, password/security) is completely unchanged from V11.8, and every DOM element ID was preserved so no application logic needed to be rewritten.",
+  "version": "11.9",
+  "description": "AP-SQL Assistant — Version 11.9. A UI/UX-focused refinement release for the Read Only Query Builder and CR Query Builder. Describe What You Need and Generated SQL now sit side by side on desktop (stacking on mobile), followed by a single full-width Manual Selectors card with three tabs: Tables & Columns, Advanced Options, and Selected/Described Requirements. The Tables & Columns tab splits into three compact, scrollable sub-cards — Select Tables, Select Columns, and Filters — arranged side by side on desktop. This is purely a layout/styling change: every underlying engine (SQL generation, the AI service layer, schema management, CASE/DECODE, Error Rectifier, password/security) is completely unchanged from V11.8, and every DOM element ID was preserved so no application logic needed to be rewritten.",
   "scripts": {
     "test": "node test/run-all.js"
   },
