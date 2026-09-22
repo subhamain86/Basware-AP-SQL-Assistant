@@ -1,12 +1,12 @@
-# AP-SQL Assistant — Version 11.8.1
+# AP-SQL Assistant — Version 11.8.2
 
 AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema(s) as its single source of truth.
 
 > ⚠️ **Generated SQL only** — this application does not execute database changes.
 
-## What V11.8.1 is
+## What V11.8.2 is
 
-This release is a **focused UI/UX upgrade to the Read Only Query Builder and CR Query Builder** — nothing else. Per the golden rule for this release: *V11.8.1 should improve the Query Builder experience without changing what the application can do.*
+This release is a **focused UI/UX upgrade to the Read Only Query Builder and CR Query Builder** — nothing else. Per the golden rule for this release: *V11.8.2 should improve the Query Builder experience without changing what the application can do.*
 
 ### The new layout
 
@@ -60,7 +60,7 @@ Change it from **Update Schema → Operational Password**; use **Forgot password
 
 ```
 ap-sql-assistant/
-├── index.html                       # V11.8.1 restructured Query Builder layout
+├── index.html                       # V11.8.2 restructured Query Builder layout
 ├── css/styles.css                   # + qb-card / qb-subcard / manual-selectors-card grid classes
 ├── js/                               # Every engine — byte-identical to V11.8
 │   ├── ai-service-engine.js, schema-assistant-engine.js

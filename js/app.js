@@ -1270,50 +1270,14 @@
   });
   $('errCopySqlBtn').addEventListener('click', function () { if (!errLastResult) return; navigator.clipboard && navigator.clipboard.writeText(errLastResult.correctedSql); var old = $('errCopySqlBtn').innerHTML; $('errCopySqlBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopySqlBtn').innerHTML = old; }, 1300); });
   $('errCopyExplanationBtn').addEventListener('click', function () { if (!errLastResult) return; var text = 'AI Analysis: ' + (errLastResult.analysis || '') + '\n\nExplanation: ' + (errLastResult.explanation || ''); navigator.clipboard && navigator.clipboard.writeText(text); var old = $('errCopyExplanationBtn').innerHTML; $('errCopyExplanationBtn').innerHTML = '&#9989; Copied'; setTimeout(function () { $('errCopyExplanationBtn').innerHTML = old; }, 1300); });
-  var TOURS = {
-    quickstart: [{ sel: '[data-tour="hamburger"]', place: 'bottom', title: 'What this application does', body: '<p>Store multiple schemas, describe requirements in plain language, and build queries safely — with AI assistance grounded in your active schema throughout.</p>' }],
-    builder: [
-      { sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query. This step uses AI intent understanding to identify tables, columns, and filters automatically. Generated SQL appears right beside it.</p>' },
-      { sel: '#resultBody', place: 'top', title: 'Generated SQL', body: '<p>Your validated SQL appears here. Use AI Self-Review to have the AI check schema correctness, relationships, and logic.</p>' },
-      { sel: '#manualTabs', place: 'top', title: 'Manual Selectors', body: '<p>Tables & Columns, Advanced Options, and Selected/Described Requirements are organized into compact tabs below.</p>' }
-    ],
-    crbuilder: [{ sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: '<p>Choose INSERT, UPDATE, or DELETE. AI can help draft these from a description, but the WHERE-condition safeguard always applies.</p>' }],
-    usedschema: [
-      { sel: '#usedSchemaSummary', place: 'bottom', title: 'The currently active schema', body: '<p>Switch between stored schemas above.</p>' },
-      { sel: '#schemaAssistantInput', place: 'bottom', title: 'AI Schema Assistant', body: '<p>Ask about any table, column, or relationship — answers are grounded strictly in your schema\u2019s own metadata.</p>' }
-    ],
-    updateschema: [{ sel: '#schemaPersistenceStatus', place: 'bottom', title: 'Multiple schemas', body: '<p>Add, update, or delete individual schemas without affecting others. Synchronization options are further below.</p>' }],
-    errorrectifier: [{ sel: '#errErrorInput', place: 'bottom', title: 'AI Error Rectifier', body: '<p>Paste the error and SQL — AI analyzes the likely cause against your active schema, corrects it, and explains the change.</p>' }],
-    about: []
-  };
-  var TOUR = TOURS.quickstart; var tourIdx = 0, tourOpen = false;
-  var overlay = $('tourOverlay'), spotlight = $('tourSpotlight'), popup = $('tourPopup');
-  function clampToViewport(top, left, popW, popH) { var vw = window.innerWidth, vh = window.innerHeight, margin = 12; return { top: Math.min(Math.max(margin, top), Math.max(margin, vh - popH - margin)), left: Math.min(Math.max(margin, left), Math.max(margin, vw - popW - margin)) }; }
-  function positionTour() {
-    var step = TOUR[tourIdx]; var target = document.querySelector(step.sel); if (!target) { endTour(); return; }
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(function () {
-      var r = target.getBoundingClientRect(); var pad = 8;
-      spotlight.style.top = (r.top - pad) + 'px'; spotlight.style.left = (r.left - pad) + 'px'; spotlight.style.width = (r.width + pad * 2) + 'px'; spotlight.style.height = (r.height + pad * 2) + 'px';
-      var popW = Math.min(popup.offsetWidth || 340, window.innerWidth - 24); var popH = Math.min(popup.offsetHeight || 190, window.innerHeight - 24); var vh = window.innerHeight;
-      var place = step.place || 'bottom';
-      if (place === 'bottom' && r.bottom + popH + 20 > vh) place = 'top';
-      if (place === 'top' && r.top - popH - 20 < 0) place = 'bottom';
-      var rawTop, rawLeft;
-      if (place === 'bottom') { rawTop = r.bottom + 14; rawLeft = r.left; } else if (place === 'top') { rawTop = r.top - popH - 14; rawLeft = r.left; } else if (place === 'left') { rawLeft = r.left - popW - 14; rawTop = r.top; } else { rawLeft = r.right + 14; rawTop = r.top; }
-      var clamped = clampToViewport(rawTop, rawLeft, popW, popH); popup.style.top = clamped.top + 'px'; popup.style.left = clamped.left + 'px';
-      $('tourStepLabel').textContent = 'Step ' + (tourIdx + 1) + ' of ' + TOUR.length + ' \u2014 ' + currentView;
-      $('tourTitle').textContent = step.title; $('tourBody').innerHTML = step.body;
-      $('tourDots').innerHTML = TOUR.map(function (_, i) { return '<i class="' + (i === tourIdx ? 'on' : '') + '"></i>'; }).join('');
-      $('tourPrev').disabled = tourIdx === 0; $('tourNext').textContent = tourIdx === TOUR.length - 1 ? 'Done' : 'Next';
-    }, 260);
-  }
-  function startTour() { TOUR = TOURS[currentView] && TOURS[currentView].length ? TOURS[currentView] : TOURS.quickstart; tourIdx = 0; tourOpen = true; overlay.classList.add('show'); positionTour(); }
-  function endTour() { tourOpen = false; overlay.classList.remove('show'); }
-  function nextTour() { if (tourIdx < TOUR.length - 1) { tourIdx++; positionTour(); } else endTour(); }
-  function prevTour() { if (tourIdx > 0) { tourIdx--; positionTour(); } }
-  $('tourBtn').addEventListener('click', startTour); $('tourNext').addEventListener('click', nextTour); $('tourPrev').addEventListener('click', prevTour); $('tourSkip').addEventListener('click', endTour);
-  overlay.addEventListener('click', function (e) { if (e.target === overlay) endTour(); });
-  document.addEventListener('keydown', function (e) { if (!tourOpen) return; if (e.key === 'Escape') endTour(); else if (e.key === 'ArrowRight') nextTour(); else if (e.key === 'ArrowLeft') prevTour(); });
-  window.addEventListener('resize', function () { if (tourOpen) positionTour(); });
-})();
+  ```js
+if (window.APSQL_TOUR) {
+  APSQL_TOUR.init({
+    getCurrentPage: function () { return currentView; }, // app.js already tracks this
+    goToPage: function (pageKey) {
+      var link = document.querySelector('[data-view="' + pageKey + '"]');
+      if (link) link.click(); // reuses your existing nav click-handling, untouched
+    }
+  });
+}
+```
