@@ -1,80 +1,29 @@
 /**
  * ai-service-engine.js — AP-SQL Assistant V11.8
  * ================================================================
- * THE AI SERVICE LAYER (spec section 36, 46).
+ * THE AI SERVICE LAYER: Application -> AI Service Layer -> AI Provider -> Model
  *
- *   Application  →  AI Service Layer  →  AI Provider  →  Model
+ * Every AI-powered feature in the app goes through `createAIService(...)`.
+ * The default, always-on provider is a fully local, deterministic
+ * "Schema-Grounded Heuristic Provider" that composes the schema/NL/
+ * validation/optimize/error-rectifier engines already grounded in the
+ * active schema — it never calls a network endpoint, never times out,
+ * never requires an API key, and never hallucinates a table or column
+ * that doesn't exist in the active schema.
  *
- * This module is the single seam every AI-powered feature in the app
- * goes through (SQL generation review, Error Rectifier, Query
- * Optimization, Schema Assistant, Filter Assistant, CASE/DECODE
- * Assistant, CR Builder assistance, table/column recommendation).
- * No feature calls a "provider" directly — everything goes through
- * `createAIService(...)`, so the provider can be swapped later
- * (a different model, a remote endpoint, etc.) without touching any
- * UI or engine code.
- *
- * HONEST DISCLOSURE: this is a static, serverless, client-side-only
- * application. There is no backend to safely hold a real model API key
- * (spec section 36: "Do not expose API keys in frontend code"), so the
- * DEFAULT and only bundled provider is a fully local, deterministic
- * "Schema-Grounded Heuristic Provider" — it performs real intent
- * understanding, entity resolution, self-review, and correction by
- * composing the schema/NL/validation/optimize/error-rectifier engines
- * that already ground every answer in the active schema. It never
- * calls out to the network and therefore never hallucinates schema
- * objects, never times out, and never requires a key.
- *
- * A `RemoteAIProvider` seam is included and fully wired into the
- * service (so a real hosted model could be plugged in later by
- * setting a provider config through `configureRemoteProvider`), but it
- * remains INACTIVE unless explicitly configured with an endpoint by an
- * administrator — and even then, every response it returns is passed
- * back through the same schema-grounding validation before being
- * trusted (spec section 19: "AI must not freely hallucinate database
- * objects"). If the remote provider is unset, unreachable, or times
- * out, the service transparently falls back to the local provider
- * (spec section 35: "AI unavailable... application must remain usable").
+ * A `RemoteAIProvider` seam exists for a future hosted model, wired via
+ * `configureRemoteProvider(...)`, but stays inactive unless configured,
+ * and falls back to the local provider automatically on any failure.
  */
 (function (root) {
   'use strict';
   var NLQ = (typeof module === 'object' && module.exports) ? require('./nl-query-engine.js') : root.APSQL_NLQUERY;
-  var VALIDATE = (typeof module === 'object' && module.exports) ? require('./validation-engine.js') : root.APSQL_VALIDATE;
-  var SQLENGINE = (typeof module === 'object' && module.exports) ? require('./sql-engine.js') : root.APSQL_ENGINE;
   var OPTIMIZE = (typeof module === 'object' && module.exports) ? require('./optimize-engine.js') : root.APSQL_OPTIMIZE;
   var ERRFIX = (typeof module === 'object' && module.exports) ? require('./error-rectifier-engine.js') : root.APSQL_ERROR_RECTIFIER;
   var DECODE = (typeof module === 'object' && module.exports) ? require('./decode-engine.js') : root.APSQL_DECODE;
 
   function nowMs() { return Date.now(); }
 
-  /* ----------------------------------------------------------------
-     1. TARGETED SCHEMA CONTEXT BUILDER (spec section 37 — do not send
-        the entire schema for every small request; retrieve only what
-        is relevant to the current request).
-     ---------------------------------------------------------------- */
-  function buildTargetedSchemaContext(engine, hintTables) {
-    var all = engine.getAllTables();
-    var relevant = [];
-    if (hintTables && hintTables.length) {
-      var wanted = {}; hintTables.forEach(function (t) { wanted[String(t).toUpperCase()] = true; });
-      relevant = all.filter(function (t) { return wanted[t.name.toUpperCase()]; });
-    }
-    if (!relevant.length) relevant = all; // fall back to full schema only when no hint is available
-    return {
-      moduleLabels: engine.getModuleLabels(),
-      tableCount: all.length,
-      tables: relevant.map(function (t) {
-        return {
-          name: t.name, module: t.module, notes: t.notes || '',
-          columns: t.columns.map(function (c) { return { name: c.name, type: c.type, description: c.description || '', alias: c.alias || '', primary_key: !!c.primary_key, foreign_key: c.foreign_key || null, hasDecode: Array.isArray(c.decode) && c.decode.length > 0 }; })
-        };
-      })
-    };
-  }
-
-  /* ----------------------------------------------------------------
-     2. LOCAL SCHEMA-GROUNDED HEURISTIC PROVIDER (default, always on)
-     ---------------------------------------------------------------- */
   function createLocalProvider(engine, decodeStore) {
     function analyzeIntent(requestText, opts) {
       opts = opts || {};
@@ -103,21 +52,18 @@
       meta = meta || {};
       var findings = [];
       var errors = [];
-      // Schema + relationship correctness (delegates to validation-engine already used at generation time)
       if (meta.tablesUsed && meta.tablesUsed.length) {
         meta.tablesUsed.forEach(function (t) { if (!engine.tableExists(t)) errors.push('Table "' + t + '" does not exist in the active schema.'); });
       }
       if (meta.columnsUsed && meta.columnsUsed.length) {
         meta.columnsUsed.forEach(function (c) { if (c.column !== '*' && !engine.columnExists(c.table, c.column)) errors.push('Column "' + c.table + '.' + c.column + '" does not exist in the active schema.'); });
       }
-      // Logic correctness: does the query actually contain what was asked for?
       if (meta.interpretation) {
         var interp = meta.interpretation;
         if (interp.filterConditions && interp.filterConditions.length && !/WHERE/i.test(sql)) findings.push('The request implied filter condition(s), but the generated SQL has no WHERE clause — please confirm this is intentional.');
         if (interp.aggregates && interp.aggregates.length && !/(COUNT|SUM|AVG|MIN|MAX)\s*\(/i.test(sql)) findings.push('The request implied an aggregation, but no aggregate function was found in the SQL.');
         if (interp.orderBy && interp.orderBy.length && !/ORDER BY/i.test(sql)) findings.push('The request implied a sort order, but no ORDER BY clause was found in the SQL.');
       }
-      // Performance pass (delegates to optimize-engine)
       var perf = [];
       if (meta.optimizeResult) perf = meta.optimizeResult.recommendations || [];
       var passed = errors.length === 0;
@@ -188,11 +134,6 @@
     };
   }
 
-  /* ----------------------------------------------------------------
-     3. REMOTE PROVIDER SEAM (inactive unless explicitly configured;
-        every response is still schema-validated by the caller before
-        being trusted — see reviewSql()/validation-engine usage in app.js)
-     ---------------------------------------------------------------- */
   function createRemoteProvider(remoteConfig, fetchImpl) {
     fetchImpl = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     function isConfigured() { return !!(remoteConfig && remoteConfig.endpoint); }
@@ -230,12 +171,6 @@
     };
   }
 
-  /* ----------------------------------------------------------------
-     4. THE SERVICE — fallback, timing, caching, status reporting.
-        Every method resolves to { ...result, meta: { providerUsed,
-        fallenBack, elapsedMs, cached } } — callers never need to know
-        which provider actually answered.
-     ---------------------------------------------------------------- */
   function createAIService(opts) {
     opts = opts || {};
     var engine = opts.engine;
@@ -291,7 +226,6 @@
   }
 
   var API = {
-    buildTargetedSchemaContext: buildTargetedSchemaContext,
     createLocalProvider: createLocalProvider,
     createRemoteProvider: createRemoteProvider,
     createAIService: createAIService

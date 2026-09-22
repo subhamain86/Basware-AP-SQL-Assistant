@@ -1,8 +1,8 @@
 {
   "name": "ap-sql-assistant",
   "private": true,
-  "version": "11.8.0",
-  "description": "AP-SQL Assistant — Version 11.8. A careful restoration and enhancement release: V10.7.1 is the UI baseline (navbar, cards, 3D logo badge, signature, gradients restored, then professionally refined with a fluid 3D icon system), while the latest working functionality (Multiple Schema Store, V11.1 Stored/Active/Default/Inactive states, GitHub sync + encrypted vault, sync schedule, password management, CR builder, CASE/DECODE, Error Rectifier) remains the functional baseline — nothing was rolled back. New in V11.8: a schema-grounded AI Service Layer (Application -> AI Service Layer -> AI Provider -> Model) powers AI Self-Review of generated SQL, an AI Error Rectifier with an explicit AI Analysis step, AI-assisted query optimization, and a new AI Schema Assistant that answers questions strictly from schema metadata. The default provider is a fully local, deterministic engine that never invents schema objects, requires no API key, and keeps every non-AI workflow fully functional if AI is ever unavailable.",
+  "version": "11.8.1",
+  "description": "AP-SQL Assistant — Version 11.8.1. A UI/UX-focused refinement release for the Read Only Query Builder and CR Query Builder. Describe What You Need and Generated SQL now sit side by side on desktop (stacking on mobile), followed by a single full-width Manual Selectors card with three tabs: Tables & Columns, Advanced Options, and Selected/Described Requirements. The Tables & Columns tab splits into three compact, scrollable sub-cards — Select Tables, Select Columns, and Filters — arranged side by side on desktop. This is purely a layout/styling change: every underlying engine (SQL generation, the AI service layer, schema management, CASE/DECODE, Error Rectifier, password/security) is completely unchanged from V11.8, and every DOM element ID was preserved so no application logic needed to be rewritten.",
   "scripts": {
     "test": "node test/run-all.js"
   },

@@ -9,7 +9,6 @@ test('answers "what is X used for" grounded in the table notes', function () {
   assertTrue(r.found);
   assertEqual(r.subjectType, 'table');
   assertTrue(r.groundedInSchema, 'should be grounded because IA_INVOICE has schema notes');
-  assertIncludes(r.narrative, 'Header-level invoice information'.toLowerCase().charAt(0) === r.narrative.charAt(0) ? '' : '');
 });
 test('answers a column question, distinguishing schema-derived facts', function () {
   var r = ASSISTANT.answerQuestion('What does the STATUS column on IA_INVOICE mean?', engine);

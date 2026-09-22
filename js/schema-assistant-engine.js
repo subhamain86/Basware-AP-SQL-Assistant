@@ -1,15 +1,10 @@
 /**
  * schema-assistant-engine.js — AP-SQL Assistant V11.8
- * AI Schema Assistant (spec section 24). Answers plain-language
- * questions about the active schema ("What is this table used for?",
- * "How are IA_INVOICE and IA_SUPPLIER related?", "What does the
- * STATUS column on IA_INVOICE mean?") strictly from schema metadata
- * that already exists (table notes, column descriptions, PK/FK,
- * decode definitions) — never invented. Every answer is tagged with
- * where the fact came from, so schema-derived facts are always
- * clearly distinguished from any interpretive narration added around
- * them (spec section 24: "must clearly distinguish schema-derived
- * facts from AI interpretation").
+ * AI Schema Assistant. Answers plain-language questions about the active
+ * schema strictly from schema metadata that already exists (table notes,
+ * column descriptions, PK/FK, decode definitions) — never invented. Every
+ * answer is tagged with where the fact came from, so schema-derived facts
+ * are always clearly distinguished from any interpretive narration.
  */
 (function (root) {
   'use strict';

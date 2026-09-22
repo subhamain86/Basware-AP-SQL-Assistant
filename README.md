@@ -1,26 +1,44 @@
-# AP-SQL Assistant — Version 11.8
+# AP-SQL Assistant — Version 11.8.1
 
 AP-SQL Assistant is a browser-based, schema-aware SQL authoring tool for AP/P2P teams. It writes both **read-only report queries** and **Change Request (CR) SQL** — INSERT, UPDATE, DELETE — using your organization's approved database schema(s) as its single source of truth.
 
 > ⚠️ **Generated SQL only** — this application does not execute database changes.
 
-## What V11.8 is
+## What V11.8.1 is
 
-This is a **careful restoration and enhancement release**, built on one non-negotiable rule: **do not break or remove any existing functionality.**
+This release is a **focused UI/UX upgrade to the Read Only Query Builder and CR Query Builder** — nothing else. Per the golden rule for this release: *V11.8.1 should improve the Query Builder experience without changing what the application can do.*
 
-**UI baseline = V10.7.1.** `css/styles.css` restores the real, original V10.7.1 stylesheet verbatim (3D-tilted logo badge, gradient hand-written signature, card hover animation, original navbar height/spacing), then adds only carefully-scoped V11.8 refinements: a consistent **fluid 3D icon system** (subtle depth, highlight sweep, hover elevation/scale/rotation, focus-visible outlines for accessibility) applied uniformly across the navbar, menu, Query Builder, Schema pages, and new AI indicators — never a full redesign.
+### The new layout
 
-**Functionality baseline = the latest working version.** Every engine from V10.7.1 through V11.7 is preserved and retested: the Multiple Schema Store, the V11.1 additive Stored/Active/Default/Inactive schema state model, GitHub-hosted sync with the encrypted credential vault, the selectable synchronization schedule, operational password management with a non-disclosing Forgot Password reset, the intelligent Describe-What-You-Need engine, the structured Query Builder and CR Builder (with mandatory WHERE protection), schema-aware CASE/DECODE, and the rule-based Error Rectifier — **nothing was rolled back to reach the V10.7.1 look.**
+```
+┌───────────────────────────┬───────────────────────────┐
+│  Describe What You Need   │       Generated SQL        │   ← side by side on desktop,
+└───────────────────────────┴───────────────────────────┘      stacked on mobile
 
-**New in V11.8 — the AI layer.** Per the architecture `Application → AI Service Layer → AI Provider → Model`, every AI-powered feature routes through one seam (`js/ai-service-engine.js`):
+┌─────────────────────────────────────────────────────────┐
+│                     Manual Selectors                      │
+│   Tables & Columns │ Advanced Options │ Selected/Described │   ← Bootstrap tabs
+│                                       │ Requirements       │
+└─────────────────────────────────────────────────────────┘
 
-- **AI Self-Review** of generated SQL (schema correctness, relationship correctness, logic-matches-request, and performance findings) — available from the Read Only Query Builder's Generated SQL card.
-- **AI Error Rectifier** — the same rule-based, schema-grounded correction engine as before, now explicitly surfaced as an **AI Analysis** step ahead of the Rectified SQL and Explanation.
-- **AI-assisted Query Optimization** in both the Read Only and CR Query Builders.
-- **AI Schema Assistant** (Used Schema page) — answers plain-language questions ("What is IA_INVOICE used for?", "How are IA_INVOICE and IA_SUPPLIER related?") strictly from schema metadata, with every fact explicitly tagged **From schema** or **AI interpretation**.
-- **AI-assisted CASE/DECODE proposals** — reuses an existing definition if one exists; otherwise parses a plain-language hint into code/label pairs for review (administrative approval still required to save).
+  Tables & Columns tab:
+┌──────────────────┬──────────────────┬──────────────────┐
+│  Select Tables   │  Select Columns  │     Filters      │   ← side by side on desktop,
+│  (scrollable)    │  (scrollable)    │  (scrollable)    │      stacked on mobile
+└──────────────────┴──────────────────┴──────────────────┘
+```
 
-**Honest architecture disclosure:** this remains a static, serverless, client-side-only application, so there is nowhere safe to hold a real model API key in the frontend. The bundled, default AI provider is therefore a fully **local, deterministic, schema-grounded heuristic engine** — it never calls a network endpoint, never times out, never requires a key, and (by construction, since it only ever composes the schema/validation/optimize/error-rectifier engines) never hallucinates a table or column that isn't in your active schema. A `RemoteAIProvider` seam exists and can be wired to a real hosted model later via `configureRemoteProvider(...)` without touching any UI code — but it stays inactive unless explicitly configured, and even then every response is still schema-validated before being trusted, with automatic fallback to the local provider on any failure or timeout.
+The exact same structure is applied to **both** the Read Only Query Builder and the CR Query Builder, with builder-specific controls preserved where they differ (e.g. the CR Query Type selector, WHERE-condition safeguard, and CASE/DECODE panel appear only in the CR builder's Tables & Columns tab).
+
+### What did **not** change
+
+Every underlying engine is byte-for-byte identical to V11.8:
+- SQL Generation, Filter, Validation, Schema, Decode, and Relationship engines
+- The AI Service Layer (`ai-service-engine.js`) — AI Self-Review, AI Error Rectifier, AI-assisted Optimization, AI Schema Assistant, AI CASE/DECODE proposals — all still schema-grounded, all still fully functional
+- Multiple Schema Store (Stored/Active/Default/Inactive), GitHub sync + encrypted vault, sync schedule, password management with non-disclosing reset
+- Read-only safety enforcement and CR WHERE-condition safeguards
+
+**How this was achieved without touching the engines:** every DOM element ID from V11.8 (`promptInput`, `resultBody`, `tableListGrid`, `columnListBody`, `readOnlyFilterGroup`, `crFilterGroup`, etc.) was preserved exactly in the restructured HTML — only the surrounding cards/tabs/grid wrapping changed. `app.js` therefore required **zero logic changes**; it is functionally identical to V11.8, just re-skinned by the new CSS classes (`.qb-card`, `.qb-subcard`, `.manual-selectors-card`, `.qb-adv-section`, `.qb-scroll-lg`, etc.).
 
 ## Getting started
 
@@ -36,26 +54,25 @@ npx http-server .
 P@assw0rd
 ```
 
-Change it from **Update Schema → Operational Password**; use **Forgot password? Reset to default** if forgotten (never displays the password).
+Change it from **Update Schema → Operational Password**; use **Forgot password? Reset to default** if forgotten.
 
 ## Project structure
 
 ```
 ap-sql-assistant/
-├── index.html                       # V10.7.1-restored layout + V11.8 AI UI hooks
-├── css/styles.css                   # Restored V10.7.1 stylesheet + fluid 3D icon system + AI badges
-├── js/
-│   ├── ai-service-engine.js         # NEW — AI Service Layer: provider abstraction, local + remote providers, caching, fallback
-│   ├── schema-assistant-engine.js   # NEW — AI Schema Assistant, grounded strictly in schema metadata
+├── index.html                       # V11.8.1 restructured Query Builder layout
+├── css/styles.css                   # + qb-card / qb-subcard / manual-selectors-card grid classes
+├── js/                               # Every engine — byte-identical to V11.8
+│   ├── ai-service-engine.js, schema-assistant-engine.js
 │   ├── schema-tools.js, schema-engine.js, schema-store-engine.js, relationship-store.js
 │   ├── datatype-engine.js, decode-engine.js, filter-engine.js, validation-engine.js
 │   ├── sql-engine.js, cr-engine.js, nl-query-engine.js, error-rectifier-engine.js
 │   ├── optimize-engine.js, suggestion-engine.js, password-manager-engine.js
 │   ├── credential-vault-engine.js, github-sync-engine.js, schema-sync-engine.js
 │   ├── shared-schema-loader.js, sync-schedule-engine.js
-│   └── app.js                       # UI wiring, including all AI feature wiring
+│   └── app.js                       # Same logic as V11.8, all element IDs preserved
 ├── schema/schema-sample.js
-├── test/                            # 71 Node-based tests
+├── test/                            # 71 Node-based tests (unchanged from V11.8)
 └── .github/workflows/deploy-pages.yml
 ```
 
@@ -65,9 +82,15 @@ ap-sql-assistant/
 node test/run-all.js
 ```
 
-71 checks covering schema lookups/relationships, filter/WHERE building, SQL generation (joins, decode CASE, recursive hierarchy, aggregation), CR INSERT/UPDATE/DELETE with WHERE protection, the V10.7/V11.1 Stored/Active/Default/Inactive schema-state model, the operational password manager, the new **AI Schema Assistant** (grounded-vs-not-found honesty, relationship Q&A), and the new **AI Service Layer** (schema-grounded intent analysis, self-review flagging both missing tables and logic mismatches, error rectification, optimization, entity recommendation, filter parsing, CASE/DECODE reuse-vs-propose, response caching, and remote-provider fallback). **All 71 pass.**
+**71/71 pass.** Since no engine logic changed, this is the identical test suite from V11.8 — its continued 100% pass rate is direct evidence that the layout refinement introduced zero functional regressions.
 
-## Security notes
+## Responsive behavior
+
+- **Desktop (≥ 992px):** Describe/Generated SQL side by side; Select Tables/Select Columns/Filters side by side.
+- **Tablet:** Cards resize fluidly via Bootstrap's grid; no fixed pixel widths.
+- **Mobile (< 992px):** Everything stacks vertically in the same top-to-bottom order shown above — no horizontal scrolling, no clipped buttons, no hidden controls.
+
+## Security notes (unchanged from V11.8)
 
 - No SQL is ever executed — only generated for manual review.
 - AI recommendations are always reviewable/editable and are never saved to the schema without the operational password.

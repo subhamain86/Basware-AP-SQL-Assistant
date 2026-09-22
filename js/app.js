@@ -29,12 +29,6 @@
   }
   function rebuildEngine() { engine = APSQL_RELATIONSHIPS.createEffectiveEngine(APSQL.createEngine(currentSchema()), relationshipStore); rebuildAiService(); }
   var decodeStore = APSQL_DECODE.createDecodeStore();
-  /* ================================================================
-     V11.8 — AI SERVICE LAYER
-     Every AI-powered feature below goes through `aiService`, which
-     always uses the CURRENT active schema (rebuilt whenever the
-     schema changes) — AI never silently uses a stale schema.
-     ================================================================ */
   var aiService = null;
   function rebuildAiService() { aiService = APSQL_AI.createAIService({ engine: engine, decodeStore: decodeStore }); }
   rebuildEngine();
@@ -830,7 +824,6 @@
     else box.innerHTML = '<div class="alert alert-secondary py-2 mb-0 small"><strong><i class="bi bi-lightbulb-fill me-1"></i>This query:</strong><ul class="mt-1 mb-0">' + lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul></div>';
     box.classList.remove('d-none');
   });
-  /* ---- V11.8: AI Self-Review of generated SQL (spec section 21) ---- */
   $('aiReviewBtn').addEventListener('click', function () {
     if (!lastResult || lastResult.status !== 'ok') return;
     $('aiReviewLoadingLine').classList.remove('d-none'); $('aiReviewReportBox').innerHTML = '';
@@ -1011,7 +1004,7 @@
   document.querySelectorAll('.cr-command-option').forEach(function (opt) { opt.addEventListener('click', function () { document.querySelectorAll('.cr-command-option').forEach(function (o) { o.classList.remove('active'); }); opt.classList.add('active'); crCommand = opt.getAttribute('data-command'); crRenderAll(); }); });
   function crRenderInsertPanel() { var table = engine.getTable(crTable); var body = $('crInsertColumnsBody'); body.innerHTML = ''; if (!table) return; table.columns.forEach(function (c) { if (!crInsertColumns[c.name]) crInsertColumns[c.name] = { checked: false, value: '' }; var s = crInsertColumns[c.name]; var row = document.createElement('div'); row.className = 'cr-value-row'; var label = document.createElement('div'); var cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'form-check-input me-2'; cb.checked = s.checked; var span = document.createElement('span'); span.innerHTML = '<code>' + c.name + '</code> <span class="text-body-secondary small">' + esc((c.type || '')) + '</span>'; label.appendChild(cb); label.appendChild(span); var valInput = document.createElement('input'); valInput.className = 'form-control form-control-sm'; valInput.placeholder = 'Value'; valInput.value = s.value; valInput.disabled = !s.checked; cb.addEventListener('change', function () { s.checked = cb.checked; valInput.disabled = !cb.checked; }); valInput.addEventListener('input', function () { s.value = valInput.value; }); row.appendChild(label); row.appendChild(valInput); body.appendChild(row); }); }
   function crRenderUpdatePanel() { var table = engine.getTable(crTable); var body = $('crUpdateColumnsBody'); body.innerHTML = ''; if (!table) return; table.columns.forEach(function (c) { if (!crUpdateColumns[c.name]) crUpdateColumns[c.name] = { checked: false, value: '' }; var s = crUpdateColumns[c.name]; var row = document.createElement('div'); row.className = 'cr-value-row'; var label = document.createElement('div'); var cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'form-check-input me-2'; cb.checked = s.checked; var span = document.createElement('span'); span.innerHTML = '<code>' + c.name + '</code> <span class="text-body-secondary small">' + esc((c.type || '')) + '</span>'; label.appendChild(cb); label.appendChild(span); var valInput = document.createElement('input'); valInput.className = 'form-control form-control-sm'; valInput.placeholder = 'New Value'; valInput.value = s.value; valInput.disabled = !s.checked; cb.addEventListener('change', function () { s.checked = cb.checked; valInput.disabled = !cb.checked; crRenderDecodePanel(); }); valInput.addEventListener('input', function () { s.value = valInput.value; }); row.appendChild(label); row.appendChild(valInput); body.appendChild(row); }); }
-  function crRenderWherePanel() { var showWhere = crCommand === 'UPDATE' || crCommand === 'DELETE' || crCommand === 'SELECT'; $('crWherePanel').classList.toggle('d-none', !showWhere); if (showWhere) renderFilterGroup($('crFilterGroup'), crFilterGroup, [crTable], function () {}); }
+  function crRenderWherePanel() { var showWhere = crCommand === 'UPDATE' || crCommand === 'DELETE' || crCommand === 'SELECT'; $('crWherePanel').classList.toggle('d-none', !showWhere); var note = $('crFiltersNaNote'); if (note) note.classList.toggle('d-none', showWhere); if (showWhere) renderFilterGroup($('crFilterGroup'), crFilterGroup, [crTable], function () {}); }
   $('crAddFilterBtn').addEventListener('click', function () { var firstCol = crTable && engine.getTable(crTable) ? engine.getTable(crTable).columns[0].name : ''; crFilterGroup.conditions.push(APSQL_FILTER.newCondition({ table: crTable, column: firstCol })); renderFilterGroup($('crFilterGroup'), crFilterGroup, [crTable], function () {}); });
   $('crClearFiltersBtn').addEventListener('click', function () { crFilterGroup.conditions = []; renderFilterGroup($('crFilterGroup'), crFilterGroup, [crTable], function () {}); });
   function crRenderDecodePanel() {
@@ -1121,7 +1114,6 @@
   }
   $('schemaSearchInput').addEventListener('input', function (e) { schemaSearchTerm = e.target.value; renderUsedSchema(); });
   $('schemaSearchClearBtn').addEventListener('click', function () { $('schemaSearchInput').value = ''; schemaSearchTerm = ''; renderUsedSchema(); });
-  /* ---- V11.8: AI Schema Assistant (Used Schema page) ---- */
   function renderAiFactTable(facts) {
     return '<table class="ai-fact-table"><tbody>' + facts.map(function (f) { return '<tr><td>' + esc(f.fact) + '</td><td>' + esc(f.value) + '</td></tr>'; }).join('') + '</tbody></table>';
   }
@@ -1148,7 +1140,7 @@
   var aboutModalEl = $('aboutModal'); var aboutModal = window.bootstrap ? new window.bootstrap.Modal(aboutModalEl) : null;
   $('aboutMenuBtn').addEventListener('click', function () {
     var st = engine.getStatus();
-    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.8'], ['Purpose', 'Version 11.8 restores the application UI to the original Version 10.7.1 visual design (navbar, cards, 3D logo badge, signature, gradients), refines it with a professional fluid 3D icon system, and layers a schema-grounded AI service architecture across SQL generation review, Error Rectification, Query Optimization, and a new Schema Assistant. AI is always routed through a single AI Service Layer so the provider can change later without touching any UI code; the default provider is a fully local, deterministic engine that never invents schema objects and never requires a network call or API key. If AI is ever unavailable, every existing non-AI workflow (manual table/column selection, filters, CR builder, password-protected schema management) continues to work exactly as before.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. AI recommendations are always reviewable and are never saved to the schema without the operational password. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
+    $('aboutList').innerHTML = [['Application name', 'AP-SQL Assistant'], ['Application version', '11.8.1'], ['Purpose', 'Version 11.8.1 is a Query Builder UI/UX refinement release: Describe What You Need and Generated SQL now sit side by side, followed by a single Manual Selectors card (Tables & Columns / Advanced Options / Selected-Described Requirements), and Tables & Columns splits cleanly into Select Tables / Select Columns / Filters — all on a compact, Bootstrap-based, responsive grid. Every underlying engine (SQL generation, AI service layer, schema management, CASE/DECODE, Error Rectifier, authentication) is completely unchanged from V11.8; only the surrounding layout and styling were reorganized.'], ['Active schema version', st.schemaVersion], ['Schema last updated', st.lastUpdated], ['Security', 'The Read Only Query Builder only ever emits read-only SELECT statements. The CR builder and Error Rectifier only ever produce SQL text for review and never execute it. AI recommendations are always reviewable and are never saved to the schema without the operational password. The credential vault uses AES-256-GCM encryption with a PBKDF2-derived key. The operational password is stored only as a SHA-256 hash, never in plain text, and changing it requires the current password (or use Forgot Password to reset to the documented default without ever displaying it).']].map(function (row) { return '<li class="list-group-item"><span class="text-body-secondary d-block small">' + row[0] + '</span>' + esc(row[1]) + '</li>'; }).join('');
     closeMenu(); if (aboutModal) aboutModal.show(); else aboutModalEl.classList.add('show');
   });
   var WORKFLOW_STEPS = ['Upload Document', 'Read Document', 'Detect Format', 'Detect Modules', 'Detect Tables', 'Detect Columns', 'Extract Metadata', 'Normalize Schema', 'Validate Schema', 'Show Preview', 'User Reviews Changes', 'Generate JSON', 'Validate JSON', 'Apply Schema Update'];
@@ -1281,9 +1273,9 @@
   var TOURS = {
     quickstart: [{ sel: '[data-tour="hamburger"]', place: 'bottom', title: 'What this application does', body: '<p>Store multiple schemas, describe requirements in plain language, and build queries safely — with AI assistance grounded in your active schema throughout.</p>' }],
     builder: [
-      { sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query. This step uses AI intent understanding to identify tables, columns, and filters automatically.</p>' },
+      { sel: '[data-tour="prompt"]', place: 'bottom', title: 'Describe What You Need', body: '<p>Type a plain-English request and click Build Query. This step uses AI intent understanding to identify tables, columns, and filters automatically. Generated SQL appears right beside it.</p>' },
       { sel: '#resultBody', place: 'top', title: 'Generated SQL', body: '<p>Your validated SQL appears here. Use AI Self-Review to have the AI check schema correctness, relationships, and logic.</p>' },
-      { sel: '#manualTabs', place: 'top', title: 'Manual Configuration', body: '<p>Tables, Columns, Filters, and Advanced Options remain fully available for precise manual control.</p>' }
+      { sel: '#manualTabs', place: 'top', title: 'Manual Selectors', body: '<p>Tables & Columns, Advanced Options, and Selected/Described Requirements are organized into compact tabs below.</p>' }
     ],
     crbuilder: [{ sel: '#crCommandSelector', place: 'bottom', title: 'Query Type', body: '<p>Choose INSERT, UPDATE, or DELETE. AI can help draft these from a description, but the WHERE-condition safeguard always applies.</p>' }],
     usedschema: [
@@ -1303,7 +1295,7 @@
     setTimeout(function () {
       var r = target.getBoundingClientRect(); var pad = 8;
       spotlight.style.top = (r.top - pad) + 'px'; spotlight.style.left = (r.left - pad) + 'px'; spotlight.style.width = (r.width + pad * 2) + 'px'; spotlight.style.height = (r.height + pad * 2) + 'px';
-      var popW = Math.min(popup.offsetWidth || 360, window.innerWidth - 24); var popH = Math.min(popup.offsetHeight || 190, window.innerHeight - 24); var vh = window.innerHeight;
+      var popW = Math.min(popup.offsetWidth || 340, window.innerWidth - 24); var popH = Math.min(popup.offsetHeight || 190, window.innerHeight - 24); var vh = window.innerHeight;
       var place = step.place || 'bottom';
       if (place === 'bottom' && r.bottom + popH + 20 > vh) place = 'top';
       if (place === 'top' && r.top - popH - 20 < 0) place = 'bottom';
