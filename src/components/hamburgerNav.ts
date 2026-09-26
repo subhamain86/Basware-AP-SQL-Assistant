@@ -5,18 +5,6 @@ import { syncService } from '../services/syncService';
 import { isBrowserOnline } from '../services/onlineNlpService';
 import type { Route, Theme, SyncSource, SyncTimeOption } from '../types';
 
-// ============================================================================
-// hamburgerNav — V14. Layout per spec section 2:
-//   [Hamburger Menu] [Brand] ... [Sync dropdowns] ... [Guided Walkthrough] [Signature]
-// Hamburger stays on the LEFT. Guided Walkthrough sits immediately left of
-// the signature, which is on the far right. The Query Builder submenu
-// collapse/expand bug (spec section 6) is fixed here: the toggle button is
-// a plain <button type="button"> (never an <a>), its click handler ONLY
-// flips `expandedGroup` and re-draws — it never touches window.location or
-// triggers navigation, and each group tracks its OWN expanded state
-// independently so fixing one never affects another.
-// ============================================================================
-
 interface NavLeaf { id: Route; label: string; icon: Parameters<typeof icon>[0]; tourSelector?: string; }
 interface NavGroup { id: string; label: string; icon: Parameters<typeof icon>[0]; children: NavLeaf[]; tourSelector?: string; }
 const NAV_STRUCTURE: (NavLeaf | NavGroup)[] = [
@@ -56,7 +44,7 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
             <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
             <div class="hero-brand-row" data-tour="brand">
               <span class="app-logo-badge">${icon('logo', 24)}</span>
-              <div class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14</span></div>
+              <div class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14.1</span></div>
             </div>
           </div>
 
@@ -145,11 +133,6 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     container.querySelector('#hamburgerOverlay')?.addEventListener('click', (e) => { if (e.target === container.querySelector('#hamburgerOverlay')) closeMenu(); });
     if (menuOpen) { const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeMenu(); document.removeEventListener('keydown', escHandler); } }; document.addEventListener('keydown', escHandler); }
 
-    // Fixed: group toggle button ONLY expands/collapses its own group and
-    // re-draws. It is a <button type="button"> with no href, so it can
-    // never trigger navigation, and each group's expanded/collapsed state
-    // is tracked by its own `entry.id` key, so toggling one never disturbs
-    // another expandable section.
     container.querySelectorAll<HTMLButtonElement>('.hb-group-toggle').forEach((btn) => {
       btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const gid = btn.dataset.group!; expandedGroup = expandedGroup === gid ? null : gid; draw(); });
     });

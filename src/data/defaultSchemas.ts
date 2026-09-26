@@ -70,13 +70,13 @@ export const CORE_SCHEMA: SchemaModel = {
         { name: 'ROLE', label: 'Role', type: 'VARCHAR', length: 2, nullable: false, decode: [{ rawValue: 'A', label: 'Admin' }, { rawValue: 'S', label: 'Support' }, { rawValue: 'B', label: 'Buyer' }, { rawValue: 'AP', label: 'AP Clerk' }], description: 'Assigned application role.' },
         { name: 'ACTIVE_FLAG', label: 'Active', type: 'FLAG', nullable: false, decode: [{ rawValue: 'Y', label: 'Yes' }, { rawValue: 'N', label: 'No' }], description: 'Whether the account is active.' }
       ]},
-    { name: 'APPROVAL_HISTORY', module: 'Users & Approvals', description: 'Audit trail of invoice approval actions.',
+    { name: 'APPROVAL_HISTORY', module: 'Users & Approvals', description: 'Audit trail of invoice approval actions — who approved, rejected, or escalated an invoice.',
       columns: [
         { name: 'APPROVAL_ID', label: 'Approval ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'Primary key.' },
         { name: 'INVOICE_ID', label: 'Invoice ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'INVOICE_HEADER', column: 'INVOICE_ID' }, description: 'Invoice being actioned.' },
-        { name: 'APPROVER_ID', label: 'Approver ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'APP_USER', column: 'USER_ID' }, description: 'User who took the action.' },
-        { name: 'APPROVAL_DATE', label: 'Approval Date', type: 'DATE', nullable: false, description: 'Date/time of the action.' },
-        { name: 'ACTION', label: 'Action', type: 'VARCHAR', length: 3, nullable: false, decode: [{ rawValue: 'APP', label: 'Approved' }, { rawValue: 'REJ', label: 'Rejected' }, { rawValue: 'ESC', label: 'Escalated' }], description: 'Action taken.' }
+        { name: 'APPROVER_ID', label: 'Approver ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'APP_USER', column: 'USER_ID' }, description: 'User who approved or rejected the invoice.' },
+        { name: 'APPROVAL_DATE', label: 'Approval Date', type: 'DATE', nullable: false, description: 'Date/time of the approval action.' },
+        { name: 'ACTION', label: 'Action', type: 'VARCHAR', length: 3, nullable: false, decode: [{ rawValue: 'APP', label: 'Approved' }, { rawValue: 'REJ', label: 'Rejected' }, { rawValue: 'ESC', label: 'Escalated' }], description: 'Action taken by the approver.' }
       ]}
   ],
   relationships: [

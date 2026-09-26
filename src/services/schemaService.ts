@@ -5,7 +5,7 @@ import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
 
-const STORAGE_KEY = 'sqla.registry.v14';
+const STORAGE_KEY = 'sqla.registry.v141';
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 
@@ -169,6 +169,41 @@ export class SchemaService {
     schema.relationships = incoming.relationships;
     schema.lastSyncedAt = new Date().toISOString();
     schema.versionMeta = await stampNewVersion(schema, source);
+    this.persist();
+  }
+
+  // ------------------------------------------------------------------
+  // V14.1 — registry-level operations for full cross-machine GitHub sync
+  // (spec sections 9-16). The ENTIRE registry (all schemas + which one is
+  // active) is treated as the unit of synchronization, so both imported
+  // and active schemas, plus which schema is currently active, all travel
+  // together in one JSON document.
+  // ------------------------------------------------------------------
+
+  /** Replaces a single schema's content by id (used when the user resolves
+   * a sync conflict by choosing "Use Remote" for that schema). */
+  replaceSchemaContent(schemaId: string, incoming: SchemaModel): void {
+    const idx = this.registry.schemas.findIndex((s) => s.id === schemaId);
+    if (idx === -1) return;
+    const wasActive = this.registry.schemas[idx].status === 'active';
+    this.registry.schemas[idx] = { ...incoming, status: wasActive ? 'active' : incoming.status };
+    this.persist();
+  }
+
+  /** Adds a schema from a synchronized remote registry that doesn't exist
+   * locally yet (brand-new schema pulled from GitHub — not a conflict). */
+  addSchemaFromRemote(incoming: SchemaModel): void {
+    if (this.registry.schemas.some((s) => s.id === incoming.id)) return;
+    this.registry.schemas.push({ ...incoming, status: 'inactive' });
+    this.persist();
+  }
+
+  /** Marks the registry as freshly synchronized (updates lastSyncedAt on
+   * every schema, without touching their content) — used after a
+   * successful push/pull so "Last synced" timestamps stay meaningful. */
+  markAllSynced(): void {
+    const now = new Date().toISOString();
+    this.registry.schemas.forEach((s) => { s.lastSyncedAt = now; });
     this.persist();
   }
 }

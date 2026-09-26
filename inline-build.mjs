@@ -14,10 +14,9 @@ const scriptCloseOccurrences = (js.match(/<\/script/gi) || []).length;
 js = js.replace(/<\/script/gi, '<\\/script');
 console.log(`Escaped ${scriptCloseOccurrences} occurrence(s) of "</script" in the bundle.`);
 
-// Defense #2: ALWAYS use function-based .replace() arguments. String
-// arguments interpret $&, $`, $', $$ as special patterns — minified JS
-// commonly contains a bare `$` variable followed by such sequences, which
-// silently corrupts the output if passed as a string replacement.
+// Defense #2: ALWAYS use function-based .replace() arguments — string
+// arguments interpret $&, $`, $', $$ as special patterns, and minified JS
+// commonly contains a bare `$` variable that triggers silent corruption.
 let out = html
   .replace('<script type="module" crossorigin src="./assets/app.js"></script>', () => `<script type="module">\n${js}\n</script>`)
   .replace('<link rel="stylesheet" crossorigin href="./assets/app.css">', () => `<style>\n${css}\n</style>`)

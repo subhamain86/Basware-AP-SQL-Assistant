@@ -71,3 +71,18 @@ export function validateIncomingSchemaFile(candidate: unknown): SchemaIntegrityR
   issues.push(...structural.issues);
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
+
+/** V14.1 — validates a whole incoming REGISTRY (multiple schemas) pulled
+ * from GitHub, e.g. { schemas: [...], activeSchemaId: "..." }. Used before
+ * merging a synchronized registry into the local one. */
+export function validateIncomingRegistryFile(candidate: unknown): SchemaIntegrityResult {
+  const issues: SchemaIntegrityIssue[] = [];
+  if (typeof candidate !== 'object' || candidate === null) { issues.push({ severity: 'error', message: 'File is not a valid JSON object.' }); return { valid: false, issues }; }
+  const obj = candidate as Record<string, unknown>;
+  if (!Array.isArray(obj.schemas)) { issues.push({ severity: 'error', message: 'Missing required "schemas" array.' }); return { valid: false, issues }; }
+  (obj.schemas as unknown[]).forEach((s, idx) => {
+    const result = validateIncomingSchemaFile(s);
+    result.issues.forEach((i) => issues.push({ severity: i.severity, message: `Schema #${idx + 1}: ${i.message}` }));
+  });
+  return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
+}

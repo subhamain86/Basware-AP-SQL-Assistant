@@ -11,18 +11,16 @@ import type { CrQueryType, Dialect } from '../types';
 import { makeId } from '../utils/id';
 
 // ============================================================================
-// crBuilderPage — V14 (spec sections 5, 5.1, 14). Restructured to follow
-// the EXACT same top-level layout as the Read Only Query Builder: a
-// "Describe What You Need" + "Generated SQL" top row, then a "Manual
-// Selectors" card with tabs below (Query Details / Advanced covers the
-// same conceptual ground as Read Only's Tables&Columns/Advanced/Summary).
-// All existing CR functionality (query type segmented control, WHERE
-// safety, values editor) is preserved unchanged — only the visual
-// container/layout changed to match Read Only.
+// crBuilderPage — V14.1. Same root-cause fix as readOnlyBuilderPage (spec
+// section 1, 8): no blanket `store.subscribe(draw)`. Every local control
+// already calls its own targeted render function after mutating the store;
+// a redundant page-wide subscription was the actual cause of "refresh"-like
+// behavior wiping out in-progress selections. Only `schemaService.subscribe`
+// remains, since a genuine active-schema switch legitimately needs the
+// available table/column list refreshed.
 // ============================================================================
 
 export function renderCrBuilderPage(container: HTMLElement): void {
-  const unsubscribe = store.subscribe(draw);
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'details';
   let isBuilding = false;
@@ -64,13 +62,15 @@ export function renderCrBuilderPage(container: HTMLElement): void {
 
   function wireTopRow(state: typeof store.cr, schema: ReturnType<typeof schemaService.getActiveSchema>): void {
     container.querySelector<HTMLTextAreaElement>('#crNlDesc')?.addEventListener('input', (e) => { store.cr.naturalLanguageText = (e.target as HTMLTextAreaElement).value; });
-    container.querySelector<HTMLSelectElement>('#crDialectSelect')?.addEventListener('change', (e) => { store.updateCr((s) => { s.dialect = (e.target as HTMLSelectElement).value as Dialect; }); });
+    container.querySelector<HTMLSelectElement>('#crDialectSelect')?.addEventListener('change', (e) => { store.updateCr((s) => { s.dialect = (e.target as HTMLSelectElement).value as Dialect; }); renderCrSqlOutput(); });
     container.querySelector('#crNlBuildBtn')?.addEventListener('click', () => runCrNlBuild());
     renderCrSqlOutput();
   }
 
   async function runCrNlBuild(): Promise<void> {
-    isBuilding = true; draw();
+    isBuilding = true;
+    const btn = container.querySelector<HTMLButtonElement>('#crNlBuildBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = `${icon('zap', 15)} Processing…`; }
     const schema = schemaService.getActiveSchema();
     const orchestrated = await orchestrateCrNlp(store.cr.naturalLanguageText, schema);
     const requirement = orchestrated.result;
@@ -79,20 +79,20 @@ export function renderCrBuilderPage(container: HTMLElement): void {
     if (requirement.matchedTable) store.updateCr((s) => { s.table = requirement.matchedTable; });
     if (requirement.values.length) store.updateCr((s) => { s.values = requirement.values; });
     if (requirement.filters.length) store.updateCr((s) => { s.filters = requirement.filters; });
-    // IMPORTANT: draw() rebuilds the ENTIRE section's innerHTML (including a
-    // fresh, empty #crNlNotes placeholder), so it must run BEFORE we
-    // populate #crNlNotes below — populating it first and then calling
-    // draw() would immediately discard the content we just wrote.
-    draw();
+
     const engineBadge = orchestrated.engineUsed === 'online' ? `<span class="engine-badge engine-online">${icon('cloud', 13)} Online AI/NLP</span>` : `<span class="engine-badge engine-offline">${icon('wifi-off', 13)} Offline/local engine${orchestrated.onlineAttempted ? ' (online attempt failed/unavailable)' : ''}</span>`;
     const notesMount = container.querySelector('#crNlNotes');
     if (notesMount) notesMount.innerHTML = `<div class="notes-box">${icon('info', 14)}<div>${engineBadge}<ul class="mt">${requirement.notes.map((n) => `<li>${n}</li>`).join('')}</ul></div></div>`;
+    renderTabsSection(store.cr, schema);
+    renderCrSqlOutput();
+    const rebuiltBtn = container.querySelector<HTMLButtonElement>('#crNlBuildBtn');
+    if (rebuiltBtn) { rebuiltBtn.disabled = false; rebuiltBtn.innerHTML = `${icon('zap', 15)} Interpret Description`; }
   }
 
   function renderCrSqlOutput(): void {
     const mount = container.querySelector<HTMLElement>('#crSqlMount'); if (!mount) return;
     const blocked = /^-- (Choose a table|Add at least one|A WHERE condition)/.test(store.cr.generatedSql);
-    renderSqlCodeBlock(mount, store.cr.generatedSql, { onCopy: () => { copyTextToClipboard(store.cr.generatedSql); store.pushToast('success', 'SQL copied to clipboard.'); }, onClear: () => { store.resetCr(); store.pushToast('info', 'CR query cleared.'); }, onRegenerate: () => { store.regenerateCrSql(); } });
+    renderSqlCodeBlock(mount, store.cr.generatedSql, { onCopy: () => { copyTextToClipboard(store.cr.generatedSql); store.pushToast('success', 'SQL copied to clipboard.'); }, onClear: () => { store.resetCr(); store.pushToast('info', 'CR query cleared.'); renderTabsSection(store.cr, schemaService.getActiveSchema()); renderCrSqlOutput(); }, onRegenerate: () => { store.regenerateCrSql(); renderCrSqlOutput(); } });
     const copyBtn = mount.querySelector<HTMLButtonElement>('#btnCopySql'); if (copyBtn) copyBtn.disabled = blocked;
   }
 
@@ -127,8 +127,8 @@ export function renderCrBuilderPage(container: HTMLElement): void {
         </div>
       </div>`;
 
-    panel.querySelectorAll<HTMLButtonElement>('.seg-btn').forEach((btn) => { btn.addEventListener('click', () => { store.updateCr((s) => { s.queryType = btn.dataset.qt as CrQueryType; }); draw(); }); });
-    panel.querySelector<HTMLSelectElement>('#crTableSelect')?.addEventListener('change', (e) => { store.updateCr((s) => { s.table = (e.target as HTMLSelectElement).value || null; s.values = []; s.filters = []; }); draw(); });
+    panel.querySelectorAll<HTMLButtonElement>('.seg-btn').forEach((btn) => { btn.addEventListener('click', () => { store.updateCr((s) => { s.queryType = btn.dataset.qt as CrQueryType; }); renderDetailsTab(panel, store.cr, schema); renderCrSqlOutput(); }); });
+    panel.querySelector<HTMLSelectElement>('#crTableSelect')?.addEventListener('change', (e) => { store.updateCr((s) => { s.table = (e.target as HTMLSelectElement).value || null; s.values = []; s.filters = []; }); renderDetailsTab(panel, store.cr, schema); renderCrSqlOutput(); });
     panel.querySelector('#addCrValueBtn')?.addEventListener('click', () => { if (columnsForTable.length === 0) return; store.updateCr((s) => { s.values.push({ id: makeId('crv'), column: columnsForTable[0].name, value: '' }); }); renderValuesList(); renderCrSqlOutput(); });
     panel.querySelector<HTMLInputElement>('#confirmNoWhere')?.addEventListener('change', (e) => { store.updateCr((s) => { s.confirmNoWhere = (e.target as HTMLInputElement).checked; }); renderCrSqlOutput(); });
     renderValuesList();
@@ -154,5 +154,5 @@ export function renderCrBuilderPage(container: HTMLElement): void {
   function tableOptions(schema: ReturnType<typeof schemaService.getActiveSchema>, selected: string | null): string { const modules = Array.from(new Set(schema.tables.map((t) => t.module))); return modules.map((m) => `<optgroup label="${m}">${schema.tables.filter((t) => t.module === m).map((t) => `<option value="${t.name}" ${t.name === selected ? 'selected' : ''}>${t.name}</option>`).join('')}</optgroup>`).join(''); }
 
   draw();
-  (container as any)._cleanup = () => { unsubscribe(); unsubscribeSchema(); };
+  (container as any)._cleanup = () => { unsubscribeSchema(); };
 }

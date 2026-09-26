@@ -5,19 +5,16 @@ import { renderDataTable } from '../components/dataTable';
 import { openModal } from '../components/modal';
 import { validateSingleRowAgainstSchema } from '../engines/schemaIntegrityEngine';
 import { verifyPassword } from '../services/passwordService';
+import { syncService } from '../services/syncService';
+import { vaultService } from '../services/vaultService';
 import type { SchemaEditorRow, ColumnDataType } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
-// ============================================================================
-// schemaEditorSection — V14 (spec section 10). Workflow is now:
-//   Select Schema -> Select Module -> Select Table -> Populate Table
-// After a schema is chosen, a Module dropdown appears (populated from that
-// schema); after a module is chosen, a Table dropdown appears (filtered to
-// that module); once a table is chosen, the data grid is scoped/populated
-// to just that table's columns. All existing Add/Edit/Delete/3-level-
-// confirmation functionality is unchanged after that point.
-// ============================================================================
-
+// schemaEditorSection — V14.1. Workflow unchanged: Select Schema -> Select
+// Module -> Select Table -> Populate Table. Benefits automatically from the
+// dataTable.ts root-cause fix (static shell, search box never destroyed).
+// Adds a quick "Sync Now" shortcut so edits made here can be pushed to
+// GitHub immediately without switching to Schema Management.
 export function renderSchemaEditorSection(container: HTMLElement): void {
   let editingSchemaId = schemaService.getActiveSchema().id;
   let selectedModule: string | null = null;
@@ -37,7 +34,10 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       <label class="block-label" data-tour="schema-editor-select">Select Schema
         <select id="editorSchemaSelect">${allSchemas.map((s) => `<option value="${s.id}" ${s.id === editingSchema.id ? 'selected' : ''}>${s.name}${s.status === 'active' ? ' (Active)' : ''}</option>`).join('')}</select>
       </label>
-      <p class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong>${editingSchema.status === 'active' ? ' <span class="chip chip-active">Active — changes apply immediately</span>' : ' <span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'}</p>
+      <p class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong>${editingSchema.status === 'active' ? ' <span class="chip chip-active">Active — changes apply immediately</span>' : ' <span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'}
+        <button type="button" class="btn btn-outline btn-sm sync-now-inline-btn" id="syncNowInlineBtn">${icon('github', 13)} Sync Now</button>
+      </p>
+      <div id="syncNowInlineResult"></div>
 
       <div class="form-row-2" data-tour="schema-editor-module-table">
         <label class="block-label">Select Module <span class="req">*</span><select id="editorModuleSelect"><option value="">— choose a module —</option>${modules.map((m) => `<option value="${m}" ${m === selectedModule ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
@@ -59,6 +59,14 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     container.querySelector<HTMLSelectElement>('#editorModuleSelect')?.addEventListener('change', (e) => { selectedModule = (e.target as HTMLSelectElement).value || null; selectedTable = null; draw(); });
     container.querySelector<HTMLSelectElement>('#editorTableSelect')?.addEventListener('change', (e) => { selectedTable = (e.target as HTMLSelectElement).value || null; draw(); });
     container.querySelector('#addRowBtn')?.addEventListener('click', () => openRowForm(editingSchema.id, null));
+    container.querySelector('#syncNowInlineBtn')?.addEventListener('click', async () => {
+      const resultMount = container.querySelector('#syncNowInlineResult'); if (!resultMount) return;
+      if (!vaultService.isUnlocked()) { resultMount.innerHTML = `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Vault (Settings → Vault) first.</div>`; return; }
+      resultMount.innerHTML = `<div class="hint">Syncing…</div>`;
+      const result = await syncService.pushRegistryToGitHub(`Update ${editingSchema.name} via Manual Schema Update`);
+      resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Synced to GitHub.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+      if (result.ok) store.pushToast('success', 'Schema changes synced to GitHub.');
+    });
     if (selectedTable) mountTable(editingSchema.id);
   }
 

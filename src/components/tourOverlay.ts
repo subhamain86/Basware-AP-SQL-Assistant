@@ -3,18 +3,18 @@ import { store } from '../state/store';
 
 export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
   { id: 'w1', route: 'quickstart', targetSelector: '[data-tour="brand"]', title: 'Welcome to SQL Assistant', body: 'This tool writes read-only and Change Request SQL for you, using your organization\'s active schema as the single source of truth.' },
-  { id: 'w2', route: 'quickstart', targetSelector: '[data-tour="hamburger-btn"]', title: 'Hamburger Menu', body: 'All page navigation lives behind this button on the left of the navbar. Select it to open Quick Start, Query Builder, Schema, Error Rectifier, Settings, and About.' },
-  { id: 'w3', route: 'quickstart', targetSelector: '[data-tour="navbar-sync"]', title: 'Sync Source & Sync Time', body: 'These dropdowns are the schema-sync controls in the navbar — choose Shared Location or GitHub, and how often to sync.' },
+  { id: 'w2', route: 'quickstart', targetSelector: '[data-tour="hamburger-btn"]', title: 'Hamburger Menu', body: 'All page navigation lives behind this button on the left of the navbar.' },
+  { id: 'w3', route: 'quickstart', targetSelector: '[data-tour="navbar-sync"]', title: 'Sync Source & Sync Time', body: 'Choose Shared Location or GitHub, and how often to sync.' },
   { id: 'w4', route: 'quickstart', targetSelector: '[data-tour="guided-walkthrough-btn"]', title: 'Guided Walkthrough', body: 'You are here! This button reopens the walkthrough any time.' },
   { id: 'w5', route: 'quickstart', targetSelector: '[data-tour="signature"]', title: 'Signature', body: 'Shows who built this application, on the far right of the navbar.' },
-  { id: 'w6', route: 'readonly', targetSelector: '[data-tour="describe-card"]', title: 'Describe What You Need', body: 'Type a plain-language requirement. The app tries an online AI/NLP engine first, then automatically falls back to a local offline engine — this is always shown clearly.' },
-  { id: 'w7', route: 'readonly', targetSelector: '[data-tour="module-selector"]', title: 'Module → Search → Select', body: 'Narrow the table list by Module first, then search within it — or search across everything.' },
-  { id: 'w8', route: 'readonly', targetSelector: '[data-tour="manual-case-decode"]', title: 'Manual CASE / DECODE', body: 'Build a CASE or DECODE expression by hand when no schema-defined one already fits.' },
+  { id: 'w6', route: 'readonly', targetSelector: '[data-tour="describe-card"]', title: 'Describe What You Need', body: 'Type a plain-language requirement — even everyday business terms like "who approved this invoice" — and the schema-aware offline engine will try to map it to the active schema. Manual Selectors and Natural Language now MERGE together rather than one replacing the other.' },
+  { id: 'w7', route: 'readonly', targetSelector: '[data-tour="module-selector"]', title: 'Module → Search → Select', body: 'Narrow the table list by Module first, then search within it — search now updates instantly without ever losing focus or refreshing.' },
+  { id: 'w8', route: 'readonly', targetSelector: '[data-tour="tab-tables-columns"]', title: 'Select Columns — inline CASE / DECODE', body: 'Every column now has CASE and DECODE controls directly beside it — build a manual expression, or toggle an existing schema-defined DECODE on/off per column.' },
   { id: 'w9', route: 'readonly', targetSelector: '[data-tour="tab-advanced"]', title: 'Advanced Options', body: 'Sorting, grouping, aggregation, joins, limits, DISTINCT all live here.' },
-  { id: 'w10', route: 'cr', targetSelector: '[data-tour="cr-query-type"]', title: 'Query Builder for CR', body: 'Same layout as Read Only — describe the change in natural language or use manual selectors.' },
+  { id: 'w10', route: 'cr', targetSelector: '[data-tour="cr-query-type"]', title: 'Query Builder for CR', body: 'Same layout as Read Only — describe the change in natural language or use manual selectors, with the same stability fixes applied.' },
   { id: 'w11', route: 'schema-used', targetSelector: '[data-tour="schema-module-selector"]', title: 'Schema — Module & Search', body: 'Filter Tables in Active Schema by Module, then search within it.' },
   { id: 'w12', route: 'error-rectifier', targetSelector: '[data-tour="error-rectifier-form"]', title: 'Error Rectifier', body: 'Paste a database error and the SQL that caused it — always grounded in the active schema.' },
-  { id: 'w13', route: 'settings', targetSelector: '[data-tour="settings-lock-screen"]', title: 'Settings is password protected', body: 'Selecting Settings shows this authentication screen first, requiring the Admin Password.' },
+  { id: 'w13', route: 'settings', targetSelector: '[data-tour="settings-lock-screen"]', title: 'Settings is password protected', body: 'Enter the Admin Password to unlock Settings, Schema Management, and cross-machine synchronization.' },
   { id: 'w14', route: 'about', targetSelector: '[data-tour="about-panel"]', title: 'About', body: 'Version history and architecture notes for SQL Assistant.' }
 ];
 

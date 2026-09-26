@@ -11,19 +11,6 @@ import { renderTabs } from '../components/tabs';
 import { downloadBlob } from '../utils/dom';
 import type { SyncTimeOption } from '../types';
 
-// ============================================================================
-// settingsPage — V14. Two fixes applied per spec:
-//  (8) Password section no longer shows a persistent/false message — the
-//      "changePwResult" box now starts EMPTY and only ever shows content
-//      immediately after a Change/Reset action, clearing itself the next
-//      time the tab is (re)rendered from scratch. No default-password hint
-//      is ever rendered anywhere (spec section 9).
-//  (12) The lock screen (gate for Settings, which contains Schema
-//      Management) now reads "Enter Admin Password" rather than a generic
-//      "Password" label, and the demo-password hint line has been removed
-//      entirely.
-// ============================================================================
-
 export function renderSettingsPage(container: HTMLElement): void {
   function draw(): void {
     if (!store.settingsUnlocked) { renderLockScreen(); return; }
@@ -36,7 +23,7 @@ export function renderSettingsPage(container: HTMLElement): void {
         <div class="settings-lock-card">
           <div class="settings-lock-icon">${icon('lock', 32)}</div>
           <h1>Settings</h1>
-          <p class="hint">Settings — including Schema Management — are protected.</p>
+          <p class="hint">Settings — including Schema Management and cross-machine synchronization — are protected.</p>
           <label class="block-label">Enter Admin Password<input type="password" id="settingsPwInput" autocomplete="off" /></label>
           <div id="settingsPwError" class="issue-box mini" hidden>Incorrect password.</div>
           <div class="row-actions" style="justify-content:center">
@@ -54,7 +41,7 @@ export function renderSettingsPage(container: HTMLElement): void {
     }
     container.querySelector('#settingsUnlockBtn')?.addEventListener('click', tryUnlock);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
-    input.addEventListener('input', () => errBox.setAttribute('hidden', '')); // clear stale error as soon as user edits
+    input.addEventListener('input', () => errBox.setAttribute('hidden', ''));
     container.querySelector('#settingsCancelBtn')?.addEventListener('click', () => { window.location.hash = 'quickstart'; });
   }
 
@@ -82,9 +69,6 @@ export function renderSettingsPage(container: HTMLElement): void {
   }
 
   function renderSecurityTab(panel: HTMLElement): void {
-    // Note: NO hint/message about the current/default password is ever
-    // rendered here (spec section 9) — this box starts empty and only
-    // shows a result immediately following a Change/Reset action.
     panel.innerHTML = `
       <div class="builder-panel narrow">
         <h3>Change Admin Password</h3>
@@ -125,24 +109,32 @@ export function renderSettingsPage(container: HTMLElement): void {
           <p class="hint">Status: ${syncService.hasConnectedLocation() ? '<span class="sync-ok">Connected</span>' : 'Not connected'}${syncService.isFileSystemAccessSupported() ? '' : ' — this browser does not support the File System Access API; use Import/Export instead.'}</p>
           <button class="btn btn-outline btn-sm" id="connectLocationBtn" ${syncService.isFileSystemAccessSupported() ? '' : 'disabled'}>${icon('folder', 14)} Connect Folder</button>
           <div id="locationResult"></div>
-          <h3 class="mt">${icon('github', 15)} GitHub</h3>
+          <h3 class="mt">${icon('github', 15)} GitHub Repository (Cross-Machine Sync)</h3>
           ${vaultUnlocked ? `
             <label class="block-label">Repository (owner/repo)<input type="text" id="ghRepo" value="${vCfg?.githubRepo || ''}" placeholder="e.g. subhamain86/Basware-AP-SQL-Assistant" /></label>
             <label class="block-label">Branch<input type="text" id="ghBranch" value="${vCfg?.githubBranch || 'main'}" /></label>
             <label class="block-label">Schema file path<input type="text" id="ghPath" value="${vCfg?.githubSchemaPath || 'schema.json'}" /></label>
-            <label class="block-label">Access Token <span class="hint">(stored only inside the encrypted Vault)</span><input type="password" id="ghToken" value="${vCfg?.githubToken || ''}" autocomplete="off" /></label>
+            <label class="block-label">Access Token <span class="hint">(stored only inside the encrypted Vault — never shown here)</span><input type="password" id="ghToken" value="${vCfg?.githubToken || ''}" autocomplete="off" placeholder="${vCfg?.githubToken ? '••••••••••••' : 'ghp_...'}" /></label>
             <button class="btn btn-outline btn-sm" id="saveGithubBtn">${icon('save', 14)} Save GitHub Configuration</button>
-          ` : `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Vault (below) to configure GitHub credentials.</div>`}
-          <h3 class="mt">Sync Now</h3>
+          ` : `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Vault (below) to configure GitHub credentials — they are never displayed in plain text anywhere in this UI.</div>`}
+          <h3 class="mt">Cross-Machine Sync</h3>
           <p class="hint">Status: <span id="syncStatusLabel">${syncStatusLabel()}</span>${syncService.getLastSyncedAt() ? ` · Last sync: ${new Date(syncService.getLastSyncedAt()!).toLocaleString()}` : ''}</p>
-          <button class="btn btn-primary btn-sm" id="syncNowBtn">${icon('folder-sync', 14)} Sync Now (${cfg.source === 'shared-location' ? 'Shared Location' : 'GitHub'})</button>
-          <div id="syncResult"></div>
+          <div class="row-actions">
+            <button class="btn btn-primary btn-sm" id="pushRegistryBtn2">${icon('github', 14)} Push All Schemas to GitHub</button>
+            <button class="btn btn-outline btn-sm" id="pullRegistryBtn2">${icon('folder-sync', 14)} Pull Schemas from GitHub</button>
+          </div>
+          <div id="syncResult2" class="mt"></div>
         </div>
         <div class="builder-panel">
           <h3>${icon('clock', 15)} Custom Sync Time</h3>
-          ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}" /></label><button class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time is not "Custom".</p>'}
+          ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}" /></label><button class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time (navbar) is not "Custom".</p>'}
           <h3 class="mt">${icon('shield-alert', 15)} Conflict Management</h3>
-          <p class="hint">If a synchronized schema differs from your active schema, you'll be shown a comparison and asked to choose Use Local / Use Remote / Cancel before anything is overwritten.</p>
+          <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a pull finds a schema that changed both locally and remotely, you'll be shown exactly which columns changed and asked to choose <strong>Use Local</strong> or <strong>Use Remote</strong> per schema. Nothing is silently overwritten, and the current working version is preserved until you decide.</p>
+          <h3 class="mt">Cross-Machine Workflow</h3>
+          <ol class="mini-list">
+            <li>Machine A: Unlock Vault → configure repository → Import/Update Schema → Push to GitHub.</li>
+            <li>Machine B: Unlock Vault → configure the SAME repository → Pull from GitHub → resolve any conflicts → Set the schema Active.</li>
+          </ol>
         </div>
       </div>`;
     panel.querySelector('#connectLocationBtn')?.addEventListener('click', async () => { const result = await syncService.connectSharedLocation(); const mount = panel.querySelector('#locationResult'); if (mount) mount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Connected: ${result.label}</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; if (result.ok) renderSyncTab(panel); });
@@ -154,7 +146,22 @@ export function renderSettingsPage(container: HTMLElement): void {
       const result = await vaultService.saveConfig({ githubRepo: repo, githubBranch: branch, githubSchemaPath: path, githubToken: token }, pass);
       if (result.ok) { store.pushToast('success', 'GitHub configuration saved to the encrypted Vault.'); renderSyncTab(panel); } else store.pushToast('error', result.error || 'Could not save — incorrect passphrase.');
     });
-    panel.querySelector('#syncNowBtn')?.addEventListener('click', async () => { const resultMount = panel.querySelector('#syncResult'); const result = await syncService.syncNow(); if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Synchronized successfully.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; const statusLabel = panel.querySelector('#syncStatusLabel'); if (statusLabel) statusLabel.textContent = syncStatusLabel(); });
+    panel.querySelector('#pushRegistryBtn2')?.addEventListener('click', async () => {
+      const btn = panel.querySelector<HTMLButtonElement>('#pushRegistryBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Pushing…';
+      const result = await syncService.pushRegistryToGitHub();
+      btn.disabled = false; btn.innerHTML = original;
+      const resultMount = panel.querySelector('#syncResult2');
+      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} All schemas pushed to GitHub.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}${result.requiresPullFirst ? ' Pull first.' : ''}</div>`;
+      const statusLabel = panel.querySelector('#syncStatusLabel'); if (statusLabel) statusLabel.textContent = syncStatusLabel();
+    });
+    panel.querySelector('#pullRegistryBtn2')?.addEventListener('click', async () => {
+      const btn = panel.querySelector<HTMLButtonElement>('#pullRegistryBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Pulling…';
+      const result = await syncService.pullRegistryFromGitHub();
+      btn.disabled = false; btn.innerHTML = original;
+      const resultMount = panel.querySelector('#syncResult2');
+      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Pulled from GitHub — ${result.newSchemasAdded.length} new, ${result.unchanged} unchanged, ${result.conflicts.length} conflict(s). Resolve conflicts in Schema Management → Pull, or here on next pull.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+      const statusLabel = panel.querySelector('#syncStatusLabel'); if (statusLabel) statusLabel.textContent = syncStatusLabel();
+    });
     panel.querySelector('#saveCustomTimeBtn')?.addEventListener('click', () => { const t = panel.querySelector<HTMLInputElement>('#customTimeInput')?.value || '20:30'; syncService.setTime('custom' as SyncTimeOption, t); store.pushToast('success', `Custom sync time saved: ${t}.`); });
   }
 
@@ -165,7 +172,7 @@ export function renderSettingsPage(container: HTMLElement): void {
     panel.innerHTML = `
       <div class="builder-panel narrow">
         <h3>${icon('cloud', 15)} Online AI/NLP Endpoint</h3>
-        <p class="hint">The Query Builder tries this endpoint first, then automatically falls back to the local offline engine if it is unset, unreachable, or the browser is offline. No endpoint is configured by default.</p>
+        <p class="hint">The Query Builder tries this endpoint first, then automatically falls back to the schema-aware local offline engine if it is unset, unreachable, or the browser is offline. No endpoint is configured by default.</p>
         <label class="block-label">Endpoint URL<input type="text" id="nlpEndpointInput" value="${current || ''}" placeholder="https://your-ai-service.example.com/nlp" /></label>
         <div class="row-actions"><button class="btn btn-primary btn-sm" id="saveNlpEndpointBtn">${icon('save', 14)} Save</button><button class="btn btn-outline btn-sm" id="clearNlpEndpointBtn">${icon('trash', 14)} Clear (use offline only)</button></div>
         <div id="nlpEndpointResult"></div>
@@ -188,7 +195,7 @@ export function renderSettingsPage(container: HTMLElement): void {
           <button class="btn btn-primary btn-sm" id="createVaultBtn">${icon('safe', 14)} Create Vault</button>
           <div id="vaultCreateResult"></div>
         ` : unlocked ? `
-          <p class="hint">Vault is unlocked for this session. Decrypted configuration is held only in memory.</p>
+          <p class="hint">Vault is unlocked for this session. Decrypted configuration is held only in memory and never rendered as plain text anywhere in this UI.</p>
           <button class="btn btn-outline btn-sm" id="lockVaultBtn">${icon('lock', 14)} Lock Vault</button>
           <h3 class="mt">Change Passphrase</h3>
           <label class="block-label">Current passphrase<input type="password" id="vaultOldPass" autocomplete="off" /></label>

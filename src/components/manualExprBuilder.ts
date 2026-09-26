@@ -4,27 +4,27 @@ import { buildManualCaseExpression, buildManualDecodeExpression } from '../engin
 import type { Dialect, SelectedColumnSpec } from '../types';
 import { makeId } from '../utils/id';
 
-// ============================================================================
-// manualExprBuilder — V14 (spec section 4.2). Lets the user construct a
-// CASE or DECODE expression manually when no suitable schema-level
-// CASE/DECODE definition already exists. Produces a SelectedColumnSpec with
-// `manualExpr` populated (raw SQL), which sqlEngine renders verbatim.
-// Basic validation: alias required, at least one WHEN/pair, no empty
-// expressions.
-// ============================================================================
+// manualExprBuilder — V14.1. Now accepts an optional pre-fill (table/column
+// name) so the per-column "CASE"/"DECODE" buttons in columnPicker can open
+// this builder with a sensible starting WHEN expression / source
+// expression already populated, instead of a blank form every time.
+export interface ManualCasePrefill { table: string; column: string; }
+export interface ManualDecodePrefill { table: string; column: string; }
 
-export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void): void {
+export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualCasePrefill): void {
+  const seedExpr = prefill ? `${prefill.table}.${prefill.column} = 'X'` : '';
+  const seedAlias = prefill ? `${prefill.column}_LABEL` : '';
   const bodyHtml = `
     <p class="hint">Build a CASE expression manually — useful when the column you need doesn't already have a schema-defined CASE/DECODE.</p>
     <div id="whenRows" class="mini-list"></div>
     <button type="button" class="btn btn-outline btn-sm" id="addWhenBtn">${icon('plus', 14)} Add WHEN</button>
     <label class="block-label mt">ELSE value<input type="text" id="caseElse" placeholder="e.g. Unknown" /></label>
-    <label class="block-label">Alias <span class="req">*</span><input type="text" id="caseAlias" placeholder="e.g. STATUS_LABEL" /></label>
+    <label class="block-label">Alias <span class="req">*</span><input type="text" id="caseAlias" value="${seedAlias}" placeholder="e.g. STATUS_LABEL" /></label>
     <div id="caseIssues"></div>
     <div class="modal-actions"><button type="button" class="btn btn-ghost" id="caseCancel">Cancel</button><button type="button" class="btn btn-primary" id="caseSave">${icon('save', 14)} Add Column</button></div>`;
-  const modal = openModal(`${icon('code', 18)} Manual CASE Expression`, bodyHtml, { wide: true });
+  const modal = openModal(`${icon('code', 18)} Manual CASE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const whenRowsEl = modal.element.querySelector<HTMLElement>('#whenRows')!;
-  let whens: { whenExpr: string; thenValue: string }[] = [{ whenExpr: '', thenValue: '' }];
+  let whens: { whenExpr: string; thenValue: string }[] = [{ whenExpr: seedExpr, thenValue: '' }];
 
   function renderWhens(): void {
     whenRowsEl.innerHTML = whens.map((w, i) => `<div class="mini-row wrap" data-idx="${i}"><input type="text" class="when-expr" placeholder="e.g. STATUS = 'A'" value="${w.whenExpr}" /><span class="hint">THEN</span><input type="text" class="when-then" placeholder="e.g. Active" value="${w.thenValue}" /><button class="icon-btn remove-when" title="Remove">${icon('trash', 14)}</button></div>`).join('');
@@ -53,17 +53,19 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
   });
 }
 
-export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void): void {
+export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill): void {
+  const seedSource = prefill ? `${prefill.table}.${prefill.column}` : '';
+  const seedAlias = prefill ? `${prefill.column}_DESC` : '';
   const bodyHtml = `
     <p class="hint">Build a DECODE (Oracle) / CASE (other dialects) expression manually.</p>
-    <label class="block-label">Source column/expression <span class="req">*</span><input type="text" id="decodeSource" placeholder="e.g. VENDOR.STATUS" /></label>
+    <label class="block-label">Source column/expression <span class="req">*</span><input type="text" id="decodeSource" value="${seedSource}" placeholder="e.g. VENDOR.STATUS" /></label>
     <div id="pairRows" class="mini-list mt"></div>
     <button type="button" class="btn btn-outline btn-sm" id="addPairBtn">${icon('plus', 14)} Add raw=label pair</button>
     <label class="block-label mt">ELSE value<input type="text" id="decodeElse" placeholder="e.g. Unknown" /></label>
-    <label class="block-label">Alias <span class="req">*</span><input type="text" id="decodeAlias" placeholder="e.g. STATUS_DESC" /></label>
+    <label class="block-label">Alias <span class="req">*</span><input type="text" id="decodeAlias" value="${seedAlias}" placeholder="e.g. STATUS_DESC" /></label>
     <div id="decodeIssues"></div>
     <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} Add Column</button></div>`;
-  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression`, bodyHtml, { wide: true });
+  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const pairRowsEl = modal.element.querySelector<HTMLElement>('#pairRows')!;
   let pairs: { rawValue: string; label: string }[] = [{ rawValue: '', label: '' }];
 

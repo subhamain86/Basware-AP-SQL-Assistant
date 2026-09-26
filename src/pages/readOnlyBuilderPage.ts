@@ -15,8 +15,34 @@ import { decodeLegend } from '../engines/decodeEngine';
 import type { Dialect } from '../types';
 import { makeId } from '../utils/id';
 
+// ============================================================================
+// readOnlyBuilderPage — V14.1. ROOT-CAUSE FIX for the "automatic page
+// refresh" bug (spec section 1): this page no longer subscribes to the
+// generic `store.subscribe(draw)`. That blanket subscription meant EVERY
+// store mutation anywhere in the app (including unrelated things like a
+// toast auto-dismissing 4 seconds later) triggered a full top-to-bottom
+// rebuild of this entire page section — tearing down and recreating the
+// table/column pickers with brand-new closures, silently resetting their
+// search term and selected module back to blank, stealing focus from
+// whatever input the user was mid-typing in, and generally producing the
+// "page just refreshed" sensation the spec describes.
+//
+// Every local control here ALREADY calls its own targeted render function
+// (renderSqlOutput(), renderSortsList(), etc.) immediately after mutating
+// the store — a blanket subscription was pure redundancy with harmful side
+// effects. The ONLY legitimate reason to redraw the whole Manual Selectors
+// area is a genuine ACTIVE SCHEMA change (new tables/columns exist), so we
+// keep `schemaService.subscribe(draw)` — schema switches are rare,
+// deliberate actions, not something that happens mid-keystroke.
+//
+// Also implements spec section 3 (AND/OR): `runNlBuild` now calls
+// `store.mergeReadOnlyFromNlp()` instead of overwriting the existing
+// manual selections, and spec section 7 (inline CASE/DECODE): the column
+// picker's per-column CASE/DECODE buttons are wired here to the manual
+// expression builders, pre-filled with that specific column.
+// ============================================================================
+
 export function renderReadOnlyBuilderPage(container: HTMLElement): void {
-  const unsubscribe = store.subscribe(draw);
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'tables-columns';
   let isBuilding = false;
@@ -31,13 +57,13 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
     container.innerHTML = `
       <section class="page page-builder">
         <h1 class="page-title">${icon('table')} Read Only Query Builder</h1>
-        <p class="page-subtitle">Generates validated SELECT / WITH statements only — destructive statements are blocked at the engine level, not just the UI. Use Natural Language and Manual Selectors independently, or combine both.</p>
+        <p class="page-subtitle">Generates validated SELECT / WITH statements only — destructive statements are blocked at the engine level, not just the UI. Natural Language and Manual Selectors merge together — use either one, or both.</p>
         <div class="builder-grid-top">
           <div class="builder-panel" data-tour="describe-card">
             <h2>${icon('sparkles', 16)} Describe What You Need <span class="optional">(optional)</span></h2>
-            <textarea id="nlDesc" rows="4" placeholder="e.g. Show invoices this month where the amount is greater than 10000, including supplier name">${state.naturalLanguageText}</textarea>
+            <textarea id="nlDesc" rows="4" placeholder="e.g. Show invoices this month where the amount is greater than 10000, or describe it in your own words like 'who approved this invoice'">${state.naturalLanguageText}</textarea>
             <div class="row-actions"><label class="inline-label">SQL dialect<select id="dialectSelect">${dialectOptions(state.dialect)}</select></label></div>
-            <button id="nlBuildBtn" class="btn btn-primary" ${isBuilding ? 'disabled' : ''}>${icon('zap', 15)} ${isBuilding ? 'Processing…' : 'Build Query'}</button>
+            <button id="nlBuildBtn" class="btn btn-primary" ${isBuilding ? 'disabled' : ''}>${icon('zap', 15)} ${isBuilding ? 'Processing…' : 'Build Query (merges with manual selections)'}</button>
             <div id="nlNotes"></div>
           </div>
           <div class="builder-panel" data-tour="generated-sql-card">
@@ -63,32 +89,29 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
 
   function wireTopRow(): void {
     container.querySelector<HTMLTextAreaElement>('#nlDesc')?.addEventListener('input', (e) => { store.readOnly.naturalLanguageText = (e.target as HTMLTextAreaElement).value; });
-    container.querySelector<HTMLSelectElement>('#dialectSelect')?.addEventListener('change', (e) => { store.updateReadOnly((s) => { s.dialect = (e.target as HTMLSelectElement).value as Dialect; }); });
+    container.querySelector<HTMLSelectElement>('#dialectSelect')?.addEventListener('change', (e) => { store.updateReadOnly((s) => { s.dialect = (e.target as HTMLSelectElement).value as Dialect; }); renderSqlOutput(); });
     container.querySelector('#nlBuildBtn')?.addEventListener('click', () => runNlBuild());
     renderSqlOutput();
   }
 
   async function runNlBuild(preferredColumn?: string): Promise<void> {
-    isBuilding = true; draw();
+    isBuilding = true;
+    const nlBtn = container.querySelector<HTMLButtonElement>('#nlBuildBtn');
+    if (nlBtn) { nlBtn.disabled = true; nlBtn.innerHTML = `${icon('zap', 15)} Processing…`; }
+
     const schema = schemaService.getActiveSchema();
     const orchestrated = await orchestrateReadOnlyNlp(store.readOnly.naturalLanguageText, schema);
     const requirement = orchestrated.result;
     if (preferredColumn) requirement.clarifications = [];
+
+    // V14.1 — TRUE AND/OR merge (spec section 3): union manual selections
+    // with whatever the NLP engine derived, instead of overwriting them.
+    store.mergeReadOnlyFromNlp(requirement);
     const result = aiService.generateSQL(requirement, schema, store.readOnly);
-    store.updateReadOnly((s) => {
-      if (requirement.matchedTables.length) s.selectedTables = requirement.matchedTables;
-      if (requirement.matchedColumns.length) s.selectedColumns = requirement.matchedColumns;
-      if (requirement.matchedFilters.length) s.filters = requirement.matchedFilters;
-      if (requirement.matchedSorts.length) s.sorts = requirement.matchedSorts;
-      if (requirement.limit) s.advanced.limit = requirement.limit;
-      if (requirement.distinct) s.advanced.distinct = true;
-    });
+
     isBuilding = false;
-    // IMPORTANT: draw() rebuilds the ENTIRE section's innerHTML (including a
-    // fresh, empty #nlNotes placeholder), so it must run BEFORE we populate
-    // #nlNotes below — populating it first and then calling draw() would
-    // immediately discard the content we just wrote.
-    draw();
+    if (nlBtn) { nlBtn.disabled = false; nlBtn.innerHTML = `${icon('zap', 15)} Build Query (merges with manual selections)`; }
+
     const engineBadge = orchestrated.engineUsed === 'online' ? `<span class="engine-badge engine-online">${icon('cloud', 13)} Online AI/NLP</span>` : `<span class="engine-badge engine-offline">${icon('wifi-off', 13)} Offline/local engine${orchestrated.onlineAttempted ? ' (online attempt failed/unavailable)' : ''}</span>`;
     const notesMount = container.querySelector('#nlNotes');
     if (notesMount) {
@@ -108,6 +131,10 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
         ${clarifHtml}`;
       notesMount.querySelectorAll<HTMLButtonElement>('.clarify-btn').forEach((btn) => { btn.addEventListener('click', () => runNlBuild(btn.dataset.col)); });
     }
+    // Refresh only the Manual Selectors tab content and SQL output — the
+    // NL description textarea and its own focus are left completely alone.
+    renderTabsSection(store.readOnly, schema);
+    renderSqlOutput();
   }
 
   function renderSqlOutput(): void {
@@ -115,9 +142,9 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
     if (!mount) return;
     renderSqlCodeBlock(mount, store.readOnly.generatedSql, {
       onCopy: () => { copyTextToClipboard(store.readOnly.generatedSql); store.pushToast('success', 'SQL copied to clipboard.'); },
-      onClear: () => { store.resetReadOnly(); store.pushToast('info', 'Query cleared.'); },
+      onClear: () => { store.resetReadOnly(); store.pushToast('info', 'Query cleared.'); renderTabsSection(store.readOnly, schemaService.getActiveSchema()); renderSqlOutput(); },
       onValidate: () => { const result = validateFullReadOnly(store.readOnly); const mountV = container.querySelector('#validationMount'); if (mountV) mountV.innerHTML = result.valid ? `<div class="issue-box mini ok">${icon('check', 14)} SQL passed validation — no destructive statements detected.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${result.issues.map((i) => `<li>[${i.severity}] ${i.message}</li>`).join('')}</ul></div>`; },
-      onRegenerate: () => { store.regenerateReadOnlySql(); store.pushToast('info', 'SQL regenerated from current selections.'); }
+      onRegenerate: () => { store.regenerateReadOnlySql(); store.pushToast('info', 'SQL regenerated from current selections.'); renderSqlOutput(); }
     }, [{ id: 'btnOptimizeToggle', label: 'Optimize', iconName: 'wand', onClick: () => { const mountO = container.querySelector('#optimizeMount'); if (!mountO) return; if (mountO.innerHTML.trim()) { mountO.innerHTML = ''; return; } const tips = optimizeSuggestions(store.readOnly); mountO.innerHTML = `<div class="tips-box">${icon('wand', 15)}<ul>${tips.map((t) => `<li>${t}</li>`).join('')}</ul></div>`; } }]);
   }
 
@@ -132,23 +159,56 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
   }
 
   function renderTablesColumnsTab(panel: HTMLElement, state: typeof store.readOnly, schema: ReturnType<typeof schemaService.getActiveSchema>): void {
-    panel.innerHTML = `<div class="tc-grid"><div class="tc-col"><h3>${icon('list', 15)} Select Tables</h3><div id="tablePickerMount"></div></div><div class="tc-col"><h3>${icon('columns', 15)} Select Columns</h3><div id="columnPickerMount"></div><div class="row-actions wrap mt" data-tour="manual-case-decode"><button type="button" class="btn btn-outline btn-sm" id="addManualCaseBtn">${icon('code', 14)} Manual CASE</button><button type="button" class="btn btn-outline btn-sm" id="addManualDecodeBtn">${icon('sparkles', 14)} Manual DECODE</button></div><div id="manualColsList" class="mini-list"></div></div><div class="tc-col"><h3>${icon('filter', 15)} Filters</h3><div id="filterBuilderMount"></div></div></div>`;
-    const tableMount = panel.querySelector<HTMLElement>('#tablePickerMount')!; const columnMount = panel.querySelector<HTMLElement>('#columnPickerMount')!; const filterMount = panel.querySelector<HTMLElement>('#filterBuilderMount')!;
+    panel.innerHTML = `<div class="tc-grid"><div class="tc-col"><h3>${icon('list', 15)} Select Tables</h3><div id="tablePickerMount"></div></div><div class="tc-col"><h3>${icon('columns', 15)} Select Columns <span class="hint">(CASE / DECODE beside each column)</span></h3><div id="columnPickerMount"></div><div class="row-actions wrap mt" data-tour="manual-case-decode"><button type="button" class="btn btn-outline btn-sm" id="addManualCaseBtn">${icon('code', 14)} Manual CASE (custom)</button><button type="button" class="btn btn-outline btn-sm" id="addManualDecodeBtn">${icon('sparkles', 14)} Manual DECODE (custom)</button></div><div id="manualColsList" class="mini-list"></div></div><div class="tc-col"><h3>${icon('filter', 15)} Filters</h3><div id="filterBuilderMount"></div></div></div>`;
+    const tableMount = panel.querySelector<HTMLElement>('#tablePickerMount')!;
+    const columnMount = panel.querySelector<HTMLElement>('#columnPickerMount')!;
+    const filterMount = panel.querySelector<HTMLElement>('#filterBuilderMount')!;
+
+    function rerenderColumnAndFilterOnly(): void {
+      renderColumnPicker(columnMount, schema, store.readOnly.selectedTables, store.readOnly.selectedColumns, columnCallbacks());
+      renderFilterBuilder(filterMount, schema, store.readOnly.selectedTables, store.readOnly.filters, onFiltersChange);
+      renderManualCols();
+    }
+
     renderTablePicker(tableMount, schema, state.selectedTables, (next) => {
       store.updateReadOnly((s) => { s.selectedTables = next; s.selectedColumns = s.selectedColumns.filter((c) => c.manualExpr || next.includes(c.table)); s.filters = s.filters.filter((f) => next.includes(f.table)); s.sorts = s.sorts.filter((so) => next.includes(so.table)); s.joins = s.joins.filter((j) => next.includes(j.table)); });
       renderSqlOutput();
-      renderColumnPicker(columnMount, schema, store.readOnly.selectedTables, store.readOnly.selectedColumns, onColumnsChange);
-      renderFilterBuilder(filterMount, schema, store.readOnly.selectedTables, store.readOnly.filters, onFiltersChange);
+      rerenderColumnAndFilterOnly(); // table selection changes the available columns — this IS a legitimate reason to refresh just the column/filter pickers
     });
-    function onColumnsChange(next: typeof state.selectedColumns): void { store.updateReadOnly((s) => { s.selectedColumns = [...next, ...s.selectedColumns.filter((c) => c.manualExpr)]; }); renderSqlOutput(); renderManualCols(); }
+
+    function onColumnsChange(next: typeof state.selectedColumns): void {
+      // V14.1 fix: de-duplicate by id when reconciling the (possibly
+      // stale, if a manual CASE/DECODE was added since this picker was
+      // last rendered) picker state with the store's manual-expression
+      // columns — previously this could double-append a manual column
+      // whenever the picker HAD already picked it up on its own.
+      store.updateReadOnly((s) => {
+        const nextIds = new Set(next.map((c) => c.id));
+        const missingManualOnes = s.selectedColumns.filter((c) => c.manualExpr && !nextIds.has(c.id));
+        s.selectedColumns = [...next, ...missingManualOnes];
+      });
+      renderSqlOutput(); renderManualCols();
+    }
     function onFiltersChange(next: typeof state.filters): void { store.updateReadOnly((s) => { s.filters = next; }); renderSqlOutput(); }
+    function columnCallbacks() {
+      return {
+        onChange: onColumnsChange,
+        onManualCaseForColumn: (table: string, column: import('../types').ColumnDef) => {
+          openManualCaseBuilder(state.dialect, (spec) => { store.updateReadOnly((s) => { s.selectedColumns.push(spec); }); renderSqlOutput(); renderManualCols(); store.pushToast('success', `Manual CASE column "${spec.alias}" added.`); }, { table, column: column.name });
+        },
+        onManualDecodeForColumn: (table: string, column: import('../types').ColumnDef) => {
+          openManualDecodeBuilder(state.dialect, (spec) => { store.updateReadOnly((s) => { s.selectedColumns.push(spec); }); renderSqlOutput(); renderManualCols(); store.pushToast('success', `Manual DECODE column "${spec.alias}" added.`); }, { table, column: column.name });
+        }
+      };
+    }
     function renderManualCols(): void {
       const mount = panel.querySelector<HTMLElement>('#manualColsList'); if (!mount) return;
       const manualCols = store.readOnly.selectedColumns.filter((c) => c.manualExpr);
       mount.innerHTML = manualCols.length ? manualCols.map((c) => `<div class="mini-row"><span class="hint">${c.alias}</span><button class="icon-btn remove-manual-col" data-id="${c.id}" title="Remove">${icon('trash', 14)}</button></div>`).join('') : '<p class="hint">No manual CASE/DECODE columns added yet.</p>';
       mount.querySelectorAll<HTMLButtonElement>('.remove-manual-col').forEach((btn) => { btn.addEventListener('click', () => { store.updateReadOnly((s) => { s.selectedColumns = s.selectedColumns.filter((c) => c.id !== btn.dataset.id); }); renderSqlOutput(); renderManualCols(); }); });
     }
-    renderColumnPicker(columnMount, schema, state.selectedTables, state.selectedColumns, onColumnsChange);
+
+    renderColumnPicker(columnMount, schema, state.selectedTables, state.selectedColumns, columnCallbacks());
     renderFilterBuilder(filterMount, schema, state.selectedTables, state.filters, onFiltersChange);
     renderManualCols();
     panel.querySelector('#addManualCaseBtn')?.addEventListener('click', () => { openManualCaseBuilder(state.dialect, (spec) => { store.updateReadOnly((s) => { s.selectedColumns.push(spec); }); renderSqlOutput(); renderManualCols(); store.pushToast('success', `Manual CASE column "${spec.alias}" added.`); }); });
@@ -175,7 +235,6 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
           <label class="inline-check"><input type="checkbox" id="recursiveCheck" ${state.advanced.recursive ? 'checked' : ''}/> Recursive hierarchy (WITH RECURSIVE)</label>
           <label class="block-label">Result limit<input type="number" id="limitInput" min="1" value="${state.advanced.limit ?? ''}" placeholder="none" /></label>
           <label class="block-label">Save as a named view<input type="text" id="viewNameInput" value="${state.advanced.saveAsView ?? ''}" placeholder="e.g. recent_high_value_invoices" /></label>
-          <h3 class="mt">${icon('code', 15)} Schema CASE / DECODE columns</h3><div id="decodeColsList" class="mini-list"></div>
         </div>
       </div>`;
     function renderSortsList(): void { const list = panel.querySelector('#sortsList'); if (!list) return; list.innerHTML = state.sorts.map((s, idx) => `<div class="mini-row" data-idx="${idx}"><select class="sort-col-select">${allCols.map((c) => `<option value="${c.table}::${c.column}" ${c.table === s.table && c.column === s.column ? 'selected' : ''}>${c.label}</option>`).join('')}</select><select class="sort-dir-select"><option value="ASC" ${s.direction === 'ASC' ? 'selected' : ''}>ASC</option><option value="DESC" ${s.direction === 'DESC' ? 'selected' : ''}>DESC</option></select><button class="icon-btn remove-btn" title="Remove">${icon('trash', 14)}</button></div>`).join(''); list.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.sort-col-select')?.addEventListener('change', (e) => { const [t, c] = (e.target as HTMLSelectElement).value.split('::'); store.updateReadOnly((s) => { s.sorts[idx].table = t; s.sorts[idx].column = c; }); renderSqlOutput(); }); row.querySelector('.sort-dir-select')?.addEventListener('change', (e) => { store.updateReadOnly((s) => { s.sorts[idx].direction = (e.target as HTMLSelectElement).value as 'ASC' | 'DESC'; }); renderSqlOutput(); }); row.querySelector('.remove-btn')?.addEventListener('click', () => { store.updateReadOnly((s) => { s.sorts.splice(idx, 1); }); renderSqlOutput(); renderSortsList(); }); }); }
@@ -191,8 +250,6 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
     panel.querySelector<HTMLInputElement>('#recursiveCheck')?.addEventListener('change', (e) => { store.updateReadOnly((s) => { s.advanced.recursive = (e.target as HTMLInputElement).checked; }); renderSqlOutput(); });
     panel.querySelector<HTMLInputElement>('#limitInput')?.addEventListener('input', (e) => { const v = (e.target as HTMLInputElement).value; store.updateReadOnly((s) => { s.advanced.limit = v ? parseInt(v, 10) : null; }); renderSqlOutput(); });
     panel.querySelector<HTMLInputElement>('#viewNameInput')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.saveAsView = (e.target as HTMLInputElement).value || null; }); renderSqlOutput(); });
-    const decodeList = panel.querySelector('#decodeColsList');
-    if (decodeList) { const decodeCols = state.selectedColumns.filter((c) => { const colDef = schema.tables.find((t) => t.name === c.table)?.columns.find((cd) => cd.name === c.column); return colDef?.decode?.length; }); decodeList.innerHTML = decodeCols.length ? decodeCols.map((c) => { const colDef = schema.tables.find((t) => t.name === c.table)?.columns.find((cd) => cd.name === c.column)!; return `<div class="mini-row"><label class="inline-check tiny"><input type="checkbox" class="decode-toggle" data-table="${c.table}" data-column="${c.column}" ${c.useDecode ? 'checked' : ''}/> ${c.table}.${c.column}</label><span class="hint">${decodeLegend(colDef)}</span></div>`; }).join('') : '<p class="hint">No schema decode-enabled columns selected yet.</p>'; decodeList.querySelectorAll<HTMLInputElement>('.decode-toggle').forEach((cb) => { cb.addEventListener('change', () => { const t = cb.dataset.table!; const c = cb.dataset.column!; store.updateReadOnly((s) => { const target = s.selectedColumns.find((x) => x.table === t && x.column === c); if (target) target.useDecode = cb.checked; }); renderSqlOutput(); }); }); }
   }
 
   function renderSummaryTab(panel: HTMLElement, state: typeof store.readOnly): void {
@@ -212,5 +269,5 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
   }
 
   draw();
-  (container as any)._cleanup = () => { unsubscribe(); unsubscribeSchema(); };
+  (container as any)._cleanup = () => { unsubscribeSchema(); };
 }

@@ -1,10 +1,11 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 
-// Vault — separate encryption layer from the admin password, protected by
+// Vault — separate encryption layer from the Admin Password, protected by
 // its own user-chosen passphrase (never a hard-coded default). Protects
-// GitHub sync credentials. Decrypted config lives in memory only while
-// unlocked.
-const VAULT_STORAGE_KEY = 'sqla.vault.v14';
+// GitHub sync credentials (access token, repo/branch/path). Decrypted
+// config lives in memory only while unlocked. Never displayed in plaintext
+// anywhere in the UI (spec section 13).
+const VAULT_STORAGE_KEY = 'sqla.vault.v141';
 export interface VaultConfig { githubRepo: string; githubBranch: string; githubSchemaPath: string; githubToken: string; sharedLocationLabel: string; }
 function emptyConfig(): VaultConfig { return { githubRepo: '', githubBranch: 'main', githubSchemaPath: 'schema.json', githubToken: '', sharedLocationLabel: '' }; }
 

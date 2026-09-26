@@ -11,7 +11,7 @@ function limitClause(dialect: Dialect, limit: number | null): { top: string; tai
   }
 }
 function renderColumn(sc: SelectedColumnSpec, schema: SchemaModel, dialect: Dialect): string {
-  if (sc.manualExpr) return `  ${sc.manualExpr}`; // V14 — manual CASE/DECODE columns carry a pre-built raw expression
+  if (sc.manualExpr) return `  ${sc.manualExpr}`;
   const table = findTable(schema, sc.table); const col = table?.columns.find((c) => c.name === sc.column);
   if (!col) return `${sc.table}.${sc.column}`;
   let expr = `${sc.table}.${sc.column}`;
