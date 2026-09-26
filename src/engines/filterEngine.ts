@@ -1,13 +1,7 @@
 import type { FilterCondition, FilterOperator } from '../types';
 const NO_VALUE_OPERATORS: FilterOperator[] = ['IS NULL', 'IS NOT NULL'];
 const LIST_OPERATORS: FilterOperator[] = ['IN', 'NOT IN'];
-// Recognizes raw SQL expressions produced by the NLP engine's relative-date
-// handling (e.g. "CURRENT_DATE - INTERVAL '30 DAY'", "DATE_TRUNC('MONTH',
-// CURRENT_DATE)") so they are emitted as live SQL rather than being wrapped
-// in an outer string literal — which would silently turn a working date
-// comparison into a comparison against literal text.
 const SQL_EXPRESSION_PATTERN = /\b(CURRENT_DATE|CURRENT_TIMESTAMP|SYSDATE|GETDATE\s*\(|NOW\s*\(|DATE_TRUNC\s*\(|INTERVAL)\b/i;
-
 function quoteIfNeeded(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === '') return "''";

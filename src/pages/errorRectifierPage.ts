@@ -3,7 +3,6 @@ import { aiService } from '../services/aiService';
 import { store } from '../state/store';
 import { copyTextToClipboard } from '../components/sqlCodeBlock';
 import type { Dialect } from '../types';
-
 export function renderErrorRectifierPage(container: HTMLElement): void {
   let dialect: Dialect = 'Oracle';
   container.innerHTML = `

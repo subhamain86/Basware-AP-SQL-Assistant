@@ -5,29 +5,26 @@ import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
 
-const STORAGE_KEY = 'apsql.registry.v132';
-export const DEMO_ADMIN_PASSWORD = 'apsql-admin';
+const STORAGE_KEY = 'sqla.registry.v14';
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 
 export class SchemaService {
   private registry: SchemaRegistry;
   private listeners = new Set<() => void>();
-
   constructor() { this.registry = this.load(); }
-
   private load(): SchemaRegistry {
     try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { const parsed = JSON.parse(raw) as SchemaRegistry; if (parsed.schemas?.length) return parsed; } } catch { }
     return { schemas: clone(DEFAULT_SCHEMAS), activeSchemaId: DEFAULT_ACTIVE_SCHEMA_ID };
   }
-
   private persist(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.registry)); this.listeners.forEach((l) => l()); }
-
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   getRegistry(): SchemaRegistry { return this.registry; }
   getActiveSchema(): SchemaModel { const found = this.registry.schemas.find((s) => s.id === this.registry.activeSchemaId); return found || this.registry.schemas[0]; }
   getAllSchemas(): SchemaModel[] { return this.registry.schemas; }
   getSchemaById(id: string): SchemaModel | undefined { return this.registry.schemas.find((s) => s.id === id); }
+  getModulesForSchema(schemaId: string): string[] { const s = this.getSchemaById(schemaId); if (!s) return []; return Array.from(new Set(s.tables.map((t) => t.module))).sort(); }
+  getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
 
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
@@ -46,12 +43,13 @@ export class SchemaService {
     return schema;
   }
 
-  importSchema(schema: SchemaModel): { ok: boolean; error?: string } {
+  importSchema(schema: SchemaModel): { ok: boolean; error?: string; schemaId?: string } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
-    const withDefaults: SchemaModel = { id: schema.id || makeId('schema'), name: schema.name || 'Imported Schema', version: schema.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: schema.tables, relationships: schema.relationships || [] };
+    const id = schema.id || makeId('schema');
+    const withDefaults: SchemaModel = { id, name: schema.name || 'Imported Schema', version: schema.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: schema.tables, relationships: schema.relationships || [] };
     this.registry.schemas.push(withDefaults);
     this.persist();
-    return { ok: true };
+    return { ok: true, schemaId: id };
   }
 
   addNewSchema(name: string): SchemaModel {
@@ -100,13 +98,17 @@ export class SchemaService {
     return [header, ...rows].join('\n');
   }
 
-  getFlattenedRows(schemaId: string): SchemaEditorRow[] {
+  getFlattenedRows(schemaId: string, moduleFilter: string | null = null, tableFilter: string | null = null): SchemaEditorRow[] {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return [];
     const rows: SchemaEditorRow[] = [];
-    schema.tables.forEach((t) => { t.columns.forEach((c) => {
-      rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableName: t.name, tableDescription: t.description, columnName: c.name, columnDescription: c.description, dataType: c.type, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' });
-    }); });
+    schema.tables.forEach((t) => {
+      if (moduleFilter && t.module !== moduleFilter) return;
+      if (tableFilter && t.name !== tableFilter) return;
+      t.columns.forEach((c) => {
+        rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableName: t.name, tableDescription: t.description, columnName: c.name, columnDescription: c.description, dataType: c.type, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' });
+      });
+    });
     return rows;
   }
 
@@ -170,5 +172,4 @@ export class SchemaService {
     this.persist();
   }
 }
-
 export const schemaService = new SchemaService();

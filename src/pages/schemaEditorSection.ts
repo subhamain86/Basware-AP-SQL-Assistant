@@ -9,37 +9,57 @@ import type { SchemaEditorRow, ColumnDataType } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
 // ============================================================================
-// schemaEditorSection — the Manual Schema Editor, embedded only inside
-// Settings once unlocked. Select Schema, scrollable/searchable/paginated
-// table, Add/Edit via a validated modal, Delete via a genuine 3-level
-// confirmation with the final step requiring the operational password.
+// schemaEditorSection — V14 (spec section 10). Workflow is now:
+//   Select Schema -> Select Module -> Select Table -> Populate Table
+// After a schema is chosen, a Module dropdown appears (populated from that
+// schema); after a module is chosen, a Table dropdown appears (filtered to
+// that module); once a table is chosen, the data grid is scoped/populated
+// to just that table's columns. All existing Add/Edit/Delete/3-level-
+// confirmation functionality is unchanged after that point.
 // ============================================================================
 
 export function renderSchemaEditorSection(container: HTMLElement): void {
   let editingSchemaId = schemaService.getActiveSchema().id;
+  let selectedModule: string | null = null;
+  let selectedTable: string | null = null;
   let tableApi: ReturnType<typeof renderDataTable<SchemaEditorRow>> | null = null;
 
   function draw(): void {
     const allSchemas = schemaService.getAllSchemas();
     const editingSchema = schemaService.getSchemaById(editingSchemaId) || allSchemas[0];
     editingSchemaId = editingSchema.id;
+    const modules = schemaService.getModulesForSchema(editingSchemaId);
+    if (selectedModule && !modules.includes(selectedModule)) { selectedModule = null; selectedTable = null; }
+    const tablesInModule = selectedModule ? schemaService.getTablesForModule(editingSchemaId, selectedModule) : [];
+    if (selectedTable && !tablesInModule.some((t) => t.name === selectedTable)) selectedTable = null;
 
     container.innerHTML = `
       <label class="block-label" data-tour="schema-editor-select">Select Schema
         <select id="editorSchemaSelect">${allSchemas.map((s) => `<option value="${s.id}" ${s.id === editingSchema.id ? 'selected' : ''}>${s.name}${s.status === 'active' ? ' (Active)' : ''}</option>`).join('')}</select>
       </label>
       <p class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong>${editingSchema.status === 'active' ? ' <span class="chip chip-active">Active — changes apply immediately</span>' : ' <span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'}</p>
-      <div class="row-actions" data-tour="schema-editor-add"><button class="btn btn-primary btn-sm" id="addRowBtn">${icon('plus', 14)} Add New Row</button></div>
-      <div id="dataTableMount" class="mt" data-tour="schema-editor-table"></div>
-      <div class="row-actions mt" id="rowActionsBar" data-tour="schema-editor-actions" hidden>
-        <span class="hint" id="selectedRowLabel"></span>
-        <button class="btn btn-outline btn-sm" id="editRowBtn">${icon('edit', 14)} Edit</button>
-        <button class="btn btn-danger btn-sm" id="deleteRowBtn">${icon('trash', 14)} Delete</button>
-      </div>`;
 
-    container.querySelector<HTMLSelectElement>('#editorSchemaSelect')?.addEventListener('change', (e) => { editingSchemaId = (e.target as HTMLSelectElement).value; draw(); });
+      <div class="form-row-2" data-tour="schema-editor-module-table">
+        <label class="block-label">Select Module <span class="req">*</span><select id="editorModuleSelect"><option value="">— choose a module —</option>${modules.map((m) => `<option value="${m}" ${m === selectedModule ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+        <label class="block-label">Select Table <span class="req">*</span><select id="editorTableSelect" ${selectedModule ? '' : 'disabled'}><option value="">— choose a table —</option>${tablesInModule.map((t) => `<option value="${t.name}" ${t.name === selectedTable ? 'selected' : ''}>${t.name}</option>`).join('')}</select></label>
+      </div>
+
+      ${selectedTable ? `
+        <div class="row-actions" data-tour="schema-editor-add"><button class="btn btn-primary btn-sm" id="addRowBtn">${icon('plus', 14)} Add New Row</button></div>
+        <div id="dataTableMount" class="mt" data-tour="schema-editor-table"></div>
+        <div class="row-actions mt" id="rowActionsBar" data-tour="schema-editor-actions" hidden>
+          <span class="hint" id="selectedRowLabel"></span>
+          <button class="btn btn-outline btn-sm" id="editRowBtn">${icon('edit', 14)} Edit</button>
+          <button class="btn btn-danger btn-sm" id="deleteRowBtn">${icon('trash', 14)} Delete</button>
+        </div>
+      ` : `<p class="hint picker-empty mt">Select a Module, then a Table, to populate its schema data below.</p>`}
+    `;
+
+    container.querySelector<HTMLSelectElement>('#editorSchemaSelect')?.addEventListener('change', (e) => { editingSchemaId = (e.target as HTMLSelectElement).value; selectedModule = null; selectedTable = null; draw(); });
+    container.querySelector<HTMLSelectElement>('#editorModuleSelect')?.addEventListener('change', (e) => { selectedModule = (e.target as HTMLSelectElement).value || null; selectedTable = null; draw(); });
+    container.querySelector<HTMLSelectElement>('#editorTableSelect')?.addEventListener('change', (e) => { selectedTable = (e.target as HTMLSelectElement).value || null; draw(); });
     container.querySelector('#addRowBtn')?.addEventListener('click', () => openRowForm(editingSchema.id, null));
-    mountTable(editingSchema.id);
+    if (selectedTable) mountTable(editingSchema.id);
   }
 
   function updateActionsBar(row: SchemaEditorRow | null): void {
@@ -54,31 +74,29 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
 
   function mountTable(schemaId: string): void {
     const mount = container.querySelector<HTMLElement>('#dataTableMount'); if (!mount) return;
-    const rows = schemaService.getFlattenedRows(schemaId);
+    const rows = schemaService.getFlattenedRows(schemaId, selectedModule, selectedTable);
     tableApi = renderDataTable<SchemaEditorRow>(mount, {
       columns: [
-        { key: 'module', label: 'Module', sortValue: (r) => r.module, width: '9%' },
-        { key: 'tableName', label: 'Table', sortValue: (r) => r.tableName, width: '13%' },
-        { key: 'columnName', label: 'Column', sortValue: (r) => r.columnName, width: '13%' },
-        { key: 'dataType', label: 'Type', render: (r) => `${r.dataType}${r.length ? `(${r.length})` : ''}`, sortValue: (r) => r.dataType, width: '10%' },
-        { key: 'columnDescription', label: 'Description', width: '28%' },
-        { key: 'keys', label: 'Keys', render: (r) => `${r.isPrimaryKey ? '<span class="chip chip-pk">PK</span>' : ''}${r.isForeignKey ? `<span class="chip chip-fk">FK→${r.fkTable}.${r.fkColumn}</span>` : ''}`, width: '17%' },
-        { key: 'nullable', label: 'Null?', render: (r) => r.nullable ? 'Yes' : 'No', width: '6%' }
+        { key: 'columnName', label: 'Column', sortValue: (r) => r.columnName, width: '16%' },
+        { key: 'dataType', label: 'Type', render: (r) => `${r.dataType}${r.length ? `(${r.length})` : ''}`, sortValue: (r) => r.dataType, width: '12%' },
+        { key: 'columnDescription', label: 'Description', width: '38%' },
+        { key: 'keys', label: 'Keys', render: (r) => `${r.isPrimaryKey ? '<span class="chip chip-pk">PK</span>' : ''}${r.isForeignKey ? `<span class="chip chip-fk">FK→${r.fkTable}.${r.fkColumn}</span>` : ''}`, width: '20%' },
+        { key: 'nullable', label: 'Null?', render: (r) => r.nullable ? 'Yes' : 'No', width: '8%' }
       ],
       rows, getRowId: (r) => r.rowId, pageSize: 50,
-      searchPredicate: (r, term) => [r.module, r.tableName, r.columnName, r.columnDescription, r.alias].some((v) => (v || '').toLowerCase().includes(term)),
+      searchPredicate: (r, term) => [r.columnName, r.columnDescription, r.alias].some((v) => (v || '').toLowerCase().includes(term)),
       onRowClick: (row) => updateActionsBar(row),
-      emptyMessage: 'No tables/columns in this schema yet. Select "Add New Row" to create the first one.'
+      emptyMessage: `No columns in ${selectedTable} yet. Select "Add New Row" to create the first one.`
     });
     updateActionsBar(null);
   }
 
-  function refreshTable(): void { if (tableApi) tableApi.refresh(schemaService.getFlattenedRows(editingSchemaId)); updateActionsBar(null); }
+  function refreshTable(): void { if (tableApi) tableApi.refresh(schemaService.getFlattenedRows(editingSchemaId, selectedModule, selectedTable)); updateActionsBar(null); }
 
   function openRowForm(schemaId: string, existing: SchemaEditorRow | null): void {
     const schema = schemaService.getSchemaById(schemaId)!;
     const isEdit = !!existing;
-    const r: SchemaEditorRow = existing || { rowId: '', module: '', tableName: '', tableDescription: '', columnName: '', columnDescription: '', dataType: 'VARCHAR', length: null, precision: null, nullable: true, alias: '', decodeText: '', isPrimaryKey: false, isForeignKey: false, fkTable: '', fkColumn: '' };
+    const r: SchemaEditorRow = existing || { rowId: '', module: selectedModule || '', tableName: selectedTable || '', tableDescription: schema.tables.find((t) => t.name === selectedTable)?.description || '', columnName: '', columnDescription: '', dataType: 'VARCHAR', length: null, precision: null, nullable: true, alias: '', decodeText: '', isPrimaryKey: false, isForeignKey: false, fkTable: '', fkColumn: '' };
     const dataTypeOptions = (VALID_DATA_TYPES as ColumnDataType[]).map((t) => `<option value="${t}" ${t === r.dataType ? 'selected' : ''}>${t}</option>`).join('');
     const tableNameList = Array.from(new Set(schema.tables.map((t) => t.name)));
 
@@ -153,9 +171,8 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       modal2.element.querySelector('#c2Cancel')?.addEventListener('click', () => modal2.close());
       modal2.element.querySelector('#c2Continue')?.addEventListener('click', () => { modal2.close(); showConfirm3(); });
     }
-
     function showConfirm3(): void {
-      const modal3 = openModal(`${icon('lock', 18)} Final Confirmation`, `<p>Enter the Settings / Operational Password to permanently delete this schema record.</p><label class="block-label">Password<input type="password" id="c3Password" autocomplete="off" /></label><div id="c3Error" class="issue-box mini" hidden>Incorrect password.</div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="c3Cancel">Cancel</button><button type="button" class="btn btn-danger" id="c3Delete">Delete Permanently</button></div>`, { closeOnBackdrop: false });
+      const modal3 = openModal(`${icon('lock', 18)} Final Confirmation`, `<p>Enter the Admin Password to permanently delete this schema record.</p><label class="block-label">Admin Password<input type="password" id="c3Password" autocomplete="off" /></label><div id="c3Error" class="issue-box mini" hidden>Incorrect password.</div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="c3Cancel">Cancel</button><button type="button" class="btn btn-danger" id="c3Delete">Delete Permanently</button></div>`, { closeOnBackdrop: false });
       modal3.element.querySelector('#c3Cancel')?.addEventListener('click', () => modal3.close());
       modal3.element.querySelector('#c3Delete')?.addEventListener('click', async () => {
         const pwInput = modal3.element.querySelector<HTMLInputElement>('#c3Password')!; const errBox = modal3.element.querySelector<HTMLElement>('#c3Error')!;

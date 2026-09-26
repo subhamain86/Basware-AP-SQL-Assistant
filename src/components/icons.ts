@@ -1,4 +1,4 @@
-export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi';
+export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes';
 const PATHS: Record<IconName, string> = {
   menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>',
@@ -56,6 +56,10 @@ const PATHS: Record<IconName, string> = {
   github: '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>',
   'clipboard-list': '<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3h6v1"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="15" y2="15"/>',
-  wifi: '<path d="M5 13a12 12 0 0 1 14 0"/><path d="M8.5 16.5a7 7 0 0 1 7 0"/><circle cx="12" cy="20" r="0.6" fill="currentColor" stroke="none"/>'
+  wifi: '<path d="M5 13a12 12 0 0 1 14 0"/><path d="M8.5 16.5a7 7 0 0 1 7 0"/><circle cx="12" cy="20" r="0.6" fill="currentColor" stroke="none"/>',
+  'wifi-off': '<line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a7 7 0 0 1 7 0"/><path d="M5 13a12 12 0 0 1 5.5-3.1"/><path d="M19 13a12 12 0 0 0-3-2.3"/><circle cx="12" cy="20" r="0.6" fill="currentColor" stroke="none"/>',
+  cloud: '<path d="M7 18a4 4 0 1 1 .7-7.94A5.5 5.5 0 0 1 18 12.5 3.5 3.5 0 0 1 17.5 18H7z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>',
+  boxes: '<path d="M2 8l5-3 5 3v6l-5 3-5-3z"/><path d="M12 8l5-3 5 3v6l-5 3-5-3z"/><path d="M7 5l5 3 5-3"/>'
 };
 export function icon(name: IconName, size = 18, extraClass = ''): string { return `<svg class="icon-svg ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`; }

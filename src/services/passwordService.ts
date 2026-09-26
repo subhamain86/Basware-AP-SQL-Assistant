@@ -1,33 +1,24 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 
 // ============================================================================
-// passwordService — reuses the SAME operational password everywhere
-// (Settings unlock, Manual Schema Update delete confirmation, Danger Zone).
-// Encrypted at rest per spec:
-//   Password -> Key derivation (PBKDF2) -> AES-GCM encryption
-//     -> Encrypted credential -> Local secure storage
-//
-// Verification works WITHOUT ever storing the password itself: we encrypt a
-// fixed marker string with a key derived from the password, then to verify
-// a candidate we attempt to decrypt that same blob using a key derived from
-// the candidate. AES-GCM's authentication tag makes a wrong password fail
-// to decrypt (not just produce garbage) — a legitimate password-
-// verification-via-authenticated-encryption pattern.
+// passwordService — V14. Default admin password is now "admin" (spec
+// section 9), encrypted at rest (never stored/logged in plain text), and
+// — critically — NEVER surfaced anywhere in the UI (no hints, no tooltips,
+// no walkthrough text, no error messages reveal it). Verification works by
+// attempting to decrypt a fixed marker; a wrong password fails
+// cryptographically via AES-GCM's auth tag, not a string comparison.
 // ============================================================================
 
-const STORAGE_KEY = 'apsql.pwvault.v132';
-const MARKER = 'apsql-verified-marker-v132';
-const DEFAULT_PASSWORD = 'apsql-admin';
+const STORAGE_KEY = 'sqla.pwvault.v14';
+const MARKER = 'sqla-verified-marker-v14';
+const DEFAULT_PASSWORD = 'admin'; // never displayed in any UI surface — internal use only
 
 let defaultBlobCache: string | null = null;
 
 async function getStoredBlobRaw(): Promise<string> {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) return stored;
-  if (!defaultBlobCache) {
-    const blob = await encryptWithSecret(DEFAULT_PASSWORD, MARKER);
-    defaultBlobCache = serializeBlob(blob);
-  }
+  if (!defaultBlobCache) { const blob = await encryptWithSecret(DEFAULT_PASSWORD, MARKER); defaultBlobCache = serializeBlob(blob); }
   return defaultBlobCache;
 }
 
@@ -50,4 +41,5 @@ export async function changePassword(oldPassword: string, newPassword: string): 
 
 export function resetPasswordToDefault(): void { localStorage.removeItem(STORAGE_KEY); }
 export function isUsingDefaultPassword(): boolean { return localStorage.getItem(STORAGE_KEY) === null; }
-export const DEMO_DEFAULT_PASSWORD_HINT = DEFAULT_PASSWORD;
+// NOTE: intentionally NOT exporting the default password value anywhere that
+// a page/component could render it. Do not add such an export back.

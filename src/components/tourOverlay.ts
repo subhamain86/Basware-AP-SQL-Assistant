@@ -2,19 +2,20 @@ import type { WalkthroughStep, Route } from '../types';
 import { store } from '../state/store';
 
 export const WALKTHROUGH_STEPS: WalkthroughStep[] = [
-  { id: 'w1', route: 'quickstart', targetSelector: '[data-tour="brand"]', title: 'Welcome to AP-SQL Assistant V13.2', body: 'This tool writes read-only and Change Request SQL for you, using your organization\'s active schema as the single source of truth.' },
-  { id: 'w2', route: 'quickstart', targetSelector: '[data-tour="hamburger-btn"]', title: 'Hamburger Menu', body: 'All page navigation lives behind this single button. Select it to open Quick Start, Query Builder, Schema, Error Rectifier, Settings, and About.' },
-  { id: 'w3', route: 'quickstart', targetSelector: '[data-tour="navbar-sync"]', title: 'Sync Source & Sync Time', body: 'These two dropdowns are the ONLY schema-sync controls in the navbar — choose Shared Location or GitHub as your source, and how often to sync. Detailed configuration (repository, credentials, Vault) lives inside Settings.' },
-  { id: 'w4', route: 'readonly', targetSelector: '[data-tour="describe-card"]', title: 'Describe What You Need', body: 'Type a plain-language requirement — including relative dates like "this month" or "last week" — and select Build Query.' },
-  { id: 'w5', route: 'readonly', targetSelector: '[data-tour="generated-sql-card"]', title: 'Generated SQL', body: 'Your SQL appears here in real time, already passed through AI self-review before being shown to you.' },
-  { id: 'w6', route: 'readonly', targetSelector: '[data-tour="tab-tables-columns"]', title: 'Tables & Columns', body: 'Manually pick tables, columns, and build filters — always kept in sync with whatever the AI interpreted.' },
-  { id: 'w7', route: 'readonly', targetSelector: '[data-tour="tab-advanced"]', title: 'Advanced Options', body: 'Sorting, grouping, aggregation, joins, limits, DISTINCT and CASE/DECODE all live here.' },
-  { id: 'w8', route: 'readonly', targetSelector: '[data-tour="tab-summary"]', title: 'Selected / Described Requirements', body: 'A live summary of everything selected or described so far.' },
-  { id: 'w9', route: 'cr', targetSelector: '[data-tour="cr-query-type"]', title: 'Query Builder for CR', body: 'Build INSERT / UPDATE / DELETE statements, including from a natural-language description like "Update the payment status to PAID for invoice 12345."' },
-  { id: 'w10', route: 'schema-used', targetSelector: '[data-tour="schema-list"]', title: 'Schema', body: 'Switch between stored schemas, view active/default status, import/export. Manual editing now lives only inside Settings.' },
-  { id: 'w11', route: 'error-rectifier', targetSelector: '[data-tour="error-rectifier-form"]', title: 'Error Rectifier', body: 'Paste a database error and the SQL that caused it — always grounded in the current active schema.' },
-  { id: 'w12', route: 'settings', targetSelector: '[data-tour="settings-lock-screen"]', title: 'Settings is password protected', body: 'Selecting Settings shows this authentication screen first. The same operational password used elsewhere unlocks it — the password itself is encrypted at rest, never stored in plain text.' },
-  { id: 'w13', route: 'about', targetSelector: '[data-tour="about-panel"]', title: 'About', body: 'Version history, architecture, and safety notes for AP-SQL Assistant.' }
+  { id: 'w1', route: 'quickstart', targetSelector: '[data-tour="brand"]', title: 'Welcome to SQL Assistant', body: 'This tool writes read-only and Change Request SQL for you, using your organization\'s active schema as the single source of truth.' },
+  { id: 'w2', route: 'quickstart', targetSelector: '[data-tour="hamburger-btn"]', title: 'Hamburger Menu', body: 'All page navigation lives behind this button on the left of the navbar. Select it to open Quick Start, Query Builder, Schema, Error Rectifier, Settings, and About.' },
+  { id: 'w3', route: 'quickstart', targetSelector: '[data-tour="navbar-sync"]', title: 'Sync Source & Sync Time', body: 'These dropdowns are the schema-sync controls in the navbar — choose Shared Location or GitHub, and how often to sync.' },
+  { id: 'w4', route: 'quickstart', targetSelector: '[data-tour="guided-walkthrough-btn"]', title: 'Guided Walkthrough', body: 'You are here! This button reopens the walkthrough any time.' },
+  { id: 'w5', route: 'quickstart', targetSelector: '[data-tour="signature"]', title: 'Signature', body: 'Shows who built this application, on the far right of the navbar.' },
+  { id: 'w6', route: 'readonly', targetSelector: '[data-tour="describe-card"]', title: 'Describe What You Need', body: 'Type a plain-language requirement. The app tries an online AI/NLP engine first, then automatically falls back to a local offline engine — this is always shown clearly.' },
+  { id: 'w7', route: 'readonly', targetSelector: '[data-tour="module-selector"]', title: 'Module → Search → Select', body: 'Narrow the table list by Module first, then search within it — or search across everything.' },
+  { id: 'w8', route: 'readonly', targetSelector: '[data-tour="manual-case-decode"]', title: 'Manual CASE / DECODE', body: 'Build a CASE or DECODE expression by hand when no schema-defined one already fits.' },
+  { id: 'w9', route: 'readonly', targetSelector: '[data-tour="tab-advanced"]', title: 'Advanced Options', body: 'Sorting, grouping, aggregation, joins, limits, DISTINCT all live here.' },
+  { id: 'w10', route: 'cr', targetSelector: '[data-tour="cr-query-type"]', title: 'Query Builder for CR', body: 'Same layout as Read Only — describe the change in natural language or use manual selectors.' },
+  { id: 'w11', route: 'schema-used', targetSelector: '[data-tour="schema-module-selector"]', title: 'Schema — Module & Search', body: 'Filter Tables in Active Schema by Module, then search within it.' },
+  { id: 'w12', route: 'error-rectifier', targetSelector: '[data-tour="error-rectifier-form"]', title: 'Error Rectifier', body: 'Paste a database error and the SQL that caused it — always grounded in the active schema.' },
+  { id: 'w13', route: 'settings', targetSelector: '[data-tour="settings-lock-screen"]', title: 'Settings is password protected', body: 'Selecting Settings shows this authentication screen first, requiring the Admin Password.' },
+  { id: 'w14', route: 'about', targetSelector: '[data-tour="about-panel"]', title: 'About', body: 'Version history and architecture notes for SQL Assistant.' }
 ];
 
 export class GuidedTour {
@@ -22,26 +23,22 @@ export class GuidedTour {
   private overlay?: HTMLDivElement;
   private navigate: (r: Route) => void;
   private steps: WalkthroughStep[];
-
   constructor(navigate: (r: Route) => void, steps: WalkthroughStep[] = WALKTHROUGH_STEPS) { this.navigate = navigate; this.steps = steps; }
   start(): void { this.index = 0; this.showStep(); }
   private cleanup(): void { this.overlay?.remove(); this.overlay = undefined; }
   exit(): void { this.cleanup(); store.markWalkthroughSeen(); }
-
   private showStep(): void {
     const step = this.steps[this.index];
     if (!step) { this.exit(); return; }
     if (store.route !== step.route) this.navigate(step.route);
-    const needsMenuOpen = step.targetSelector.includes('hamburger') || step.id === 'w2';
+    const needsMenuOpen = step.targetSelector.includes('hamburger-panel') || step.id === 'w2';
     if (needsMenuOpen) { const toggler = document.querySelector<HTMLButtonElement>('#navToggle'); if (toggler && toggler.getAttribute('aria-expanded') !== 'true') toggler.click(); }
     requestAnimationFrame(() => requestAnimationFrame(() => this.render(step)));
   }
-
   private render(step: WalkthroughStep): void {
     this.cleanup();
     const target = document.querySelector<HTMLElement>(step.targetSelector);
-    const overlay = document.createElement('div');
-    overlay.className = 'tour-overlay';
+    const overlay = document.createElement('div'); overlay.className = 'tour-overlay';
     const rect = target?.getBoundingClientRect();
     const spotlightStyle = rect ? `top:${Math.max(4, rect.top - 6)}px;left:${Math.max(4, rect.left - 6)}px;width:${rect.width + 12}px;height:${rect.height + 12}px;` : 'display:none;';
     let popupTop = rect ? rect.bottom + 16 : window.innerHeight / 2 - 100;

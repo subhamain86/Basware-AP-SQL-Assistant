@@ -12,6 +12,7 @@ import { store } from '../state/store';
 import type { Route } from '../types';
 
 const VALID_ROUTES: Route[] = ['quickstart', 'readonly', 'cr', 'schema-used', 'error-rectifier', 'settings', 'about'];
+const SIGNATURE_NAME = 'Subham Ain';
 
 export function mountAppShell(root: HTMLElement): void {
   root.innerHTML = '';
@@ -20,7 +21,7 @@ export function mountAppShell(root: HTMLElement): void {
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
 
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>AP-SQL Assistant · Version 13.2</span><span class="hint">Crafted by Subham Ain</span>`;
+  footer.innerHTML = `<span>SQL Assistant · Version 14</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
 
   mountToastContainer(root);
@@ -48,20 +49,9 @@ export function mountAppShell(root: HTMLElement): void {
   function renderAll(): void { const route = routeFromHash(); store.setRoute(route); renderPage(route); }
   window.addEventListener('hashchange', renderAll);
 
-  // Only force a full Settings re-render when the LOCK STATE itself flips
-  // (locked <-> unlocked) — e.g. from the "Lock Settings" inactivity timer
-  // firing while the user is on another tab. Re-rendering on every store
-  // notification (which fires on every toast, every Query Builder keystroke,
-  // etc.) would otherwise reset the active Settings tab back to "Security"
-  // any time the user does anything at all inside Settings.
   let lastKnownSettingsLockState = store.settingsUnlocked;
-  store.subscribe(() => {
-    if (store.route === 'settings' && store.settingsUnlocked !== lastKnownSettingsLockState) {
-      lastKnownSettingsLockState = store.settingsUnlocked;
-      renderPage('settings');
-    }
-  });
+  store.subscribe(() => { if (store.route === 'settings' && store.settingsUnlocked !== lastKnownSettingsLockState) { lastKnownSettingsLockState = store.settingsUnlocked; renderPage('settings'); } });
 
-  renderNavbar(navSlot, navigate, () => tour.start());
+  renderNavbar(navSlot, navigate, () => tour.start(), SIGNATURE_NAME);
   renderAll();
 }

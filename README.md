@@ -1,60 +1,65 @@
-# AP-SQL Assistant — V13.2
+# SQL Assistant — V14
 
-An incremental, security- and intelligence-focused upgrade of V13.1. **No existing functionality was removed.**
+An incremental upgrade of the V13.x line. **Renamed application, rebuilt navbar, hybrid online/offline NLP,
+module-scoped selectors everywhere, manual CASE/DECODE builders, CR Builder UI parity, and three real bugs found
+and fixed via actual browser testing.** No existing functionality was removed.
 
 ## Just want to open it? `dist/index.html`
 
-Fully self-contained (~175 KB, zero external `<script>`/`<link>` references). Double-click it — no server, no
+Fully self-contained (~200 KB, zero external `<script>`/`<link>` references). Double-click it — no server, no
 build step. Verified via `file://` in a real headless browser with **zero console errors, zero page errors**
-across an extensive test suite (see below).
+across an extensive, targeted test suite (see below).
 
-## What's new in V13.2
+## What's new in V14
 
-- **Manual Schema Update moved exclusively into Settings** — no longer a top-level nav item. Reachable only after
-  Settings authentication, exactly as specified.
-- **Settings is password-protected** — selecting it always shows a lock screen first; only a correct password
-  unlocks the full Settings UI for that session (with a 5-minute inactivity auto-lock, and an explicit "Lock
-  Settings" button).
-- **Genuine encryption at rest** — both the Settings password and the separate Vault Passphrase use
-  **PBKDF2 (150,000 iterations) + AES-GCM authenticated encryption** via the browser's built-in Web Crypto API.
-  No plaintext password is ever written to `localStorage`; verification works by attempting to decrypt a fixed
-  marker, so a wrong password/passphrase fails cryptographically, not just via a string comparison.
-- **A separate encrypted Vault** for sync credentials (GitHub repo/branch/token) — protected by its own
-  user-chosen passphrase (no default ever hard-coded), with Create / Unlock / Lock / Change Passphrase / Reset,
-  and an honest "lost passphrase = unrecoverable, only resettable" policy (no fake recovery flow).
-- **Navbar redesigned to carry ONLY two Schema Sync dropdowns** — Sync Source (Shared Location / GitHub) and Sync
-  Time (Manual through Custom). No Sync Now button, no repository/credentials in the navbar — all detailed
-  configuration lives inside Settings → Synchronization, exactly as specified.
-- **Schema versioning + conflict detection** — every save stamps a version/checksum/device-tag; a
-  `detectConflict()` engine compares local vs. incoming schemas and reports exactly which table.column paths
-  changed, rather than silently overwriting.
-- **Enhanced NLP** — relative dates (today, yesterday, this/last week/month/year, "last N days"), AND/OR
-  detection, a step-by-step **Query Plan** shown before SQL generation, and **clarification questions** when a
-  phrase is ambiguous (e.g. multiple DATE columns could match "this month").
-- **Natural-language CR parsing** — e.g. "Update the payment status to PAID for invoice 12345" is parsed into
-  table/column/value/WHERE automatically in the CR Builder.
-- **AI self-review** — every AI-generated SELECT is re-validated through the same read-only safety engine as
-  manual/CR SQL before being shown to the user.
+- **Renamed to "SQL Assistant"** everywhere — page title, navbar, headings, About page, footer. No trace of the
+  previous application name remains anywhere in the UI.
+- **Navbar rebuilt**: Hamburger Menu is now on the **left**. On the right: Sync Source/Time dropdowns (center),
+  then **Guided Walkthrough**, then the **signature** ("Subham Ain") on the far right, in that exact order.
+- **Hybrid Online/Offline NLP**: a new `onlineNlpService` + `nlpOrchestrator` implement the required priority
+  chain — **Online AI/NLP → Offline/local engine → Manual Selector fallback**. No online endpoint is configured
+  out of the box (none was provided), so it correctly and transparently falls back to the local engine every
+  time, with a visible badge (`🌐 Online AI/NLP` vs. `📵 Offline/local engine`) so the user always knows which
+  engine actually ran. An endpoint can be configured later under Settings → AI / NLP Engine.
+- **Module → Search → Select** flow added to: the Read Only/CR table picker, the main Schema page's "Tables in
+  Active Schema" list, and the Manual Schema Update workflow.
+- **Manual CASE / Manual DECODE** builders — new modal-based expression builders in Select Columns, for when no
+  schema-defined CASE/DECODE already fits. Coexists with existing schema-level decode functionality.
+- **CR Query Builder UI aligned with Read Only** — same top-row layout (Describe/Generated SQL), same
+  "Manual Selectors" card with tabs below. All existing CR functionality (query type, WHERE safety, values editor)
+  preserved unchanged.
+- **Hamburger submenu collapse/expand bug fixed** (see below — this was a real, subtle CSS bug, not just a JS
+  wiring issue).
+- **Schema page simplified**: Add Schema / Import Schema removed from the main Schema page; both remain available
+  (plus a new "Push to GitHub" action) inside Settings → Schema Management, gated by the Admin Password.
+- **Settings password section bug fixed**: no more persistent/false message on the lock screen (see below).
+- **Default Admin Password is `admin`**, used only internally — **never displayed anywhere in the UI** (no
+  hints, tooltips, walkthrough text, notifications, or error messages reveal it). The lock screen now reads
+  "Enter Admin Password".
+- **Manual Schema Update workflow**: Select Schema → Select Module → Select Table → Populate Table. The data
+  grid is now scoped to just the chosen table's columns, and the Add Row form pre-fills the Module/Table fields.
 
-## Bugs found and fixed during this build (verified via real browser testing, not just compilation)
+## Three real bugs found and fixed via actual browser testing (not just compilation)
 
 | Bug | Root cause | Fix |
 |---|---|---|
-| Relative-date SQL was wrapped in quotes, e.g. `>= 'DATE_TRUNC(''MONTH'', CURRENT_DATE)'` | `filterEngine`'s value-quoting didn't recognize raw SQL expressions | Added `SQL_EXPRESSION_PATTERN` detection for `CURRENT_DATE`, `DATE_TRUNC(`, `INTERVAL`, etc. — these now pass through unquoted |
-| Settings silently reset to the "Security" tab immediately after any successful action (e.g. right after saving a schema row) | `appShell` re-rendered the *entire* Settings page on **every** store notification (including toasts) | Now only re-renders Settings when the lock state itself actually flips (locked ↔ unlocked) |
-| A literal `<script>...</script>` tag was getting corrupted into the middle of the bundled JS | Minified code contained a variable literally named `$` followed by `&&`; JS's `String.replace()` interprets `$&` as "insert the matched substring" when the replacement argument is a *string* | Switched to function-based replacements (which never interpret `$`-patterns) plus a byte-identical verification check that now runs on every build |
+| Hamburger "Query Builder" submenu arrow toggled `aria-expanded` and the `hidden` attribute correctly in the DOM, but the submenu **never visually collapsed** | `.hb-group-children { display: flex; ... }` is an unconditional CSS rule — an author-specified `display` always overrides the browser's default `[hidden] { display: none }` behavior, per the CSS cascade | Added `.hb-group-children[hidden] { display: none; }`. Found the exact same pattern affecting `.issue-box`/`.note-box`/`.tips-box` (used by the Settings password error box and the Manual Schema Update delete-confirmation password error) and `.row-actions` (used by the schema editor's row-action bar) — fixed all three with the same technique. |
+| The Query Plan and "Online/Offline engine" badge never appeared after building a query, even though the code that generates them ran successfully | `runNlBuild()`/`runCrNlBuild()` set `#nlNotes.innerHTML` with the results, then immediately called `draw()` — which re-renders the **entire** section's `innerHTML`, including a fresh, empty `#nlNotes` placeholder, silently discarding the content that was just written | Reordered both functions so `draw()` runs first (reflecting the "done building" state), and the notes/badge are written to the DOM **afterward** |
+| (Regression check) Same `[hidden]`-override pattern also affected the 3-level delete confirmation's password-error box | Same root cause as bug #1 | Covered by the same `.issue-box[hidden]` fix |
 
 ## What's in this zip
 
 ```
-apsql/
-├── dist/index.html          ← Open this. Fully self-contained.
-├── inline-build.mjs          ← The build-time inliner, with the $-pattern and </script fixes + verification
-├── src/                      ← Full TypeScript source
-│   ├── engines/               + schemaVersionEngine (NEW), crNlpEngine (NEW)
-│   ├── services/               + cryptoService (NEW), passwordService (rewritten), vaultService (NEW), syncService (NEW)
-│   ├── components/             hamburgerNav (redesigned: sync dropdowns, no Manual Schema Editor link)
-│   └── pages/                  settingsPage (rewritten: lock gate + 6 tabs), schemaEditorSection (moved here)
+sqla/
+├── dist/index.html         ← Open this. Fully self-contained.
+├── inline-build.mjs         ← Build-time inliner with byte-identical verification
+├── src/
+│   ├── engines/              + crNlpEngine, schemaVersionEngine, manual CASE/DECODE builders in decodeEngine
+│   ├── services/              + onlineNlpService (NEW), nlpOrchestrator (NEW), cryptoService, passwordService,
+│   │                            vaultService, syncService (+ pushSchemaToGitHub)
+│   ├── components/            hamburgerNav (redesigned + bug fix), manualExprBuilder (NEW), tablePicker (Module flow)
+│   └── pages/                 crBuilderPage (aligned with Read Only), schemaPage (simplified + Module/Search),
+│                               schemaEditorSection (Module→Table workflow), settingsPage (fixed + AI/NLP tab)
 ├── package.json / tsconfig.json / vite.config.ts
 └── README.md
 ```
@@ -62,17 +67,21 @@ apsql/
 ## Verified before packaging (real browser tests, not just compilation)
 
 - `tsc --noEmit`: 0 errors · `vite build`: clean
-- Navbar: only Sync Source + Sync Time dropdowns present, no other sync controls
-- Settings: wrong password rejected, correct password unlocks, stays unlocked across in-session navigation, locks
-  via button, password never in plaintext in `localStorage`
-- Manual Schema Update (inside Settings): Add/Edit/Delete all work, 3-level delete confirmation with password gate
-  confirmed, **does not reset to a different tab after a successful save**
-- Vault: create, lock, unlock (wrong passphrase rejected, correct one works), passphrase never in plaintext
-- Sync tab: GitHub fields only appear when Vault is unlocked; Shared Location connect button present
-- NLP: relative dates generate **valid, unquoted** SQL; Query Plan displayed; CR natural-language parsing works
-- Mobile (390px): hamburger menu includes Sync Source/Time as dropdowns, zero horizontal overflow
-- **Zero console errors, zero page errors** across the entire test run
+- Branding: "SQL Assistant" everywhere, zero trace of previous name
+- Navbar: hamburger left, sync dropdowns, Guided Walkthrough immediately left of signature, signature far right
+- Hamburger submenu: expand **and** collapse both verified visually (not just via `aria-expanded`)
+- Read Only + CR builders: online/offline engine badge and Query Plan/notes correctly persist after building
+- Relative-date SQL (e.g. "this month") generates valid, unquoted `DATE_TRUNC(...)` — not wrapped in a string
+- Manual CASE and Manual DECODE both add correctly-rendered expressions to the generated SQL
+- Settings: error box hidden on fresh load, shows only on actual wrong password, "Enter Admin Password" label,
+  default password `admin` works and is never found in `localStorage` as plaintext
+- Manual Schema Update: Module → Table selection correctly scopes the data grid; Add Row pre-fills Module/Table;
+  3-level delete confirmation's password step also has its error box correctly hidden until an actual wrong entry
+- Schema page: Add Schema / Import Schema fields confirmed absent; Module selector + Search confirmed present
+- Schema Management (Settings): Add/Import/Push-to-GitHub confirmed present and gated behind the Admin Password
+- Mobile (390px): hamburger opens, Sync Source/Time available as dropdowns inside the panel, zero horizontal overflow
+- **Zero console errors, zero page errors** across the entire test run, including a full-route regression pass
 
 ## Demo credentials
 
-Operational password: `apsql-admin`. Vault has no default — you must create your own passphrase.
+Admin Password: `admin` (used internally only — never shown in the UI). Change or reset it from Settings → Security.

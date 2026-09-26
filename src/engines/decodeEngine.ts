@@ -19,3 +19,27 @@ export function validateDecodeEntries(entries: DecodeEntry[]): string[] {
   });
   return issues;
 }
+/** V14 — builds a raw SQL CASE expression from a manually-defined spec
+ * (used when there is no schema-level decode/case definition available). */
+export function buildManualCaseExpression(whens: { whenExpr: string; thenValue: string }[], elseValue: string, alias: string): string {
+  const body = whens.map((w) => `    WHEN ${w.whenExpr} THEN ${quoteIfPlainValue(w.thenValue)}`).join('\n');
+  return `CASE\n${body}\n    ELSE ${quoteIfPlainValue(elseValue)}\n  END AS ${alias}`;
+}
+/** V14 — builds a manual DECODE (Oracle) / CASE (other dialects) expression
+ * from a source column/expression plus raw=label pairs, when no schema
+ * decode definition exists for that column. */
+export function buildManualDecodeExpression(sourceExpr: string, pairs: { rawValue: string; label: string }[], elseValue: string, alias: string, dialect: Dialect): string {
+  if (dialect === 'Oracle') {
+    const args = pairs.map((p) => `'${p.rawValue}', ${quoteIfPlainValue(p.label)}`).join(', ');
+    return `DECODE(${sourceExpr}, ${args}, ${quoteIfPlainValue(elseValue)}) AS ${alias}`;
+  }
+  const whens = pairs.map((p) => `    WHEN ${sourceExpr} = '${p.rawValue}' THEN ${quoteIfPlainValue(p.label)}`).join('\n');
+  return `CASE\n${whens}\n    ELSE ${quoteIfPlainValue(elseValue)}\n  END AS ${alias}`;
+}
+function quoteIfPlainValue(v: string): string {
+  const t = v.trim();
+  if (t === '') return 'NULL';
+  if (/^-?\d+(\.\d+)?$/.test(t)) return t;
+  if (t.startsWith("'") && t.endsWith("'")) return t;
+  return `'${t.replace(/'/g, "''")}'`;
+}

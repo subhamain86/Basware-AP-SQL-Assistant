@@ -1,22 +1,16 @@
 import { icon } from './icons';
 export interface DataTableColumn<T> { key: string; label: string; render?: (row: T) => string; sortValue?: (row: T) => string | number; width?: string; }
-export interface DataTableOptions<T> { columns: DataTableColumn<T>[]; rows: T[]; getRowId: (row: T) => string; pageSize?: number; searchPredicate?: (row: T, term: string) => boolean; onRowClick?: (row: T) => void; selectedRowId?: string | null; emptyMessage?: string; }
-
-export function renderDataTable<T>(container: HTMLElement, opts: DataTableOptions<T>): { refresh: (rows: T[]) => void; getSelectedId: () => string | null } {
+export interface DataTableOptions<T> { columns: DataTableColumn<T>[]; rows: T[]; getRowId: (row: T) => string; pageSize?: number; searchPredicate?: (row: T, term: string) => boolean; onRowClick?: (row: T) => void; selectedRowId?: string | null; emptyMessage?: string; initialSearch?: string; }
+export function renderDataTable<T>(container: HTMLElement, opts: DataTableOptions<T>): { refresh: (rows: T[]) => void; getSelectedId: () => string | null; setSearch: (term: string) => void } {
   const pageSize = opts.pageSize ?? 50;
-  let allRows = opts.rows; let searchTerm = ''; let sortKey: string | null = null; let sortDir: 'asc' | 'desc' = 'asc'; let page = 0;
+  let allRows = opts.rows; let searchTerm = opts.initialSearch || ''; let sortKey: string | null = null; let sortDir: 'asc' | 'desc' = 'asc'; let page = 0;
   let selectedId: string | null = opts.selectedRowId ?? null;
-
   function filteredSortedRows(): T[] {
     let rows = allRows;
     if (searchTerm) rows = rows.filter((r) => opts.searchPredicate?.(r, searchTerm.toLowerCase()));
-    if (sortKey) {
-      const col = opts.columns.find((c) => c.key === sortKey);
-      if (col?.sortValue) rows = [...rows].sort((a, b) => { const av = col.sortValue!(a); const bv = col.sortValue!(b); const cmp = av < bv ? -1 : av > bv ? 1 : 0; return sortDir === 'asc' ? cmp : -cmp; });
-    }
+    if (sortKey) { const col = opts.columns.find((c) => c.key === sortKey); if (col?.sortValue) rows = [...rows].sort((a, b) => { const av = col.sortValue!(a); const bv = col.sortValue!(b); const cmp = av < bv ? -1 : av > bv ? 1 : 0; return sortDir === 'asc' ? cmp : -cmp; }); }
     return rows;
   }
-
   function draw(): void {
     const filtered = filteredSortedRows();
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -45,5 +39,5 @@ export function renderDataTable<T>(container: HTMLElement, opts: DataTableOption
     container.querySelector('#dtNextBtn')?.addEventListener('click', () => { page = Math.min(totalPages - 1, page + 1); draw(); });
   }
   draw();
-  return { refresh: (rows: T[]) => { allRows = rows; draw(); }, getSelectedId: () => selectedId };
+  return { refresh: (rows: T[]) => { allRows = rows; draw(); }, getSelectedId: () => selectedId, setSearch: (term: string) => { searchTerm = term; page = 0; draw(); } };
 }

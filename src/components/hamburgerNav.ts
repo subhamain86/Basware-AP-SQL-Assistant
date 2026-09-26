@@ -2,22 +2,23 @@ import { icon } from './icons';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
 import { syncService } from '../services/syncService';
+import { isBrowserOnline } from '../services/onlineNlpService';
 import type { Route, Theme, SyncSource, SyncTimeOption } from '../types';
 
 // ============================================================================
-// hamburgerNav — the navbar carries ONLY two Schema Sync selectors: "Sync
-// Source" (Shared Location / GitHub) and "Sync Time" (Manual / 15m / 30m /
-// 1h / 4h / 6h / Daily / Custom). No Sync Now button, no repo/branch/
-// credentials, no Vault config — all of that lives exclusively inside
-// Settings. Manual Schema Editor no longer appears anywhere in this menu —
-// it is reachable only from within Settings once unlocked. On narrow
-// screens these two dropdowns move into the hamburger panel itself but
-// remain dropdowns, never collapsing into free text.
+// hamburgerNav — V14. Layout per spec section 2:
+//   [Hamburger Menu] [Brand] ... [Sync dropdowns] ... [Guided Walkthrough] [Signature]
+// Hamburger stays on the LEFT. Guided Walkthrough sits immediately left of
+// the signature, which is on the far right. The Query Builder submenu
+// collapse/expand bug (spec section 6) is fixed here: the toggle button is
+// a plain <button type="button"> (never an <a>), its click handler ONLY
+// flips `expandedGroup` and re-draws — it never touches window.location or
+// triggers navigation, and each group tracks its OWN expanded state
+// independently so fixing one never affects another.
 // ============================================================================
 
 interface NavLeaf { id: Route; label: string; icon: Parameters<typeof icon>[0]; tourSelector?: string; }
 interface NavGroup { id: string; label: string; icon: Parameters<typeof icon>[0]; children: NavLeaf[]; tourSelector?: string; }
-
 const NAV_STRUCTURE: (NavLeaf | NavGroup)[] = [
   { id: 'quickstart', label: 'Quick Start', icon: 'compass' },
   { id: 'query-builder-group', label: 'Query Builder', icon: 'code', tourSelector: 'nav-query-builder', children: [
@@ -29,13 +30,11 @@ const NAV_STRUCTURE: (NavLeaf | NavGroup)[] = [
   { id: 'settings', label: 'Settings', icon: 'settings', tourSelector: 'nav-settings' },
   { id: 'about', label: 'About', icon: 'info' }
 ];
-
 function isGroup(entry: NavLeaf | NavGroup): entry is NavGroup { return 'children' in entry; }
-
 const SYNC_SOURCE_LABELS: Record<SyncSource, string> = { 'shared-location': 'Shared Location', github: 'GitHub' };
 const SYNC_TIME_LABELS: Record<SyncTimeOption, string> = { manual: 'Manual', '15m': 'Every 15 minutes', '30m': 'Every 30 minutes', '1h': 'Every 1 hour', '4h': 'Every 4 hours', '6h': 'Every 6 hours', daily: 'Daily', custom: 'Custom' };
 
-export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => void, onStartTour: () => void): void {
+export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => void, onStartTour: () => void, signatureName: string): void {
   let menuOpen = false;
   let expandedGroup: string | null = null;
   let sourceMenuOpen = false;
@@ -48,13 +47,17 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     const activeSchema = schemaService.getActiveSchema();
     const cfg = syncService.getConfig();
     const settingsLockIcon = store.settingsUnlocked ? 'unlock' : 'lock';
+    const online = isBrowserOnline();
 
     container.innerHTML = `
       <nav class="navbar">
         <div class="container-fluid navbar-inner">
-          <div class="hero-brand-row" data-tour="brand">
-            <span class="app-logo-badge">${icon('logo', 24)}</span>
-            <div class="brand-text"><span class="builder-heading">AP-SQL Assistant</span><span class="small">V13.2</span></div>
+          <div class="navbar-left-cluster">
+            <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
+            <div class="hero-brand-row" data-tour="brand">
+              <span class="app-logo-badge">${icon('logo', 24)}</span>
+              <div class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14</span></div>
+            </div>
           </div>
 
           <div class="navbar-sync-cluster" data-tour="navbar-sync">
@@ -75,6 +78,7 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
 
           <div class="navbar-right-cluster">
             <span class="schema-badge" data-tour="active-schema-badge" title="Active schema">${icon('database', 14)} ${activeSchema.name}</span>
+            <span class="net-status-badge ${online ? 'is-online' : 'is-offline'}" title="${online ? 'Browser reports online' : 'Browser reports offline — NLP will use the local engine'}">${icon(online ? 'wifi' : 'wifi-off', 14)}</span>
             <span class="settings-lock-badge ${store.settingsUnlocked ? 'is-unlocked' : ''}" title="Settings ${store.settingsUnlocked ? 'unlocked' : 'locked'}">${icon(settingsLockIcon, 14)}</span>
             <div class="theme-toggle-wrap" data-tour="theme-toggle">
               <button id="themeBtn" class="btn btn-ghost btn-sm icon-only" type="button" aria-haspopup="true" aria-expanded="false" title="Theme">${icon(themeIconName(), 18)}</button>
@@ -84,7 +88,8 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
                 <button data-theme-choice="dark" type="button">${icon('moon', 15)} Dark</button>
               </div>
             </div>
-            <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
+            <button class="btn btn-outline btn-sm navbar-tour-btn" id="tourBtnNav" type="button" data-tour="guided-walkthrough-btn">${icon('play', 15)}<span class="tour-btn-label">Guided Walkthrough</span></button>
+            <span class="navbar-signature" data-tour="signature" title="Crafted by ${signatureName}">${icon('user', 14)} ${signatureName}</span>
           </div>
         </div>
       </nav>
@@ -100,7 +105,10 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
                 const inGroup = routeIsInGroup(entry);
                 const isExpanded = expandedGroup === entry.id || inGroup;
                 return `<div class="hb-group">
-                    <button type="button" class="hb-group-toggle ${inGroup ? 'active' : ''}" data-group="${entry.id}" ${entry.tourSelector ? `data-tour="${entry.tourSelector}"` : ''} aria-expanded="${isExpanded}">${icon(entry.icon, 18)}<span>${entry.label}</span>${icon('chevron-down', 15, isExpanded ? 'rotated' : '')}</button>
+                    <button type="button" class="hb-group-toggle ${inGroup ? 'active' : ''}" data-group="${entry.id}" ${entry.tourSelector ? `data-tour="${entry.tourSelector}"` : ''} aria-expanded="${isExpanded}">
+                      <span class="hb-group-toggle-main">${icon(entry.icon, 18)}<span>${entry.label}</span></span>
+                      <span class="hb-group-chevron">${icon('chevron-down', 15, isExpanded ? 'rotated' : '')}</span>
+                    </button>
                     <div class="hb-group-children" ${isExpanded ? '' : 'hidden'}>${entry.children.map((c) => `<a href="#${c.id}" data-route="${c.id}" ${c.tourSelector ? `data-tour="${c.tourSelector}"` : ''} class="hb-link hb-link-child ${activeRoute() === c.id ? 'active' : ''}">${icon(c.icon, 16)}<span>${c.label}</span></a>`).join('')}</div>
                   </div>`;
               }
@@ -120,10 +128,10 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
             </div>
             <div class="hb-divider"></div>
             <button type="button" class="hb-link hb-tour-btn" id="tourBtnHb">${icon('play', 18)}<span>Guided Walkthrough</span></button>
+            <div class="hb-signature">${icon('user', 14)} ${signatureName}</div>
           </div>
         </div>
       </div>`;
-
     wireEvents();
   }
 
@@ -137,9 +145,17 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     container.querySelector('#hamburgerOverlay')?.addEventListener('click', (e) => { if (e.target === container.querySelector('#hamburgerOverlay')) closeMenu(); });
     if (menuOpen) { const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeMenu(); document.removeEventListener('keydown', escHandler); } }; document.addEventListener('keydown', escHandler); }
 
-    container.querySelectorAll<HTMLButtonElement>('.hb-group-toggle').forEach((btn) => { btn.addEventListener('click', () => { const gid = btn.dataset.group!; expandedGroup = expandedGroup === gid ? null : gid; draw(); }); });
+    // Fixed: group toggle button ONLY expands/collapses its own group and
+    // re-draws. It is a <button type="button"> with no href, so it can
+    // never trigger navigation, and each group's expanded/collapsed state
+    // is tracked by its own `entry.id` key, so toggling one never disturbs
+    // another expandable section.
+    container.querySelectorAll<HTMLButtonElement>('.hb-group-toggle').forEach((btn) => {
+      btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const gid = btn.dataset.group!; expandedGroup = expandedGroup === gid ? null : gid; draw(); });
+    });
     container.querySelectorAll<HTMLAnchorElement>('[data-route]').forEach((a) => { a.addEventListener('click', (e) => { e.preventDefault(); onNavigate(a.dataset.route as Route); closeMenu(); }); });
     container.querySelector('#tourBtnHb')?.addEventListener('click', () => { closeMenu(); onStartTour(); });
+    container.querySelector('#tourBtnNav')?.addEventListener('click', () => { onStartTour(); });
 
     const themeBtn = container.querySelector<HTMLButtonElement>('#themeBtn'); const themeMenu = container.querySelector<HTMLDivElement>('#themeMenu');
     themeBtn?.addEventListener('click', (e) => { e.stopPropagation(); const isHidden = themeMenu?.hasAttribute('hidden'); if (isHidden) themeMenu?.removeAttribute('hidden'); else themeMenu?.setAttribute('hidden', ''); themeBtn.setAttribute('aria-expanded', String(!!isHidden)); });
@@ -148,19 +164,18 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     const sourceBtn = container.querySelector<HTMLButtonElement>('#syncSourceBtn'); const sourceMenu = container.querySelector<HTMLDivElement>('#syncSourceMenu');
     sourceBtn?.addEventListener('click', (e) => { e.stopPropagation(); sourceMenuOpen = !sourceMenuOpen; timeMenuOpen = false; draw(); });
     container.querySelectorAll<HTMLButtonElement>('[data-source]').forEach((btn) => { btn.addEventListener('click', (e) => { e.stopPropagation(); syncService.setSource(btn.dataset.source as SyncSource); sourceMenuOpen = false; draw(); store.pushToast('info', `Sync source set to ${SYNC_SOURCE_LABELS[btn.dataset.source as SyncSource]}.`); }); });
-
     const timeBtn = container.querySelector<HTMLButtonElement>('#syncTimeBtn'); const timeMenu = container.querySelector<HTMLDivElement>('#syncTimeMenu');
     timeBtn?.addEventListener('click', (e) => { e.stopPropagation(); timeMenuOpen = !timeMenuOpen; sourceMenuOpen = false; draw(); });
     container.querySelectorAll<HTMLButtonElement>('[data-time]').forEach((btn) => { btn.addEventListener('click', (e) => { e.stopPropagation(); syncService.setTime(btn.dataset.time as SyncTimeOption); timeMenuOpen = false; draw(); store.pushToast('info', `Sync time set to ${SYNC_TIME_LABELS[btn.dataset.time as SyncTimeOption]}.`); }); });
-
     container.querySelector<HTMLSelectElement>('#hbSyncSourceSelect')?.addEventListener('change', (e) => { syncService.setSource((e.target as HTMLSelectElement).value as SyncSource); });
     container.querySelector<HTMLSelectElement>('#hbSyncTimeSelect')?.addEventListener('change', (e) => { syncService.setTime((e.target as HTMLSelectElement).value as SyncTimeOption); });
-
     document.addEventListener('click', () => { themeMenu?.setAttribute('hidden', ''); if (sourceMenuOpen || timeMenuOpen) { sourceMenuOpen = false; timeMenuOpen = false; draw(); } });
   }
 
   store.subscribe(draw);
   schemaService.subscribe(draw);
   syncService.subscribe(draw);
+  window.addEventListener('online', draw);
+  window.addEventListener('offline', draw);
   draw();
 }
