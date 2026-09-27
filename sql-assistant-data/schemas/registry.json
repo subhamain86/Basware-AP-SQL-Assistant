@@ -6,7 +6,7 @@
       "version": "1.0",
       "status": "inactive",
       "updatedAt": "2026-09-27T12:37:52.671Z",
-      "lastSyncedAt": "2026-09-27T13:08:36.200Z",
+      "lastSyncedAt": "2026-09-27T13:08:38.692Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -738,7 +738,7 @@
       "version": "1.0",
       "status": "inactive",
       "updatedAt": "2026-09-27T12:37:52.671Z",
-      "lastSyncedAt": "2026-09-27T13:08:36.200Z",
+      "lastSyncedAt": "2026-09-27T13:08:38.692Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -1548,7 +1548,7 @@
       "version": "1.0",
       "status": "active",
       "updatedAt": "2026-09-27T12:39:52.776Z",
-      "lastSyncedAt": "2026-09-27T13:08:36.200Z",
+      "lastSyncedAt": "2026-09-27T13:08:38.692Z",
       "tables": [
         {
           "name": "IA_ACTION_LOG",
