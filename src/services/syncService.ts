@@ -7,6 +7,7 @@ import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { assertSyncConfigOrError, safeTrim, sanitizeIncomingSchema } from '../utils/validation';
 import { makeId } from '../utils/id';
 import { beginInternalSync, endInternalSync } from './syncCoordination';
+import { safeSetItem } from '../utils/storage';
 
 const CONFIG_KEY = 'sqla.syncconfig.v146';
 const STATUS_KEY = 'sqla.syncstatus.v146';
@@ -14,10 +15,38 @@ const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v146';
 const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v146';
 const SYNC_LOG_KEY = 'sqla.synclog.v146';
 const MAX_LOG_ENTRIES = 30;
+// V14.7 — see utils/storage.ts for the full root-cause explanation. Any
+// single log message longer than this gets truncated before it is ever
+// stored.
+const MAX_LOG_MESSAGE_LENGTH = 600;
+
+function truncateLogMessage(message: string): string {
+  return message.length > MAX_LOG_MESSAGE_LENGTH
+    ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}… (${message.length - MAX_LOG_MESSAGE_LENGTH} more characters truncated)`
+    : message;
+}
 
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
-function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
+// V14.7 FIX: previously loaded the stored log verbatim. If any entries
+// were written BEFORE this fix existed (e.g. a validation error with a
+// 100KB+ message, from repeatedly failed syncs against a large
+// real-world schema), those oversized strings stayed in localStorage
+// forever, re-saved on every subsequent logEvent() call — permanently
+// consuming most of the browser's quota and causing every future write
+// (even a tiny one) to fail. Every entry is now truncated on load too,
+// so legacy bloat is cleaned up the next time the app starts, not just
+// prevented going forward.
+function loadSyncLog(): SyncLogEntry[] {
+  try {
+    const raw = localStorage.getItem(SYNC_LOG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SyncLogEntry[];
+      return parsed.map((e) => ({ ...e, message: truncateLogMessage(e.message) }));
+    }
+  } catch { }
+  return [];
+}
 
 export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; conflicts: PendingConflict[]; unchanged: number; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
@@ -34,29 +63,29 @@ class SyncService {
 
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
-  private persistConfig(): void { localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config)); }
-  private persistPendingConflicts(): void { localStorage.setItem(PENDING_CONFLICTS_KEY, JSON.stringify(this.pendingConflicts)); this.notify(); }
-  // V14.7 FIX: a validation failure on a large real-world schema can
-  // produce a message with hundreds of concatenated issues (thousands of
-  // characters — this is exactly what happened with the reported
-  // "Remote schema file failed validation" error, whose full message was
-  // over 100KB). Storing MAX_LOG_ENTRIES of these verbatim in
-  // localStorage could exceed the browser's per-origin storage quota,
-  // throwing "Setting the value of 'sqla.synclog.v146' exceeded the
-  // quota" — which then masked the *real* underlying error in the UI.
-  // The message is now capped, and the storage write is wrapped so a
-  // quota error can never crash the app or hide the original problem.
-  private static readonly MAX_LOG_MESSAGE_LENGTH = 600;
+  // V14.7 FIX: wrapped every raw localStorage.setItem() call in this
+  // class with safeSetItem() (see utils/storage.ts) so a quota failure
+  // on ANY of these keys degrades gracefully — the in-memory state (and
+  // therefore the running app) stays correct and functional for the
+  // current session — instead of throwing an uncaught, cryptic browser
+  // error that surfaces to the user with no explanation.
+  private persistConfig(): void { safeSetItem(CONFIG_KEY, JSON.stringify(this.config)); }
+  private persistPendingConflicts(): void { safeSetItem(PENDING_CONFLICTS_KEY, JSON.stringify(this.pendingConflicts)); this.notify(); }
+  private setStatusStorage(status: SyncStatus): void { safeSetItem(STATUS_KEY, status); }
   private logEvent(kind: SyncLogEntry['kind'], message: string): void {
-    const trimmedMessage = message.length > SyncService.MAX_LOG_MESSAGE_LENGTH
-      ? `${message.slice(0, SyncService.MAX_LOG_MESSAGE_LENGTH)}… (${message.length - SyncService.MAX_LOG_MESSAGE_LENGTH} more characters truncated)`
-      : message;
+    const trimmedMessage = truncateLogMessage(message);
     this.syncLog = [{ id: makeId('synclog'), timestamp: new Date().toISOString(), kind, message: trimmedMessage }, ...this.syncLog].slice(0, MAX_LOG_ENTRIES);
-    try {
-      localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
-    } catch {
-      // Storage quota exceeded or unavailable — drop older entries and retry once with just the newest one, so logging can never crash the app.
-      try { localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog.slice(0, 5))); } catch { /* give up silently; in-memory log still holds the entry for this session */ }
+    const result = safeSetItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
+    if (!result.ok) {
+      // Even the (now-truncated) log itself couldn't be saved — storage
+      // is essentially exhausted by other data (almost certainly the
+      // schema registry, given how large a real production schema can
+      // be). Aggressively drop down to just the newest few entries and
+      // retry once; if that STILL fails, keep the in-memory log for this
+      // session only rather than crashing anything.
+      const minimal = this.syncLog.slice(0, 3);
+      const retry = safeSetItem(SYNC_LOG_KEY, JSON.stringify(minimal));
+      if (retry.ok) this.syncLog = minimal;
     }
     this.notify();
   }
@@ -92,7 +121,7 @@ class SyncService {
   }
 
   private lastKnownSha(): string | null { return localStorage.getItem(LAST_KNOWN_SHA_KEY); }
-  private setLastKnownSha(sha: string | null): void { if (sha) localStorage.setItem(LAST_KNOWN_SHA_KEY, sha); else localStorage.removeItem(LAST_KNOWN_SHA_KEY); }
+  private setLastKnownSha(sha: string | null): void { if (sha) safeSetItem(LAST_KNOWN_SHA_KEY, sha); else localStorage.removeItem(LAST_KNOWN_SHA_KEY); }
 
   private missingConfigMessage(): string | null {
     if (!secretVaultService.isUnlocked()) return 'The Secret Vault is locked. Enter the Admin Password to unlock it and enable synchronization.';
@@ -129,6 +158,18 @@ class SyncService {
     this.persistPendingConflicts();
   }
 
+  /** V14.7 — checked after any operation that calls into schemaService
+   * and could trigger a persist() (addSchemaFromRemote, markAllSynced,
+   * replaceSchemaContent, etc). If the schema registry itself couldn't be
+   * saved to localStorage (almost always a quota problem given how large
+   * a real production schema is), this surfaces ONE clear, specific log
+   * entry distinguishing "synced correctly but couldn't be saved locally"
+   * from a genuine validation or network failure. */
+  private checkAndLogPersistIssue(): void {
+    const err = schemaService.getLastPersistError();
+    if (err) this.logEvent('error', `Schema(s) synchronized successfully in memory, but could not be saved to local browser storage: ${err}`);
+  }
+
   async pullRegistryFromGitHub(): Promise<PullOutcome> {
     const missing = this.missingConfigMessage();
     if (missing) { this.logEvent('error', missing); return { ok: false, error: missing, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
@@ -161,12 +202,14 @@ class SyncService {
         conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
       }
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
-      localStorage.setItem(STATUS_KEY, this.status);
+      this.setStatusStorage(this.status);
       this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
+      // V14.7 — surface a quota problem distinctly from the success message above.
+      this.checkAndLogPersistIssue();
       this.notify();
       return { ok: true, newSchemasAdded, conflicts, unchanged };
     } catch (e) {
-      this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify();
+      this.status = 'failed'; this.setStatusStorage(this.status); this.notify();
       const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
       this.logEvent('error', message);
       return { ok: false, error: message, newSchemasAdded: [], conflicts: [], unchanged: 0 };
@@ -195,12 +238,14 @@ class SyncService {
       this.setLastKnownSha(result.sha);
       schemaService.markAllSynced();
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
-      localStorage.setItem(STATUS_KEY, this.status);
+      this.setStatusStorage(this.status);
       this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s)).`);
+      // V14.7 — surface a quota problem distinctly from the success message above.
+      this.checkAndLogPersistIssue();
       this.notify();
       return { ok: true };
     } catch (e) {
-      this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify();
+      this.status = 'failed'; this.setStatusStorage(this.status); this.notify();
       const apiErr = isGitHubApiError(e) ? e : null;
       const requiresPull = !!apiErr && (apiErr.status === 409 || apiErr.status === 422);
       const msg = apiErr?.message || (e as Error)?.message || 'Unknown error during synchronization.';
@@ -245,10 +290,10 @@ class SyncService {
       const result = await this.pullFromSharedLocation(activeSchema);
       this.status = result.ok ? 'synchronized' : 'failed';
       this.lastSyncedAt = new Date().toISOString();
-      localStorage.setItem(STATUS_KEY, this.status);
+      this.setStatusStorage(this.status);
       this.notify();
       return { ok: result.ok, error: result.error };
-    } catch (e) { this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
+    } catch (e) { this.status = 'failed'; this.setStatusStorage(this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
     finally { endInternalSync(); }
   }
 }

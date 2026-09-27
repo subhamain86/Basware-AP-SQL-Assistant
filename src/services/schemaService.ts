@@ -5,6 +5,7 @@ import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
 import { validateSchemaName, sanitizeIncomingSchema } from '../utils/validation';
+import { safeSetItem } from '../utils/storage';
 
 const STORAGE_KEY = 'sqla.registry.v146';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
@@ -12,12 +13,31 @@ function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 export class SchemaService {
   private registry: SchemaRegistry;
   private listeners = new Set<() => void>();
+  // V14.7 — set whenever persist() could not fully save to localStorage
+  // (almost always a quota problem given how large a real production
+  // schema's JSON serialization can be). In-memory data and the running
+  // app remain fully correct either way; this only tracks whether the
+  // LAST persist() call actually made it to disk, so callers like
+  // syncService can surface a clear, specific message instead of letting
+  // a raw QuotaExceededError crash the operation or get misreported as a
+  // validation failure.
+  private lastPersistError: string | null = null;
   constructor() { this.registry = this.load(); }
   private load(): SchemaRegistry {
     try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { const parsed = JSON.parse(raw) as SchemaRegistry; if (parsed.schemas?.length) return parsed; } } catch { }
     return { schemas: clone(DEFAULT_SCHEMAS), activeSchemaId: DEFAULT_ACTIVE_SCHEMA_ID };
   }
-  private persist(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.registry)); this.listeners.forEach((l) => l()); }
+  private persist(): void {
+    const result = safeSetItem(STORAGE_KEY, JSON.stringify(this.registry));
+    this.lastPersistError = result.ok ? null : (result.error || 'Unknown storage error.');
+    // Notify listeners regardless of persistence outcome — the in-memory
+    // registry is always the source of truth for the running session, so
+    // the UI must reflect it even if it couldn't be saved to disk.
+    this.listeners.forEach((l) => l());
+  }
+  /** V14.7 — see lastPersistError note above. Returns null if the most
+   * recent change was saved successfully. */
+  getLastPersistError(): string | null { return this.lastPersistError; }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   getRegistry(): SchemaRegistry { return this.registry; }
   getActiveSchema(): SchemaModel { const found = this.registry.schemas.find((s) => s.id === this.registry.activeSchemaId); return found || this.registry.schemas[0]; }
@@ -26,7 +46,6 @@ export class SchemaService {
   getModulesForSchema(schemaId: string): string[] { const s = this.getSchemaById(schemaId); if (!s) return []; return Array.from(new Set(s.tables.map((t) => t.module))).sort(); }
   getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
   getAllSchemaNames(excludeId?: string): string[] { return this.registry.schemas.filter((s) => s.id !== excludeId).map((s) => s.name); }
-
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
     this.registry.schemas.forEach((s) => { s.status = s.id === schemaId ? 'active' : (s.status === 'active' ? 'inactive' : s.status); });
@@ -34,12 +53,10 @@ export class SchemaService {
     this.persist();
   }
   resetToDefaultSchema(): void { this.switchActiveSchema(DEFAULT_ACTIVE_SCHEMA_ID); }
-
   validateNewSchemaName(name: unknown, excludeId?: string): string | null {
     const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
-
   /** V14.6 — `schema` is sanitized via sanitizeIncomingSchema() BEFORE
    * being stored, guaranteeing every table/column name, description, and
    * decode value is a real string (never undefined) regardless of what
@@ -55,7 +72,6 @@ export class SchemaService {
     this.persist();
     return { ok: true, schemaId: id };
   }
-
   addNewSchema(name: string): { ok: boolean; error?: string; schema?: SchemaModel } {
     const nameError = this.validateNewSchemaName(name);
     if (nameError) return { ok: false, error: nameError };
@@ -64,7 +80,6 @@ export class SchemaService {
     this.persist();
     return { ok: true, schema: fresh };
   }
-
   renameSchema(schemaId: string, newName: string): { ok: boolean; error?: string } {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return { ok: false, error: 'Schema not found.' };
@@ -75,7 +90,6 @@ export class SchemaService {
     this.persist();
     return { ok: true };
   }
-
   deleteSchema(schemaId: string): { ok: boolean; error?: string } {
     if (this.registry.schemas.length <= 1) return { ok: false, error: 'Cannot delete the only remaining schema.' };
     const wasActive = this.registry.activeSchemaId === schemaId;
@@ -84,7 +98,6 @@ export class SchemaService {
     this.persist();
     return { ok: true };
   }
-
   addTable(schemaId: string, table: TableDef): void {
     const schema = this.registry.schemas.find((s) => s.id === schemaId);
     if (!schema) return;
@@ -92,7 +105,6 @@ export class SchemaService {
     schema.updatedAt = new Date().toISOString();
     this.persist();
   }
-
   saveDecodeDefinition(schemaId: string, tableName: string, columnName: string, entries: DecodeEntry[]): string[] {
     const issues = validateDecodeEntries(entries);
     if (issues.length) return issues;
@@ -105,7 +117,6 @@ export class SchemaService {
     this.persist();
     return [];
   }
-
   exportSchemaJson(schemaId: string): string { const schema = this.registry.schemas.find((s) => s.id === schemaId); return JSON.stringify(schema, null, 2); }
   exportSchemaCsv(schemaId: string): string {
     const schema = this.registry.schemas.find((s) => s.id === schemaId);
@@ -114,7 +125,6 @@ export class SchemaService {
     const rows = schema.tables.flatMap((t) => t.columns.map((c) => [t.module, t.name, t.objectType || 'TABLE', t.description, c.name, c.description, c.type, c.length ?? '', c.precision ?? '', c.nullable ? 'Y' : 'N', c.alias ?? '', c.isPrimaryKey ? 'Y' : 'N', c.references ? `${c.references.table}.${c.references.column}` : '', c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join(';') : ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')));
     return [header, ...rows].join('\n');
   }
-
   getFlattenedRows(schemaId: string, moduleFilter: string | null = null, tableFilter: string | null = null): SchemaEditorRow[] {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return [];
@@ -128,7 +138,6 @@ export class SchemaService {
     });
     return rows;
   }
-
   async upsertRow(schemaId: string, row: SchemaEditorRow, originalRowId: string | null): Promise<string[]> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return ['Schema not found.'];
@@ -155,7 +164,6 @@ export class SchemaService {
     this.persist();
     return [];
   }
-
   async deleteRow(schemaId: string, rowId: string): Promise<{ ok: boolean; error?: string }> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return { ok: false, error: 'Schema not found.' };
@@ -169,7 +177,6 @@ export class SchemaService {
     this.persist();
     return { ok: true };
   }
-
   deleteAllSchemaContents(schemaId: string): string {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return '';
@@ -178,7 +185,6 @@ export class SchemaService {
     this.persist();
     return backup;
   }
-
   async applySynchronizedSchema(schemaId: string, incoming: SchemaModel, source: 'location' | 'github'): Promise<void> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return;
@@ -189,7 +195,6 @@ export class SchemaService {
     schema.versionMeta = await stampNewVersion(schema, source);
     this.persist();
   }
-
   replaceSchemaContent(schemaId: string, incoming: SchemaModel): void {
     const idx = this.registry.schemas.findIndex((s) => s.id === schemaId);
     if (idx === -1) return;
