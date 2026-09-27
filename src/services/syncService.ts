@@ -38,12 +38,14 @@ class SyncService {
   private persistPendingConflicts(): void { localStorage.setItem(PENDING_CONFLICTS_KEY, JSON.stringify(this.pendingConflicts)); this.notify(); }
   // V14.7 FIX: a validation failure on a large real-world schema can
   // produce a message with hundreds of concatenated issues (thousands of
-  // characters). Storing MAX_LOG_ENTRIES of these verbatim in
-  // localStorage could exceed the browser's per-origin quota, throwing
-  // "Setting the value of 'sqla.synclog.v146' exceeded the quota" — which
-  // then masked the *real* underlying error in the UI. The message is now
-  // capped, and the storage write is wrapped so a quota error can never
-  // crash the app or hide the original problem.
+  // characters — this is exactly what happened with the reported
+  // "Remote schema file failed validation" error, whose full message was
+  // over 100KB). Storing MAX_LOG_ENTRIES of these verbatim in
+  // localStorage could exceed the browser's per-origin storage quota,
+  // throwing "Setting the value of 'sqla.synclog.v146' exceeded the
+  // quota" — which then masked the *real* underlying error in the UI.
+  // The message is now capped, and the storage write is wrapped so a
+  // quota error can never crash the app or hide the original problem.
   private static readonly MAX_LOG_MESSAGE_LENGTH = 600;
   private logEvent(kind: SyncLogEntry['kind'], message: string): void {
     const trimmedMessage = message.length > SyncService.MAX_LOG_MESSAGE_LENGTH
@@ -53,8 +55,8 @@ class SyncService {
     try {
       localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
     } catch {
-      // Storage quota exceeded or unavailable — drop older entries and retry once with just the newest one.
-      try { localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog.slice(0, 5))); } catch { /* give up silently; in-memory log still holds the entry */ }
+      // Storage quota exceeded or unavailable — drop older entries and retry once with just the newest one, so logging can never crash the app.
+      try { localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog.slice(0, 5))); } catch { /* give up silently; in-memory log still holds the entry for this session */ }
     }
     this.notify();
   }
@@ -208,11 +210,9 @@ class SyncService {
       endInternalSync();
     }
   }
-
   resolveConflict(schemaId: string, decision: 'local' | 'remote', remoteSchema: SchemaModel): void {
     if (decision === 'remote') schemaService.replaceSchemaContent(schemaId, remoteSchema);
   }
-
   async pullFromSharedLocation(activeSchema: SchemaModel): Promise<{ ok: boolean; error?: string; conflict?: ReturnType<typeof detectConflict>; incoming?: SchemaModel }> {
     if (!this.directoryHandle) return { ok: false, error: 'No shared location connected yet.' };
     try {
@@ -235,9 +235,7 @@ class SyncService {
       return { ok: true };
     } catch (e) { return { ok: false, error: 'Could not write to the connected location: ' + (e as Error).message }; }
   }
-
   async syncWithGitHubSimple(): Promise<PullOutcome> { return this.pullRegistryFromGitHub(); }
-
   async syncNow(): Promise<{ ok: boolean; error?: string }> {
     if (this.config.source === 'github') { const result = await this.pullRegistryFromGitHub(); return { ok: result.ok, error: result.error }; }
     this.status = 'syncing'; this.notify();

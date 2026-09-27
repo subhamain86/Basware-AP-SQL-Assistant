@@ -3,18 +3,21 @@ import { VALID_DATA_TYPES } from '../types';
 import { safeTrim, safeUpperTrim } from '../utils/validation';
 
 // V14.7 FIX — root cause of "Remote schema file failed validation" on
-// real-world (Oracle-sourced) schemas: VALID_DATA_TYPES only lists the 5
-// generic UI-editor buckets ('VARCHAR','NUMBER','DATE','FLAG','TIMESTAMP').
-// Any schema imported/synced from an actual database (e.g. exported via
-// DESCRIBE/ALL_TAB_COLUMNS) carries native types like "NVARCHAR2(64)",
-// "NUMBER(22,5)", "TIMESTAMP(6)", "BLOB", "RAW(16)" — none of which match
-// the 5-item list, so EVERY column was flagged as an error and the whole
-// file was rejected. This new check normalizes the type (strips any
-// "(length[,precision])" suffix, upper-cases, trims) and accepts it if it
-// matches either a generic UI type OR a recognized native DB base type.
-// The manual schema-editor dropdown (schemaEditorSection.ts) still only
-// offers the 5 generic types — this only widens what remote/import data
-// is allowed to contain.
+// real-world (Oracle-sourced) schemas: VALID_DATA_TYPES only ever listed
+// the 5 generic UI-editor buckets ('VARCHAR','NUMBER','DATE','FLAG',
+// 'TIMESTAMP'). Any schema imported/synced from an actual database (e.g.
+// exported via DESCRIBE / ALL_TAB_COLUMNS) carries native types like
+// "NVARCHAR2(64)", "NUMBER(22,5)", "TIMESTAMP(6)", "BLOB", "RAW(16)" —
+// none of which matched the 5-item list, so EVERY column in a real schema
+// was flagged as an error and the ENTIRE remote file was rejected (this is
+// exactly what produced the 1,600+ repeated "invalid data type" lines in
+// the Sync Log). isRecognizedDataType() normalizes the type (strips any
+// trailing "(length[,precision])" qualifier, upper-cases, trims) and
+// accepts it if it matches either one of the 5 generic UI types OR a
+// recognized native DB base type. The manual schema-editor dropdown
+// (schemaEditorSection.ts) still only offers the 5 generic types — this
+// only widens what remote/import data is allowed to contain, it does not
+// change anything about how a user manually adds a row.
 const NATIVE_DB_BASE_TYPES = new Set<string>([
   'VARCHAR', 'VARCHAR2', 'NVARCHAR', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CHARACTER',
   'CLOB', 'NCLOB', 'BLOB', 'RAW', 'LONG', 'LONG RAW',
@@ -27,8 +30,6 @@ function isRecognizedDataType(rawType: unknown): boolean {
   const t = safeTrim(rawType);
   if (!t) return false;
   if (VALID_DATA_TYPES.includes(t as (typeof VALID_DATA_TYPES)[number])) return true;
-  // Strip a trailing size/precision qualifier, e.g. "NVARCHAR2(64)" -> "NVARCHAR2",
-  // "NUMBER(22,5)" -> "NUMBER", "TIMESTAMP(6)" -> "TIMESTAMP".
   const base = safeUpperTrim(t).replace(/\s*\(.*\)\s*$/, '');
   return NATIVE_DB_BASE_TYPES.has(base);
 }
@@ -51,6 +52,9 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
       const key = `${safeUpperTrim(tName)}::${safeUpperTrim(cName)}`;
       if (seenTableColumn.has(key)) issues.push({ severity: 'error', message: `Duplicate column "${tName}.${cName}" — each table/column combination must be unique.` });
       seenTableColumn.add(key);
+      // V14.7 FIX: was `!VALID_DATA_TYPES.includes(c.type)` — see
+      // isRecognizedDataType() note above for why this rejected every
+      // real-world (Oracle-sourced) schema.
       if (!isRecognizedDataType(c.type)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has an invalid data type "${c.type}".` });
       if (c.isPrimaryKey) pkCount += 1;
       if (c.isForeignKey) {
@@ -79,11 +83,12 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
           // device).
           const rawValue = safeTrim(d?.rawValue);
           // V14.7 FIX: was `severity: 'error'` — a blank raw value is a
-          // legitimate way to decode a NULL/blank DB value (e.g. "" -> "Not
-          // set") and was blocking valid, real-world schemas (dozens of
-          // FLAG/boolean columns like IS_ACTIVE, ENABLED, GRANTED use this
-          // pattern) from ever syncing. Downgraded to a warning so it's
-          // still surfaced to the user but no longer rejects the file.
+          // legitimate way some databases decode a NULL/blank value (e.g.
+          // "" -> "Not set"), and dozens of real FLAG/boolean columns
+          // (IS_ACTIVE, ENABLED, GRANTED, etc.) use exactly this pattern.
+          // This alone was blocking otherwise-valid schemas from ever
+          // syncing. Downgraded to a warning — still surfaced to the user,
+          // but no longer rejects the whole file.
           if (!rawValue) issues.push({ severity: 'warning', message: `Column "${tName}.${cName}" has a decode entry with an empty raw value.` });
           const rk = safeUpperTrim(d?.rawValue);
           if (rk && seenRaw.has(rk)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has duplicate decode raw value "${rawValue}".` });
