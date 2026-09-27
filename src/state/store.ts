@@ -5,7 +5,7 @@ import { buildCrSQL } from '../engines/crEngine';
 import { makeId } from '../utils/id';
 
 function emptyReadOnlyState(dialect: Dialect = 'Oracle'): ReadOnlyQueryState {
-  return { dialect, naturalLanguageText: '', selectedTables: [], selectedColumns: [], joins: [], filters: [], sorts: [], advanced: { distinct: false, groupByColumns: [], havingClause: '', limit: null, recursive: false, saveAsView: null, caseExpressions: [], decodeExpressions: [] }, generatedSql: '-- Select at least one table (or describe your requirement above) to generate SQL.', lastGeneratedAt: null };
+  return { dialect, naturalLanguageText: '', selectedTables: [], selectedColumns: [], joins: [], filters: [], sorts: [], advanced: { distinct: false, groupByColumns: [], havingClause: '', limit: null, recursive: false, saveAsView: null, caseExpressions: [], decodeExpressions: [], ctes: [] }, generatedSql: '-- Select at least one table (or describe your requirement above) to generate SQL.', lastGeneratedAt: null, joinPathChoices: {} };
 }
 function emptyCrState(dialect: Dialect = 'Oracle'): CrQueryState {
   return { dialect, naturalLanguageText: '', queryType: 'UPDATE', table: null, values: [], filters: [], confirmNoWhere: false, generatedSql: '-- Choose a table for this Change Request.', lastGeneratedAt: null };
@@ -24,17 +24,17 @@ class AppStore {
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    const savedTheme = localStorage.getItem('sqla.theme.v141');
+    const savedTheme = localStorage.getItem('sqla.theme.v142');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') this.theme = savedTheme;
-    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v141') === '1';
+    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v142') === '1';
     schemaService.subscribe(() => this.regenerateReadOnlySql());
     ['click', 'keydown', 'mousemove'].forEach((evt) => document.addEventListener(evt, () => this.bumpActivity(), { passive: true }));
   }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   setRoute(route: Route): void { this.route = route; this.notify(); }
-  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v141', theme); this.notify(); }
-  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v141', '1'); }
+  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v142', theme); this.notify(); }
+  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v142', '1'); }
   pushToast(kind: ToastMessage['kind'], text: string): void { const toast: ToastMessage = { id: makeId('toast'), kind, text }; this.toasts.push(toast); this.notify(); setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== toast.id); this.notify(); }, 4000); }
   unlockSettings(): void { this.settingsUnlocked = true; this.bumpActivity(); this.notify(); }
   lockSettings(): void { this.settingsUnlocked = false; if (this.inactivityTimer) { clearTimeout(this.inactivityTimer); this.inactivityTimer = null; } this.notify(); }
@@ -58,32 +58,20 @@ class AppStore {
   updateReadOnly(mutator: (s: ReadOnlyQueryState) => void): void { mutator(this.readOnly); this.regenerateReadOnlySql(); }
   resetReadOnly(): void { this.readOnly = emptyReadOnlyState(this.readOnly.dialect); this.regenerateReadOnlySql(); }
 
-  /** V14.1 — implements the required AND/OR relationship between Natural
-   * Language and Manual Selectors (spec section 3): the NLP-derived
-   * requirement is MERGED (union, de-duplicated) into whatever the user
-   * has already manually selected, rather than replacing it outright. A
-   * manual selection made before or after describing a requirement in
-   * natural language is preserved either way. */
   mergeReadOnlyFromNlp(requirement: QueryRequirement): void {
     this.updateReadOnly((s) => {
-      // Tables: union, preserve existing order, append new ones.
       const tableSet = new Set(s.selectedTables);
       requirement.matchedTables.forEach((t) => tableSet.add(t));
       s.selectedTables = Array.from(tableSet);
 
-      // Columns: union by (table,column) OR by manualExpr identity — never
-      // drop a column the user manually picked, and never add an exact
-      // duplicate of one that's already there.
       const colKey = (c: SelectedColumnSpec) => c.manualExpr ? `manual:${c.id}` : `${c.table}::${c.column}`;
       const existingKeys = new Set(s.selectedColumns.map(colKey));
       requirement.matchedColumns.forEach((c) => { const k = colKey(c); if (!existingKeys.has(k)) { s.selectedColumns.push(c); existingKeys.add(k); } });
 
-      // Filters: append new ones (avoid exact duplicate table/column/operator/value).
       const filterKey = (f: FilterCondition) => `${f.table}::${f.column}::${f.operator}::${f.value}`;
       const existingFilterKeys = new Set(s.filters.map(filterKey));
       requirement.matchedFilters.forEach((f) => { const k = filterKey(f); if (!existingFilterKeys.has(k)) { s.filters.push(f); existingFilterKeys.add(k); } });
 
-      // Sorts: append new ones not already present for that table/column.
       const sortKey = (so: SortSpec) => `${so.table}::${so.column}`;
       const existingSortKeys = new Set(s.sorts.map(sortKey));
       requirement.matchedSorts.forEach((so) => { const k = sortKey(so); if (!existingSortKeys.has(k)) { s.sorts.push(so); existingSortKeys.add(k); } });

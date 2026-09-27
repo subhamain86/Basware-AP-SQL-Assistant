@@ -6,15 +6,13 @@ import { openModal } from '../components/modal';
 import { validateSingleRowAgainstSchema } from '../engines/schemaIntegrityEngine';
 import { verifyPassword } from '../services/passwordService';
 import { syncService } from '../services/syncService';
-import { vaultService } from '../services/vaultService';
+import { secretVaultService } from '../services/secretVaultService';
 import type { SchemaEditorRow, ColumnDataType } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
-// schemaEditorSection — V14.1. Workflow unchanged: Select Schema -> Select
-// Module -> Select Table -> Populate Table. Benefits automatically from the
-// dataTable.ts root-cause fix (static shell, search box never destroyed).
-// Adds a quick "Sync Now" shortcut so edits made here can be pushed to
-// GitHub immediately without switching to Schema Management.
+// schemaEditorSection — V14.2. Workflow unchanged: Select Schema -> Select
+// Module -> Select Table -> Populate Table. Uses the secretVaultService for
+// the inline "Sync Now" shortcut.
 export function renderSchemaEditorSection(container: HTMLElement): void {
   let editingSchemaId = schemaService.getActiveSchema().id;
   let selectedModule: string | null = null;
@@ -41,7 +39,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
 
       <div class="form-row-2" data-tour="schema-editor-module-table">
         <label class="block-label">Select Module <span class="req">*</span><select id="editorModuleSelect"><option value="">— choose a module —</option>${modules.map((m) => `<option value="${m}" ${m === selectedModule ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
-        <label class="block-label">Select Table <span class="req">*</span><select id="editorTableSelect" ${selectedModule ? '' : 'disabled'}><option value="">— choose a table —</option>${tablesInModule.map((t) => `<option value="${t.name}" ${t.name === selectedTable ? 'selected' : ''}>${t.name}</option>`).join('')}</select></label>
+        <label class="block-label">Select Table <span class="req">*</span><select id="editorTableSelect" ${selectedModule ? '' : 'disabled'}><option value="">— choose a table —</option>${tablesInModule.map((t) => `<option value="${t.name}" ${t.name === selectedTable ? 'selected' : ''}>${t.name}${t.objectType === 'VIEW' ? ' (View)' : ''}</option>`).join('')}</select></label>
       </div>
 
       ${selectedTable ? `
@@ -61,7 +59,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     container.querySelector('#addRowBtn')?.addEventListener('click', () => openRowForm(editingSchema.id, null));
     container.querySelector('#syncNowInlineBtn')?.addEventListener('click', async () => {
       const resultMount = container.querySelector('#syncNowInlineResult'); if (!resultMount) return;
-      if (!vaultService.isUnlocked()) { resultMount.innerHTML = `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Vault (Settings → Vault) first.</div>`; return; }
+      if (!secretVaultService.isUnlocked()) { resultMount.innerHTML = `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Secret Vault first (Settings → Security → Enter Admin Password).</div>`; return; }
       resultMount.innerHTML = `<div class="hint">Syncing…</div>`;
       const result = await syncService.pushRegistryToGitHub(`Update ${editingSchema.name} via Manual Schema Update`);
       resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Synced to GitHub.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;

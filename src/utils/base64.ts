@@ -1,11 +1,6 @@
-// ============================================================================
-// base64 — UTF-8 safe base64 encode/decode helpers. Native btoa/atob only
-// operate on Latin1 byte strings and throw on characters outside that range
-// (e.g. curly quotes, accented characters, emoji in table/column
-// descriptions). GitHub Contents API requires base64-encoded UTF-8 file
-// content, so these helpers go through TextEncoder/TextDecoder to be fully
-// correct for any schema text the user might have entered.
-// ============================================================================
+// UTF-8 safe base64 encode/decode helpers for the GitHub Contents API,
+// which requires base64-encoded UTF-8 file content. Native btoa/atob only
+// operate on Latin1 byte strings and throw on out-of-range characters.
 export function utf8ToBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';

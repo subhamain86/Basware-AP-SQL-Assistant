@@ -1,4 +1,4 @@
-export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes';
+export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes' | 'eye' | 'git-branch' | 'route';
 const PATHS: Record<IconName, string> = {
   menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>',
@@ -30,7 +30,7 @@ const PATHS: Record<IconName, string> = {
   link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>',
   save: '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h8V4"/><path d="M8 14h8v6H8z"/>',
   'alert-triangle': '<path d="M12 4 22 20H2z"/><line x1="12" y1="10" x2="12" y2="15"/><circle cx="12" cy="18" r="0.6" fill="currentColor" stroke="none"/>',
-  logo: '<rect x="2" y="2" width="20" height="20" rx="5" fill="currentColor" opacity="0.12" stroke="none"/><ellipse cx="12" cy="7.5" rx="6" ry="2.2"/><path d="M6 7.5v5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2v-5"/><path d="M6 12.5v4c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2v-4"/>',
+  logo: 'LOGO_PLACEHOLDER',
   refresh: '<path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><polyline points="21,3 21,8 16,8"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><polyline points="3,21 3,16 8,16"/>',
   sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
   list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>',
@@ -60,6 +60,12 @@ const PATHS: Record<IconName, string> = {
   'wifi-off': '<line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a7 7 0 0 1 7 0"/><path d="M5 13a12 12 0 0 1 5.5-3.1"/><path d="M19 13a12 12 0 0 0-3-2.3"/><circle cx="12" cy="20" r="0.6" fill="currentColor" stroke="none"/>',
   cloud: '<path d="M7 18a4 4 0 1 1 .7-7.94A5.5 5.5 0 0 1 18 12.5 3.5 3.5 0 0 1 17.5 18H7z"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>',
-  boxes: '<path d="M2 8l5-3 5 3v6l-5 3-5-3z"/><path d="M12 8l5-3 5 3v6l-5 3-5-3z"/><path d="M7 5l5 3 5-3"/>'
+  boxes: '<path d="M2 8l5-3 5 3v6l-5 3-5-3z"/><path d="M12 8l5-3 5 3v6l-5 3-5-3z"/><path d="M7 5l5 3 5-3"/>',
+  eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
+  'git-branch': '<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  route: '<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-4-4h-5a4 4 0 0 1-4-4v-.5"/>'
 };
-export function icon(name: IconName, size = 18, extraClass = ''): string { return `<svg class="icon-svg ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`; }
+export function icon(name: IconName, size = 18, extraClass = ''): string {
+  if (name === 'logo') return PATHS.logo; // logo is a full standalone <svg>, not a path set — see logoMark()
+  return `<svg class="icon-svg ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+}

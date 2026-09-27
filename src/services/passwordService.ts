@@ -1,12 +1,13 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 
 // passwordService — reuses the SAME operational Admin Password everywhere
-// (Settings unlock, Manual Schema Update delete confirmation, Danger Zone).
-// Encrypted at rest (PBKDF2 + AES-GCM). Default is "admin", used only
-// internally — NEVER surfaced anywhere in the UI (no hints, tooltips,
-// walkthrough text, notifications, or error messages reveal it).
-const STORAGE_KEY = 'sqla.pwvault.v141';
-const MARKER = 'sqla-verified-marker-v141';
+// (Settings unlock, Secret Vault unlock, Manual Schema Update delete
+// confirmation, Danger Zone). Encrypted at rest (PBKDF2 + AES-GCM).
+// Default is "admin", used only internally — NEVER surfaced anywhere in
+// the UI (no hints, tooltips, walkthrough text, notifications, or error
+// messages reveal it).
+const STORAGE_KEY = 'sqla.pwvault.v142';
+const MARKER = 'sqla-verified-marker-v142';
 const DEFAULT_PASSWORD = 'admin';
 
 let defaultBlobCache: string | null = null;

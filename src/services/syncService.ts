@@ -1,42 +1,22 @@
 import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, SchemaRegistry } from '../types';
-import { vaultService } from './vaultService';
+import { secretVaultService } from './secretVaultService';
 import { schemaService } from './schemaService';
 import { validateIncomingRegistryFile } from '../engines/schemaIntegrityEngine';
 import { detectConflict } from '../engines/schemaVersionEngine';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
 
-// ============================================================================
-// syncService — V14.1. Owns the lightweight navbar-level config (Sync
-// Source + Sync Time) AND the real cross-machine synchronization mechanism
-// (spec sections 9-16): the ENTIRE local schema registry (all schemas +
-// which one is active) is pushed to / pulled from a single JSON file in a
-// configured GitHub repository via the Contents API, using the Vault's
-// securely-stored access token. Per-schema conflicts are detected by
-// REUSING the existing schemaVersionEngine.detectConflict() — no second,
-// competing conflict system was introduced, per the explicit spec
-// instruction in section 16.
-//
-// "Shared Location" (File System Access API) is preserved unchanged from
-// V14 as an alternative, browser-local sync source for users without
-// GitHub access.
-// ============================================================================
+// syncService — V14.2. Same registry push/pull + conflict-detection
+// mechanism as V14.1, now sourcing GitHub configuration from
+// secretVaultService instead of the old separate-passphrase vaultService
+// (spec sections 24-31: preserve existing sync functionality, but the
+// user no longer needs to separately know/enter repo details — they come
+// pre-filled from the Secret Vault's bootstrap defaults).
+const CONFIG_KEY = 'sqla.syncconfig.v142';
+const STATUS_KEY = 'sqla.syncstatus.v142';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v142';
+function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 
-const CONFIG_KEY = 'sqla.syncconfig.v141';
-const STATUS_KEY = 'sqla.syncstatus.v141';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v141';
-
-function loadConfig(): SyncConfig {
-  try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { }
-  return { source: 'shared-location', time: 'manual', customTime: null };
-}
-
-export interface PullOutcome {
-  ok: boolean;
-  error?: string;
-  newSchemasAdded: string[];
-  conflicts: { schemaId: string; schemaName: string; localVersion: string; remoteVersion: string; changedPaths: string[]; remoteSchema: SchemaModel }[];
-  unchanged: number;
-}
+export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; conflicts: { schemaId: string; schemaName: string; localVersion: string; remoteVersion: string; changedPaths: string[]; remoteSchema: SchemaModel }[]; unchanged: number; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 
 class SyncService {
@@ -66,7 +46,6 @@ class SyncService {
       const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
       this.directoryHandle = handle;
       const label = handle.name as string;
-      if (vaultService.isUnlocked()) await vaultService.saveConfig({ sharedLocationLabel: label }, '');
       this.notify();
       return { ok: true, label };
     } catch (e) { return { ok: false, error: 'Folder selection was cancelled or denied.' }; }
@@ -75,35 +54,30 @@ class SyncService {
   private lastKnownSha(): string | null { return localStorage.getItem(LAST_KNOWN_SHA_KEY); }
   private setLastKnownSha(sha: string | null): void { if (sha) localStorage.setItem(LAST_KNOWN_SHA_KEY, sha); else localStorage.removeItem(LAST_KNOWN_SHA_KEY); }
 
-  /** Pulls the full registry (all schemas + activeSchemaId) from the
-   * configured GitHub repository. For each remote schema whose id already
-   * exists locally, compares checksums via the EXISTING
-   * schemaVersionEngine.detectConflict() — if they differ, the schema is
-   * reported as a conflict (caller must show the resolution UI) rather
-   * than being silently applied. Brand-new remote schema ids are added
-   * locally as inactive schemas without any conflict prompt. */
+  /** Returns a clear, non-secret-exposing message describing exactly what
+   * is missing before a GitHub sync can proceed (spec section 30). */
+  private missingConfigMessage(): string | null {
+    if (!secretVaultService.isUnlocked()) return 'The Secret Vault is locked. Enter the Admin Password to unlock it and enable GitHub synchronization.';
+    const cfg = secretVaultService.getConfig()!;
+    if (!cfg.githubRepo.trim()) return 'No GitHub repository is configured yet. Open Settings → Secret Vault to configure one (a default is provided).';
+    if (!cfg.githubToken.trim()) return 'No GitHub access token is configured yet. Open Settings → Secret Vault and enter your personal access token — this is the one piece of information each authorized user must supply individually, since it is a personal credential.';
+    return null;
+  }
+
   async pullRegistryFromGitHub(): Promise<PullOutcome> {
-    if (!vaultService.isUnlocked()) return { ok: false, error: 'Unlock the Vault first — GitHub credentials are stored there.', newSchemasAdded: [], conflicts: [], unchanged: 0 };
-    const cfg = vaultService.getConfig()!;
-    if (!cfg.githubRepo.trim()) return { ok: false, error: 'Configure a GitHub repository in Settings → Synchronization first.', newSchemasAdded: [], conflicts: [], unchanged: 0 };
+    const missing = this.missingConfigMessage();
+    if (missing) return { ok: false, error: missing, newSchemasAdded: [], conflicts: [], unchanged: 0 };
+    const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
     try {
       const file = await getFile(cfg.githubRepo, cfg.githubBranch || 'main', cfg.githubSchemaPath || 'schema.json', cfg.githubToken);
-      if (!file) {
-        this.status = 'never'; this.notify();
-        return { ok: false, error: 'No schema file found yet at the configured path — push your local schemas first to create it.', newSchemasAdded: [], conflicts: [], unchanged: 0 };
-      }
+      if (!file) { this.status = 'never'; this.notify(); return { ok: false, error: 'No schema file found yet at the configured path — push your local schemas first to create it.', newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
       const parsed = JSON.parse(file.content);
       const integrity = validateIncomingRegistryFile(parsed);
-      if (!integrity.valid) {
-        this.status = 'failed'; this.notify();
-        return { ok: false, error: 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '), newSchemasAdded: [], conflicts: [], unchanged: 0 };
-      }
+      if (!integrity.valid) { this.status = 'failed'; this.notify(); return { ok: false, error: 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '), newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
       const remoteRegistry = parsed as SchemaRegistry;
-      const newSchemasAdded: string[] = [];
-      const conflicts: PullOutcome['conflicts'] = [];
-      let unchanged = 0;
+      const newSchemasAdded: string[] = []; const conflicts: PullOutcome['conflicts'] = []; let unchanged = 0;
       for (const remoteSchema of remoteRegistry.schemas) {
         const local = schemaService.getSchemaById(remoteSchema.id);
         if (!local) { schemaService.addSchemaFromRemote(remoteSchema); newSchemasAdded.push(remoteSchema.name); continue; }
@@ -122,15 +96,10 @@ class SyncService {
     }
   }
 
-  /** Pushes the ENTIRE local registry to GitHub. Uses the last-known SHA
-   * (from the most recent pull/push) as an optimistic-concurrency guard —
-   * GitHub will reject the write with a 409/422 if the remote file moved
-   * on since then, surfacing `requiresPullFirst: true` rather than
-   * silently overwriting someone else's changes. */
   async pushRegistryToGitHub(commitMessage?: string): Promise<PushOutcome> {
-    if (!vaultService.isUnlocked()) return { ok: false, error: 'Unlock the Vault first — GitHub credentials are stored there.' };
-    const cfg = vaultService.getConfig()!;
-    if (!cfg.githubRepo.trim()) return { ok: false, error: 'Configure a GitHub repository in Settings → Synchronization first.' };
+    const missing = this.missingConfigMessage();
+    if (missing) return { ok: false, error: missing };
+    const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
     try {
       const registry = schemaService.getRegistry();
@@ -152,17 +121,10 @@ class SyncService {
     }
   }
 
-  /** Applies the user's conflict resolution decision: 'remote' overwrites
-   * the local schema with the remote version; 'local' keeps the local
-   * schema untouched (the working version is explicitly preserved, per
-   * spec section 16's "preserve the existing working version until the
-   * conflict is resolved"). */
   resolveConflict(schemaId: string, decision: 'local' | 'remote', remoteSchema: SchemaModel): void {
     if (decision === 'remote') schemaService.replaceSchemaContent(schemaId, remoteSchema);
-    // decision === 'local': intentionally a no-op — local stays exactly as-is.
   }
 
-  // -------- Shared Location (unchanged mechanism from V14) --------
   async pullFromSharedLocation(activeSchema: SchemaModel): Promise<{ ok: boolean; error?: string; conflict?: ReturnType<typeof detectConflict>; incoming?: SchemaModel }> {
     if (!this.directoryHandle) return { ok: false, error: 'No shared location connected yet.' };
     try {
@@ -186,14 +148,14 @@ class SyncService {
     } catch (e) { return { ok: false, error: 'Could not write to the connected location: ' + (e as Error).message }; }
   }
 
-  /** Generic entry point used by the navbar's "Sync Now"-equivalent
-   * actions and the scheduler — dispatches to whichever source is
-   * currently configured. */
+  /** V14.2 — the simple, user-facing "Sync with GitHub" entry point (spec
+   * section 29): internally retrieves config from the Secret Vault,
+   * connects, pulls the latest data, and reports success/failure clearly —
+   * no technical repository details are surfaced to the caller. */
+  async syncWithGitHubSimple(): Promise<PullOutcome> { return this.pullRegistryFromGitHub(); }
+
   async syncNow(): Promise<{ ok: boolean; error?: string }> {
-    if (this.config.source === 'github') {
-      const result = await this.pullRegistryFromGitHub();
-      return { ok: result.ok, error: result.error };
-    }
+    if (this.config.source === 'github') { const result = await this.pullRegistryFromGitHub(); return { ok: result.ok, error: result.error }; }
     this.status = 'syncing'; this.notify();
     try {
       const activeSchema = schemaService.getActiveSchema();
@@ -203,10 +165,7 @@ class SyncService {
       localStorage.setItem(STATUS_KEY, this.status);
       this.notify();
       return { ok: result.ok, error: result.error };
-    } catch (e) {
-      this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify();
-      return { ok: false, error: (e as Error).message };
-    }
+    } catch (e) { this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error).message }; }
   }
 }
 export const syncService = new SyncService();

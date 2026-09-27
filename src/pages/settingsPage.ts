@@ -2,7 +2,7 @@ import { icon } from '../components/icons';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
 import { changePassword, resetPasswordToDefault, verifyPassword } from '../services/passwordService';
-import { vaultService } from '../services/vaultService';
+import { secretVaultService, maskToken, DEFAULT_BOOTSTRAP_CONFIG } from '../services/secretVaultService';
 import { syncService } from '../services/syncService';
 import { getConfiguredEndpoint, setConfiguredEndpoint } from '../services/onlineNlpService';
 import { renderSchemaManagementSection } from './schemaPage';
@@ -10,6 +10,16 @@ import { renderSchemaEditorSection } from './schemaEditorSection';
 import { renderTabs } from '../components/tabs';
 import { downloadBlob } from '../utils/dom';
 import type { SyncTimeOption } from '../types';
+
+// ============================================================================
+// settingsPage — V14.2 (spec sections 24-30). The lock screen still reads
+// "Enter Admin Password" (unchanged). The KEY change: on a successful
+// unlock, the SAME password is immediately handed to
+// secretVaultService.tryAutoUnlock() — creating the Secret Vault
+// automatically (pre-filled with non-secret bootstrap defaults) the very
+// first time, or unlocking it transparently thereafter. There is no
+// separate "Vault Passphrase" prompt anywhere anymore.
+// ============================================================================
 
 export function renderSettingsPage(container: HTMLElement): void {
   function draw(): void {
@@ -23,7 +33,7 @@ export function renderSettingsPage(container: HTMLElement): void {
         <div class="settings-lock-card">
           <div class="settings-lock-icon">${icon('lock', 32)}</div>
           <h1>Settings</h1>
-          <p class="hint">Settings — including Schema Management and cross-machine synchronization — are protected.</p>
+          <p class="hint">Settings — including Schema Management, the Secret Vault, and cross-machine synchronization — are protected.</p>
           <label class="block-label">Enter Admin Password<input type="password" id="settingsPwInput" autocomplete="off" /></label>
           <div id="settingsPwError" class="issue-box mini" hidden>Incorrect password.</div>
           <div class="row-actions" style="justify-content:center">
@@ -35,9 +45,16 @@ export function renderSettingsPage(container: HTMLElement): void {
     const input = container.querySelector<HTMLInputElement>('#settingsPwInput')!;
     const errBox = container.querySelector<HTMLElement>('#settingsPwError')!;
     async function tryUnlock(): Promise<void> {
-      const ok = await verifyPassword(input.value);
-      if (ok) { store.unlockSettings(); store.pushToast('success', 'Settings unlocked for this session.'); draw(); }
-      else errBox.removeAttribute('hidden');
+      const candidate = input.value;
+      const ok = await verifyPassword(candidate);
+      if (ok) {
+        store.unlockSettings();
+        // V14.2 — the same Admin Password automatically unlocks (or, on
+        // first use, creates) the Secret Vault too. No second prompt.
+        await secretVaultService.tryAutoUnlock(candidate);
+        store.pushToast('success', 'Settings unlocked for this session.');
+        draw();
+      } else errBox.removeAttribute('hidden');
     }
     container.querySelector('#settingsUnlockBtn')?.addEventListener('click', tryUnlock);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
@@ -55,15 +72,15 @@ export function renderSettingsPage(container: HTMLElement): void {
         <p class="page-subtitle">Everything previously available under "Admin" lives here — same Admin Password, encrypted at rest.</p>
         <div id="settingsTabsMount" class="settings-tabs-scroll"></div>
       </section>`;
-    container.querySelector('#lockSettingsBtn')?.addEventListener('click', () => { store.lockSettings(); store.pushToast('info', 'Settings locked.'); draw(); });
+    container.querySelector('#lockSettingsBtn')?.addEventListener('click', () => { store.lockSettings(); secretVaultService.lock(); store.pushToast('info', 'Settings locked.'); draw(); });
     const tabsMount = container.querySelector<HTMLElement>('#settingsTabsMount')!;
     renderTabs(tabsMount, [
       { id: 'security', label: 'Security', render: renderSecurityTab },
       { id: 'schema-editor', label: 'Manual Schema Update', render: (panel) => { panel.setAttribute('data-tour', 'schema-editor-panel'); renderSchemaEditorSection(panel); } },
       { id: 'schema-mgmt', label: 'Schema Management', render: (panel) => renderSchemaManagementSection(panel, { allowAddImport: true }, draw) },
+      { id: 'secret-vault', label: 'Secret Vault', render: renderSecretVaultTab },
       { id: 'sync', label: 'Synchronization', render: renderSyncTab },
       { id: 'nlp', label: 'AI / NLP Engine', render: renderNlpTab },
-      { id: 'vault', label: 'Vault', render: renderVaultTab },
       { id: 'danger', label: 'Danger Zone', render: renderDangerTab }
     ], 'security', { security: 'settings-security', danger: 'settings-danger' });
   }
@@ -72,23 +89,30 @@ export function renderSettingsPage(container: HTMLElement): void {
     panel.innerHTML = `
       <div class="builder-panel narrow">
         <h3>Change Admin Password</h3>
+        <p class="hint">This same password also protects the Secret Vault (GitHub configuration) — changing it will re-encrypt the vault automatically.</p>
         <label class="block-label">Current password<input type="password" id="oldPwInput" autocomplete="off" /></label>
         <label class="block-label">New password<input type="password" id="newPwInput" autocomplete="off" /></label>
         <div class="row-actions"><button class="btn btn-primary btn-sm" id="changePwBtn">${icon('key', 14)} Change Password</button></div>
         <div id="changePwResult"></div>
         <h3 class="mt">Forgot Password</h3>
-        <p class="hint">Resets the Admin Password back to its internal default.</p>
+        <p class="hint">Resets the Admin Password back to its internal default. Note: this does NOT re-encrypt an existing Secret Vault — if you reset the password, you will also need to reset the Secret Vault (Secret Vault tab) since it can no longer be decrypted.</p>
         <button class="btn btn-outline btn-sm" id="resetPwBtn">${icon('refresh', 14)} Reset to Default</button>
         <div id="resetPwResult"></div>
         <h3 class="mt">Session Security</h3>
-        <p class="hint">Settings automatically locks after 5 minutes of inactivity, or immediately via "Lock Settings".</p>
+        <p class="hint">Settings automatically locks after 5 minutes of inactivity, or immediately via "Lock Settings" (this also re-locks the Secret Vault).</p>
       </div>`;
     panel.querySelector('#changePwBtn')?.addEventListener('click', async () => {
       const oldPw = panel.querySelector<HTMLInputElement>('#oldPwInput')?.value || ''; const newPw = panel.querySelector<HTMLInputElement>('#newPwInput')?.value || '';
       const resultMount = panel.querySelector('#changePwResult'); const result = await changePassword(oldPw, newPw);
       if (!resultMount) return;
-      if (result.ok) { resultMount.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Password changed successfully.</div>`; store.pushToast('success', 'Admin password changed.'); (panel.querySelector<HTMLInputElement>('#oldPwInput')!).value = ''; (panel.querySelector<HTMLInputElement>('#newPwInput')!).value = ''; }
-      else resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+      if (result.ok) {
+        // V14.2 — re-encrypt the Secret Vault under the new password too,
+        // so it doesn't silently become unreadable.
+        const reenc = await secretVaultService.reencryptForNewPassword(oldPw, newPw);
+        resultMount.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Password changed successfully.${!reenc.ok ? ` (Note: ${reenc.error})` : ' The Secret Vault was re-encrypted automatically.'}</div>`;
+        store.pushToast('success', 'Admin password changed.');
+        (panel.querySelector<HTMLInputElement>('#oldPwInput')!).value = ''; (panel.querySelector<HTMLInputElement>('#newPwInput')!).value = '';
+      } else resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
     });
     panel.querySelector('#resetPwBtn')?.addEventListener('click', () => {
       resetPasswordToDefault();
@@ -98,10 +122,80 @@ export function renderSettingsPage(container: HTMLElement): void {
     });
   }
 
+  function renderSecretVaultTab(panel: HTMLElement): void {
+    const unlocked = secretVaultService.isUnlocked();
+    const cfg = secretVaultService.getConfig();
+    panel.innerHTML = `
+      <div class="builder-panel narrow">
+        <div class="editing-schema-banner">${icon(unlocked ? 'unlock' : 'lock', 14)} Secret Vault ${unlocked ? 'Unlocked' : 'Locked'}</div>
+        <p class="hint">The Secret Vault securely stores the GitHub configuration needed for synchronization. It unlocks automatically with the same Admin Password used for Settings — no separate passphrase to remember.</p>
+        ${unlocked ? `
+          <h3 class="mt">GitHub Access Token <span class="req">*</span></h3>
+          <p class="hint">This is the one piece of information each authorized user must supply individually — it's a personal credential and, for security, is never synchronized or auto-recovered.</p>
+          <div class="masked-token-row">
+            <span class="masked-token-display">${icon('key', 14)} ${maskToken(cfg?.githubToken || '')}</span>
+            <button type="button" class="btn btn-outline btn-sm" id="changeTokenBtn">${cfg?.githubToken ? 'Change Token' : 'Set Token'}</button>
+          </div>
+          <div id="tokenEditRow" class="mt" hidden>
+            <label class="block-label">New GitHub Access Token<input type="password" id="newTokenInput" autocomplete="off" placeholder="ghp_..." /></label>
+            <div class="row-actions"><button class="btn btn-primary btn-sm" id="saveTokenBtn">${icon('save', 14)} Save Token</button><button class="btn btn-ghost btn-sm" id="cancelTokenBtn">Cancel</button></div>
+          </div>
+          <details class="advanced-sync-details mt">
+            <summary>${icon('settings', 14)} Advanced repository settings <span class="hint">(optional — a working default is already configured)</span></summary>
+            <label class="block-label">Repository (owner/repo)<input type="text" id="ghRepo" value="${cfg?.githubRepo || DEFAULT_BOOTSTRAP_CONFIG.githubRepo}" /></label>
+            <label class="block-label">Branch<input type="text" id="ghBranch" value="${cfg?.githubBranch || DEFAULT_BOOTSTRAP_CONFIG.githubBranch}" /></label>
+            <label class="block-label">Schema file path<input type="text" id="ghPath" value="${cfg?.githubSchemaPath || DEFAULT_BOOTSTRAP_CONFIG.githubSchemaPath}" /></label>
+            <button class="btn btn-outline btn-sm mt" id="saveRepoConfigBtn">${icon('save', 14)} Save Repository Settings</button>
+          </details>
+          <div id="secretVaultResult" class="mt"></div>
+          <h3 class="mt">Reset Secret Vault</h3>
+          <p class="hint">Permanently discards the stored GitHub configuration and token. Not the same as recovering a lost password — that is not possible.</p>
+          <button class="btn btn-danger btn-sm" id="resetVaultBtn">${icon('trash', 14)} Reset Secret Vault</button>
+        ` : `
+          <div class="issue-box mini warn">${icon('alert-triangle', 14)} The Secret Vault should already be unlocked automatically — if you're seeing this, try locking and re-unlocking Settings.</div>
+        `}
+      </div>`;
+
+    panel.querySelector('#changeTokenBtn')?.addEventListener('click', () => { const row = panel.querySelector<HTMLElement>('#tokenEditRow'); if (row) row.hidden = !row.hidden; });
+    panel.querySelector('#cancelTokenBtn')?.addEventListener('click', () => { const row = panel.querySelector<HTMLElement>('#tokenEditRow'); if (row) row.hidden = true; });
+    panel.querySelector('#saveTokenBtn')?.addEventListener('click', async () => {
+      const newToken = panel.querySelector<HTMLInputElement>('#newTokenInput')?.value || '';
+      const password = await promptForCurrentAdminPasswordSilently();
+      if (!password) return;
+      const result = await secretVaultService.saveConfig({ githubToken: newToken }, password);
+      const resultMount = panel.querySelector('#secretVaultResult');
+      if (result.ok) { store.pushToast('success', 'GitHub token saved securely.'); renderSecretVaultTab(panel); } else if (resultMount) resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+    });
+    panel.querySelector('#saveRepoConfigBtn')?.addEventListener('click', async () => {
+      const repo = panel.querySelector<HTMLInputElement>('#ghRepo')?.value || DEFAULT_BOOTSTRAP_CONFIG.githubRepo;
+      const branch = panel.querySelector<HTMLInputElement>('#ghBranch')?.value || DEFAULT_BOOTSTRAP_CONFIG.githubBranch;
+      const path = panel.querySelector<HTMLInputElement>('#ghPath')?.value || DEFAULT_BOOTSTRAP_CONFIG.githubSchemaPath;
+      const password = await promptForCurrentAdminPasswordSilently();
+      if (!password) return;
+      const result = await secretVaultService.saveConfig({ githubRepo: repo, githubBranch: branch, githubSchemaPath: path }, password);
+      const resultMount = panel.querySelector('#secretVaultResult');
+      if (result.ok) { store.pushToast('success', 'Repository settings saved.'); if (resultMount) resultMount.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Saved.</div>`; } else if (resultMount) resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+    });
+    panel.querySelector('#resetVaultBtn')?.addEventListener('click', () => { if (confirm('This permanently discards the stored GitHub configuration and token. Continue?')) { secretVaultService.resetVault(); store.pushToast('info', 'Secret Vault reset.'); renderSecretVaultTab(panel); } });
+
+    // Since the vault's encryption key IS the Admin Password (already
+    // verified once to unlock Settings), we quietly re-derive it here by
+    // asking the user to confirm it once more only for a WRITE — this
+    // keeps the "never store the plaintext password anywhere in memory
+    // longer than necessary" property while still avoiding a full
+    // separate secret. In practice this resolves instantly for the vast
+    // majority of users who just unlocked Settings moments ago.
+    async function promptForCurrentAdminPasswordSilently(): Promise<string | null> {
+      const p = prompt('Confirm your Admin Password to save this change:');
+      if (!p) return null;
+      const ok = await verifyPassword(p);
+      if (!ok) { store.pushToast('error', 'Incorrect Admin Password — change not saved.'); return null; }
+      return p;
+    }
+  }
+
   function renderSyncTab(panel: HTMLElement): void {
     const cfg = syncService.getConfig();
-    const vaultUnlocked = vaultService.isUnlocked();
-    const vCfg = vaultService.getConfig();
     panel.innerHTML = `
       <div class="builder-grid-top">
         <div class="builder-panel">
@@ -109,118 +203,41 @@ export function renderSettingsPage(container: HTMLElement): void {
           <p class="hint">Status: ${syncService.hasConnectedLocation() ? '<span class="sync-ok">Connected</span>' : 'Not connected'}${syncService.isFileSystemAccessSupported() ? '' : ' — this browser does not support the File System Access API; use Import/Export instead.'}</p>
           <button class="btn btn-outline btn-sm" id="connectLocationBtn" ${syncService.isFileSystemAccessSupported() ? '' : 'disabled'}>${icon('folder', 14)} Connect Folder</button>
           <div id="locationResult"></div>
-          <h3 class="mt">${icon('github', 15)} GitHub Repository (Cross-Machine Sync)</h3>
-          ${vaultUnlocked ? `
-            <label class="block-label">Repository (owner/repo)<input type="text" id="ghRepo" value="${vCfg?.githubRepo || ''}" placeholder="e.g. subhamain86/Basware-AP-SQL-Assistant" /></label>
-            <label class="block-label">Branch<input type="text" id="ghBranch" value="${vCfg?.githubBranch || 'main'}" /></label>
-            <label class="block-label">Schema file path<input type="text" id="ghPath" value="${vCfg?.githubSchemaPath || 'schema.json'}" /></label>
-            <label class="block-label">Access Token <span class="hint">(stored only inside the encrypted Vault — never shown here)</span><input type="password" id="ghToken" value="${vCfg?.githubToken || ''}" autocomplete="off" placeholder="${vCfg?.githubToken ? '••••••••••••' : 'ghp_...'}" /></label>
-            <button class="btn btn-outline btn-sm" id="saveGithubBtn">${icon('save', 14)} Save GitHub Configuration</button>
-          ` : `<div class="issue-box mini warn">${icon('alert-triangle', 14)} Unlock the Vault (below) to configure GitHub credentials — they are never displayed in plain text anywhere in this UI.</div>`}
-          <h3 class="mt">Cross-Machine Sync</h3>
-          <p class="hint">Status: <span id="syncStatusLabel">${syncStatusLabel()}</span>${syncService.getLastSyncedAt() ? ` · Last sync: ${new Date(syncService.getLastSyncedAt()!).toLocaleString()}` : ''}</p>
-          <div class="row-actions">
-            <button class="btn btn-primary btn-sm" id="pushRegistryBtn2">${icon('github', 14)} Push All Schemas to GitHub</button>
-            <button class="btn btn-outline btn-sm" id="pullRegistryBtn2">${icon('folder-sync', 14)} Pull Schemas from GitHub</button>
-          </div>
+          <h3 class="mt">${icon('github', 15)} GitHub Sync</h3>
+          <p class="hint">Repository configuration and access token now live in <strong>Settings → Secret Vault</strong> — no technical details needed here.</p>
+          <button class="btn btn-primary btn-sm" id="simpleSyncBtn2">${icon('github', 14)} Sync with GitHub</button>
           <div id="syncResult2" class="mt"></div>
         </div>
         <div class="builder-panel">
           <h3>${icon('clock', 15)} Custom Sync Time</h3>
           ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}" /></label><button class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time (navbar) is not "Custom".</p>'}
           <h3 class="mt">${icon('shield-alert', 15)} Conflict Management</h3>
-          <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a pull finds a schema that changed both locally and remotely, you'll be shown exactly which columns changed and asked to choose <strong>Use Local</strong> or <strong>Use Remote</strong> per schema. Nothing is silently overwritten, and the current working version is preserved until you decide.</p>
-          <h3 class="mt">Cross-Machine Workflow</h3>
-          <ol class="mini-list">
-            <li>Machine A: Unlock Vault → configure repository → Import/Update Schema → Push to GitHub.</li>
-            <li>Machine B: Unlock Vault → configure the SAME repository → Pull from GitHub → resolve any conflicts → Set the schema Active.</li>
-          </ol>
+          <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a pull finds a schema that changed both locally and remotely, you'll be shown exactly which columns changed and asked to choose <strong>Use Local</strong> or <strong>Use Remote</strong> per schema.</p>
         </div>
       </div>`;
     panel.querySelector('#connectLocationBtn')?.addEventListener('click', async () => { const result = await syncService.connectSharedLocation(); const mount = panel.querySelector('#locationResult'); if (mount) mount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Connected: ${result.label}</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; if (result.ok) renderSyncTab(panel); });
-    panel.querySelector('#saveGithubBtn')?.addEventListener('click', async () => {
-      if (!vaultService.isUnlocked()) return;
-      const repo = panel.querySelector<HTMLInputElement>('#ghRepo')?.value || ''; const branch = panel.querySelector<HTMLInputElement>('#ghBranch')?.value || 'main'; const path = panel.querySelector<HTMLInputElement>('#ghPath')?.value || 'schema.json'; const token = panel.querySelector<HTMLInputElement>('#ghToken')?.value || '';
-      const pass = prompt('Re-enter your Vault Passphrase to save this configuration:');
-      if (!pass) { store.pushToast('info', 'GitHub configuration not saved.'); return; }
-      const result = await vaultService.saveConfig({ githubRepo: repo, githubBranch: branch, githubSchemaPath: path, githubToken: token }, pass);
-      if (result.ok) { store.pushToast('success', 'GitHub configuration saved to the encrypted Vault.'); renderSyncTab(panel); } else store.pushToast('error', result.error || 'Could not save — incorrect passphrase.');
-    });
-    panel.querySelector('#pushRegistryBtn2')?.addEventListener('click', async () => {
-      const btn = panel.querySelector<HTMLButtonElement>('#pushRegistryBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Pushing…';
-      const result = await syncService.pushRegistryToGitHub();
+    panel.querySelector('#simpleSyncBtn2')?.addEventListener('click', async () => {
+      const btn = panel.querySelector<HTMLButtonElement>('#simpleSyncBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Syncing…';
+      const result = await syncService.syncWithGitHubSimple();
       btn.disabled = false; btn.innerHTML = original;
       const resultMount = panel.querySelector('#syncResult2');
-      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} All schemas pushed to GitHub.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}${result.requiresPullFirst ? ' Pull first.' : ''}</div>`;
-      const statusLabel = panel.querySelector('#syncStatusLabel'); if (statusLabel) statusLabel.textContent = syncStatusLabel();
-    });
-    panel.querySelector('#pullRegistryBtn2')?.addEventListener('click', async () => {
-      const btn = panel.querySelector<HTMLButtonElement>('#pullRegistryBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Pulling…';
-      const result = await syncService.pullRegistryFromGitHub();
-      btn.disabled = false; btn.innerHTML = original;
-      const resultMount = panel.querySelector('#syncResult2');
-      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Pulled from GitHub — ${result.newSchemasAdded.length} new, ${result.unchanged} unchanged, ${result.conflicts.length} conflict(s). Resolve conflicts in Schema Management → Pull, or here on next pull.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
-      const statusLabel = panel.querySelector('#syncStatusLabel'); if (statusLabel) statusLabel.textContent = syncStatusLabel();
+      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box mini ok">${icon('check', 14)} Synchronized — ${result.newSchemasAdded.length} new, ${result.unchanged} unchanged, ${result.conflicts.length} conflict(s).</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
     });
     panel.querySelector('#saveCustomTimeBtn')?.addEventListener('click', () => { const t = panel.querySelector<HTMLInputElement>('#customTimeInput')?.value || '20:30'; syncService.setTime('custom' as SyncTimeOption, t); store.pushToast('success', `Custom sync time saved: ${t}.`); });
   }
-
-  function syncStatusLabel(): string { const s = syncService.getStatus(); return s === 'synchronized' ? 'Synchronized' : s === 'pending' ? 'Changes Pending' : s === 'failed' ? 'Synchronization Failed' : s === 'syncing' ? 'Synchronizing' : 'Never synchronized'; }
 
   function renderNlpTab(panel: HTMLElement): void {
     const current = getConfiguredEndpoint();
     panel.innerHTML = `
       <div class="builder-panel narrow">
         <h3>${icon('cloud', 15)} Online AI/NLP Endpoint</h3>
-        <p class="hint">The Query Builder tries this endpoint first, then automatically falls back to the schema-aware local offline engine if it is unset, unreachable, or the browser is offline. No endpoint is configured by default.</p>
+        <p class="hint">The Query Builder tries this endpoint first, then automatically falls back to the schema-aware local offline engine if it is unset, unreachable, or the browser is offline.</p>
         <label class="block-label">Endpoint URL<input type="text" id="nlpEndpointInput" value="${current || ''}" placeholder="https://your-ai-service.example.com/nlp" /></label>
         <div class="row-actions"><button class="btn btn-primary btn-sm" id="saveNlpEndpointBtn">${icon('save', 14)} Save</button><button class="btn btn-outline btn-sm" id="clearNlpEndpointBtn">${icon('trash', 14)} Clear (use offline only)</button></div>
         <div id="nlpEndpointResult"></div>
       </div>`;
     panel.querySelector('#saveNlpEndpointBtn')?.addEventListener('click', () => { const url = panel.querySelector<HTMLInputElement>('#nlpEndpointInput')?.value || ''; setConfiguredEndpoint(url); const mount = panel.querySelector('#nlpEndpointResult'); if (mount) mount.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Endpoint saved.</div>`; store.pushToast('success', 'Online AI/NLP endpoint saved.'); });
     panel.querySelector('#clearNlpEndpointBtn')?.addEventListener('click', () => { setConfiguredEndpoint(null); renderNlpTab(panel); store.pushToast('info', 'Online endpoint cleared — offline engine will always be used.'); });
-  }
-
-  function renderVaultTab(panel: HTMLElement): void {
-    const exists = vaultService.exists();
-    const unlocked = vaultService.isUnlocked();
-    panel.innerHTML = `
-      <div class="builder-panel narrow">
-        <div class="editing-schema-banner">${icon(unlocked ? 'unlock' : 'lock', 14)} Vault ${unlocked ? 'Unlocked' : 'Locked'}</div>
-        ${!exists ? `
-          <h3>Create Vault</h3>
-          <p class="hint">Protects GitHub credentials with your own passphrase. No default passphrase is ever built in.</p>
-          <label class="block-label">Vault Passphrase<input type="password" id="vaultNewPass" autocomplete="off" /></label>
-          <label class="block-label">Confirm Passphrase<input type="password" id="vaultConfirmPass" autocomplete="off" /></label>
-          <button class="btn btn-primary btn-sm" id="createVaultBtn">${icon('safe', 14)} Create Vault</button>
-          <div id="vaultCreateResult"></div>
-        ` : unlocked ? `
-          <p class="hint">Vault is unlocked for this session. Decrypted configuration is held only in memory and never rendered as plain text anywhere in this UI.</p>
-          <button class="btn btn-outline btn-sm" id="lockVaultBtn">${icon('lock', 14)} Lock Vault</button>
-          <h3 class="mt">Change Passphrase</h3>
-          <label class="block-label">Current passphrase<input type="password" id="vaultOldPass" autocomplete="off" /></label>
-          <label class="block-label">New passphrase<input type="password" id="vaultChangeNewPass" autocomplete="off" /></label>
-          <button class="btn btn-outline btn-sm" id="changeVaultPassBtn">${icon('key', 14)} Change Passphrase</button>
-          <div id="vaultChangeResult"></div>
-          <h3 class="mt">Reset Vault</h3>
-          <p class="hint">Permanently destroys the vault. Not the same as recovering a lost passphrase — that is not possible.</p>
-          <button class="btn btn-danger btn-sm" id="resetVaultBtn">${icon('trash', 14)} Reset Vault</button>
-        ` : `
-          <h3>Unlock Vault</h3>
-          <label class="block-label">Vault Passphrase<input type="password" id="vaultUnlockPass" autocomplete="off" /></label>
-          <div id="vaultUnlockResult"></div>
-          <button class="btn btn-primary btn-sm" id="unlockVaultBtn">${icon('unlock', 14)} Unlock</button>
-          <h3 class="mt">Lost your passphrase?</h3>
-          <p class="hint">There is no recovery mechanism. You may reset the vault, permanently discarding existing encrypted secrets.</p>
-          <button class="btn btn-outline btn-sm" id="resetVaultBtnLocked">${icon('trash', 14)} Reset Vault (discard existing secrets)</button>
-        `}
-      </div>`;
-    panel.querySelector('#createVaultBtn')?.addEventListener('click', async () => { const p1 = panel.querySelector<HTMLInputElement>('#vaultNewPass')?.value || ''; const p2 = panel.querySelector<HTMLInputElement>('#vaultConfirmPass')?.value || ''; const result = await vaultService.createVault(p1, p2); const mount = panel.querySelector('#vaultCreateResult'); if (result.ok) { store.pushToast('success', 'Vault created and unlocked.'); renderVaultTab(panel); } else if (mount) mount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; });
-    panel.querySelector('#unlockVaultBtn')?.addEventListener('click', async () => { const p = panel.querySelector<HTMLInputElement>('#vaultUnlockPass')?.value || ''; const result = await vaultService.unlock(p); const mount = panel.querySelector('#vaultUnlockResult'); if (result.ok) { store.pushToast('success', 'Vault unlocked.'); renderVaultTab(panel); } else if (mount) mount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; });
-    panel.querySelector('#lockVaultBtn')?.addEventListener('click', () => { vaultService.lock(); store.pushToast('info', 'Vault locked.'); renderVaultTab(panel); });
-    panel.querySelector('#changeVaultPassBtn')?.addEventListener('click', async () => { const oldP = panel.querySelector<HTMLInputElement>('#vaultOldPass')?.value || ''; const newP = panel.querySelector<HTMLInputElement>('#vaultChangeNewPass')?.value || ''; const result = await vaultService.changePassphrase(oldP, newP); const mount = panel.querySelector('#vaultChangeResult'); if (result.ok) { store.pushToast('success', 'Vault passphrase changed.'); if (mount) mount.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Passphrase changed.</div>`; } else if (mount) mount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; });
-    panel.querySelector('#resetVaultBtn')?.addEventListener('click', () => { if (confirm('This permanently discards all encrypted vault secrets. Continue?')) { vaultService.resetVault(); store.pushToast('info', 'Vault reset. Create a new one when ready.'); renderVaultTab(panel); } });
-    panel.querySelector('#resetVaultBtnLocked')?.addEventListener('click', () => { if (confirm('This permanently discards all encrypted vault secrets (they cannot be recovered). Continue?')) { vaultService.resetVault(); store.pushToast('info', 'Vault reset.'); renderVaultTab(panel); } });
   }
 
   function renderDangerTab(panel: HTMLElement): void {

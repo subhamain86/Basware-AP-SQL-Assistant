@@ -4,10 +4,13 @@ import { buildManualCaseExpression, buildManualDecodeExpression } from '../engin
 import type { Dialect, SelectedColumnSpec } from '../types';
 import { makeId } from '../utils/id';
 
-// manualExprBuilder — V14.1. Now accepts an optional pre-fill (table/column
-// name) so the per-column "CASE"/"DECODE" buttons in columnPicker can open
-// this builder with a sensible starting WHEN expression / source
-// expression already populated, instead of a blank form every time.
+// manualExprBuilder — V14.2. `openManualDecodeBuilder` now accepts an
+// optional `replaceSpecId` (spec section 11: "Do not create duplicate
+// aliases or duplicate column expressions"). When set, `onAdd` is expected
+// to REPLACE that existing SelectedColumnSpec in place (same id) rather
+// than push a brand-new one — this is what lets the per-column "Display
+// as: Manual DECODE…" option convert an already-selected raw/schema-decode
+// column into a manual expression without creating a duplicate entry.
 export interface ManualCasePrefill { table: string; column: string; }
 export interface ManualDecodePrefill { table: string; column: string; }
 
@@ -53,9 +56,9 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
   });
 }
 
-export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill): void {
+export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill, replaceSpecId?: string, seedAliasOverride?: string): void {
   const seedSource = prefill ? `${prefill.table}.${prefill.column}` : '';
-  const seedAlias = prefill ? `${prefill.column}_DESC` : '';
+  const seedAlias = seedAliasOverride || (prefill ? `${prefill.column}_DESC` : '');
   const bodyHtml = `
     <p class="hint">Build a DECODE (Oracle) / CASE (other dialects) expression manually.</p>
     <label class="block-label">Source column/expression <span class="req">*</span><input type="text" id="decodeSource" value="${seedSource}" placeholder="e.g. VENDOR.STATUS" /></label>
@@ -64,8 +67,8 @@ export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: Selected
     <label class="block-label mt">ELSE value<input type="text" id="decodeElse" placeholder="e.g. Unknown" /></label>
     <label class="block-label">Alias <span class="req">*</span><input type="text" id="decodeAlias" value="${seedAlias}" placeholder="e.g. STATUS_DESC" /></label>
     <div id="decodeIssues"></div>
-    <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} Add Column</button></div>`;
-  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
+    <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} ${replaceSpecId ? 'Apply' : 'Add Column'}</button></div>`;
+  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true, closeOnBackdrop: !replaceSpecId ? true : true });
   const pairRowsEl = modal.element.querySelector<HTMLElement>('#pairRows')!;
   let pairs: { rawValue: string; label: string }[] = [{ rawValue: '', label: '' }];
 
@@ -93,7 +96,7 @@ export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: Selected
     if (validPairs.length === 0) issues.push('Add at least one complete raw=label pair.');
     if (issues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${issues.map((i) => `<li>${i}</li>`).join('')}</ul></div>`; return; }
     const expr = buildManualDecodeExpression(source, validPairs, elseVal, alias, dialect);
-    onAdd({ id: makeId('col'), table: '', column: alias, alias, useDecode: false, aggregate: null, manualExpr: expr });
+    onAdd({ id: replaceSpecId || makeId('col'), table: replaceSpecId ? (prefill?.table || '') : '', column: replaceSpecId ? (prefill?.column || alias) : alias, alias, useDecode: false, aggregate: null, manualExpr: expr, displayMode: 'manual-decode' });
     modal.close();
   });
 }

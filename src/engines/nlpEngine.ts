@@ -1,55 +1,23 @@
 import type { SchemaModel, QueryRequirement, SelectedColumnSpec, FilterCondition, SortSpec, ColumnDef, TableDef, ClarificationQuestion } from '../types';
 import { makeId } from '../utils/id';
 
-// ============================================================================
-// nlpEngine — V14.1. Enhanced to be genuinely SCHEMA-AWARE (spec section
-// 2.1): it now reads the Active Schema's table/column NAMES *and*
-// DESCRIPTIONS, PK/FK relationships, decode definitions, and module
-// grouping as first-class matching signals — not just literal name
-// substring matches. This lets a user describe a requirement using
-// business terminology ("who approved this invoice") and still resolve to
-// the correct schema objects (APPROVAL_HISTORY.APPROVER_ID) even though
-// none of those exact words appear in the table/column name itself, purely
-// because the schema's own DESCRIPTION text mentions "approved"/"approver".
-//
-// Still 100% schema-grounded: every match is looked up FROM the schema
-// itself (table/column names, descriptions) — nothing is hard-coded beyond
-// generic English synonym scaffolding, and nothing is invented. Requested
-// terms that cannot be confidently mapped are reported back via
-// `unresolvedTerms` rather than silently guessed at.
-// ============================================================================
-
 interface ColumnRef { table: string; column: ColumnDef; }
 function allColumns(schema: SchemaModel): ColumnRef[] { return schema.tables.flatMap((t) => t.columns.map((c) => ({ table: t.name, column: c }))); }
-
 const TABLE_SYNONYMS: Record<string, string> = {
   INVOICE: 'INVOICE_HEADER', INVOICES: 'INVOICE_HEADER', BILL: 'INVOICE_HEADER', BILLS: 'INVOICE_HEADER',
   'PURCHASE ORDER': 'PO_HEADER', 'PURCHASE ORDERS': 'PO_HEADER', PO: 'PO_HEADER', POS: 'PO_HEADER',
   VENDOR: 'VENDOR', VENDORS: 'VENDOR', SUPPLIER: 'VENDOR', SUPPLIERS: 'VENDOR',
+  ORGANIZATION: 'ORGANIZATION', ORGANIZATIONS: 'ORGANIZATION', ORG: 'ORGANIZATION',
   'GL ACCOUNT': 'GL_ACCOUNT', ACCOUNT: 'GL_ACCOUNT', ACCOUNTS: 'GL_ACCOUNT', LEDGER: 'GL_ACCOUNT',
   USER: 'APP_USER', USERS: 'APP_USER', EMPLOYEE: 'APP_USER', EMPLOYEES: 'APP_USER',
   APPROVAL: 'APPROVAL_HISTORY', APPROVALS: 'APPROVAL_HISTORY'
 };
-
-// Generic English stopwords stripped before description/token overlap
-// scoring, so common words like "the"/"show"/"with" don't create false
-// signal when comparing the user's phrase against schema descriptions.
 const STOPWORDS = new Set(['the', 'a', 'an', 'show', 'me', 'all', 'get', 'find', 'list', 'with', 'and', 'or', 'for', 'of', 'in', 'on', 'to', 'from', 'that', 'this', 'is', 'are', 'was', 'were', 'by', 'who', 'which', 'each']);
-
-function tokenize(text: string): string[] {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter((t) => t.length > 2 && !STOPWORDS.has(t));
-}
-
-/** Scores how well a free-text phrase overlaps with a table/column's own
- * name + label + description text (schema-grounded description matching —
- * this is what lets "who approved this invoice" resolve to
- * APPROVAL_HISTORY even though the table name doesn't contain "approved"). */
+function tokenize(text: string): string[] { return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter((t) => t.length > 2 && !STOPWORDS.has(t)); }
 function descriptionOverlapScore(phraseTokens: string[], candidateText: string): number {
   const candidateTokens = new Set(tokenize(candidateText));
   if (candidateTokens.size === 0) return 0;
-  let hits = 0;
-  phraseTokens.forEach((t) => { if (candidateTokens.has(t)) hits += 1; });
-  return hits;
+  let hits = 0; phraseTokens.forEach((t) => { if (candidateTokens.has(t)) hits += 1; }); return hits;
 }
 
 function findTableMentions(text: string, schema: SchemaModel): TableDef[] {
@@ -61,18 +29,6 @@ function findTableMentions(text: string, schema: SchemaModel): TableDef[] {
   Object.entries(TABLE_SYNONYMS).forEach(([alias, tableName]) => {
     if (upper.includes(alias) && schema.tables.some((t) => t.name === tableName) && !found.some((f) => f.name === tableName)) found.push(schema.tables.find((t) => t.name === tableName)!);
   });
-
-  // V14.1 fix: schema-aware description matching now ALWAYS runs and
-  // MERGES an additional table in, rather than only firing as a total
-  // fallback when zero name/synonym matches exist. Without this, a phrase
-  // like "who approved this invoice" would match INVOICE_HEADER via the
-  // "invoice" synonym and STOP THERE — never discovering that
-  // APPROVAL_HISTORY's own description ("who approved, rejected, or
-  // escalated an invoice") is clearly the more relevant table for this
-  // specific requirement. A stricter score threshold applies when adding
-  // to an EXISTING match (2+ overlapping tokens) versus starting from
-  // nothing (1+ token), to avoid over-triggering on a single generic
-  // shared word once something has already been found by name.
   const phraseTokens = tokenize(text);
   const minScore = found.length === 0 ? 1 : 2;
   const bestNew = schema.tables
@@ -95,13 +51,6 @@ function findColumnMentions(text: string, tables: TableDef[]): ColumnRef[] {
     for (const [canon, syns] of Object.entries(SYNONYMS)) { if (nameSpaced.includes(canon) && syns.some((s) => upper.includes(s))) { cols.push(ref); synonymHit = true; break; } }
     if (synonymHit) continue;
   }
-
-  // V14.1 fix: schema-aware description matching for columns now ALWAYS
-  // runs and MERGES additional columns in (deduped), rather than only
-  // firing as a total fallback when zero columns were matched by name.
-  // This is what lets "who approved this invoice" resolve to
-  // APPROVAL_HISTORY.APPROVER_ID via its description even though the
-  // phrase separately matched INVOICE_HEADER by the "invoice" synonym.
   if (pool.length > 0) {
     const phraseTokens = tokenize(text);
     const alreadyMatched = new Set(cols.map((c) => `${c.table}::${c.column.name}`));
@@ -183,27 +132,32 @@ export function parseRequirement(rawText: string, schema: SchemaModel): QueryReq
   if (tables.length === 0) { notes.push('No table names were recognized in the active schema — try mentioning a business object like "invoice", "purchase order", or "vendor", or describe it in your own words (e.g. "who approved this").'); return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0.1, notes, queryPlan, clarifications: [], unresolvedTerms: findUnresolvedTerms(text, schema) }; }
   queryPlan.push(`3. Identify target table(s) from the active schema: ${tables.map((t) => t.name).join(', ')}.`);
   notes.push(`Recognized table(s): ${tables.map((t) => t.name).join(', ')}.`);
+  // V14.2 — when more than one table is matched, note that joins between
+  // them will be resolved automatically from schema relationships (spec
+  // section 3) — the actual join computation happens in sqlEngine via
+  // joinAutoEngine, this is purely a transparency note for the user.
+  if (tables.length > 1) { queryPlan.push(`4. Determine required JOIN path(s) between ${tables.map((t) => t.name).join(' and ')} using schema primary/foreign key relationships.`); notes.push('Multiple tables were identified — the required JOIN(s) will be generated automatically from schema relationships (including via an intermediate table where needed).'); }
   const combinator = detectCombinator(text);
   const mentionedColumns = findColumnMentions(text, tables);
-  queryPlan.push(mentionedColumns.length ? `4. Identify requested columns: ${mentionedColumns.map((c) => c.column.name).join(', ')}.` : '4. No specific columns mentioned — will default to key identifying columns.');
+  queryPlan.push(mentionedColumns.length ? `${tables.length > 1 ? '5' : '4'}. Identify requested columns: ${mentionedColumns.map((c) => c.column.name).join(', ')}.` : `${tables.length > 1 ? '5' : '4'}. No specific columns mentioned — will default to key identifying columns.`);
   const numericFilters = extractNumericFilters(text, mentionedColumns.length ? mentionedColumns : allColumns(schema).filter((c) => tables.some((t) => t.name === c.table)), combinator);
   const dateCandidate = extractDateFilterCandidates(text, tables);
   const decodeFilters = extractDecodeFilters(text, tables);
   const allFilters = [...numericFilters, ...decodeFilters];
   if (dateCandidate) { allFilters.push(dateCandidate.filter); if (dateCandidate.alternativeColumns.length > 0) clarifications.push({ question: `I found ${dateCandidate.alternativeColumns.length + 1} possible date fields for this requirement. Which one should be used?`, options: [dateCandidate.filter.column, ...dateCandidate.alternativeColumns.map((c) => c.column.name)] }); }
-  queryPlan.push(allFilters.length ? `5. Apply ${allFilters.length} filter condition(s) (combined with ${combinator}).` : '5. No filter conditions detected.');
+  queryPlan.push(allFilters.length ? `Apply ${allFilters.length} filter condition(s) (combined with ${combinator}).` : 'No filter conditions detected.');
   if (allFilters.length) notes.push(`Inferred ${allFilters.length} filter condition(s) from the text.`); else notes.push('No explicit filter conditions were recognized — showing all rows for the matched table(s).');
   const limit = extractLimit(text); const distinct = extractDistinct(text); const sorts = extractSorts(text, tables);
-  queryPlan.push(sorts.length ? `6. Sort by ${sorts[0].table}.${sorts[0].column} ${sorts[0].direction}.` : '6. No sorting requested.');
-  if (limit) { queryPlan.push(`7. Limit results to ${limit} rows.`); notes.push(`Result limit of ${limit} detected.`); }
+  queryPlan.push(sorts.length ? `Sort by ${sorts[0].table}.${sorts[0].column} ${sorts[0].direction}.` : 'No sorting requested.');
+  if (limit) { queryPlan.push(`Limit results to ${limit} rows.`); notes.push(`Result limit of ${limit} detected.`); }
   if (distinct) notes.push('DISTINCT requested.');
-  let selectedColumns: SelectedColumnSpec[] = mentionedColumns.map((c) => ({ id: makeId('col'), table: c.table, column: c.column.name, alias: '', useDecode: !!c.column.decode?.length, aggregate: null }));
+  let selectedColumns: SelectedColumnSpec[] = mentionedColumns.map((c) => ({ id: makeId('col'), table: c.table, column: c.column.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }));
   if (selectedColumns.length === 0) {
-    tables.forEach((t) => { const defaultCols = t.columns.filter((c) => c.isPrimaryKey || /date|amount|name|status/i.test(c.name)).slice(0, 5); defaultCols.forEach((c) => selectedColumns.push({ id: makeId('col'), table: t.name, column: c.name, alias: '', useDecode: !!c.decode?.length, aggregate: null })); });
+    tables.forEach((t) => { const defaultCols = t.columns.filter((c) => c.isPrimaryKey || /date|amount|name|status/i.test(c.name)).slice(0, 5); defaultCols.forEach((c) => selectedColumns.push({ id: makeId('col'), table: t.name, column: c.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' })); });
     notes.push('No specific columns mentioned — defaulted to key identifying columns for the matched table(s).');
   }
-  queryPlan.push('8. Validate all table/column names against the active schema (never invent objects not present).');
-  queryPlan.push('9. Generate SQL.');
+  queryPlan.push('Validate all table/column names against the active schema (never invent objects not present).');
+  queryPlan.push('Generate SQL.');
   const unresolvedTerms = findUnresolvedTerms(text, schema);
   if (unresolvedTerms.length) notes.push(`Could not resolve: ${unresolvedTerms.join(', ')} — not present in the active schema.`);
   const confidence = Math.min(1, 0.35 + tables.length * 0.15 + allFilters.length * 0.15 + (selectedColumns.length ? 0.15 : 0) - (clarifications.length ? 0.1 : 0));

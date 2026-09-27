@@ -2,10 +2,8 @@
 // Manual Selector fallback" priority chain. Only attempts the online leg: a
 // short-timeout fetch to a user-configurable endpoint. If unset,
 // unreachable, or offline, resolves null quickly so the caller falls back
-// to the local rule-based engine transparently. No endpoint is configured
-// by default (none was provided), so this correctly falls back every time
-// out of the box.
-const ENDPOINT_STORAGE_KEY = 'sqla.onlineNlpEndpoint.v141';
+// to the local rule-based engine transparently.
+const ENDPOINT_STORAGE_KEY = 'sqla.onlineNlpEndpoint.v142';
 const TIMEOUT_MS = 3500;
 export function getConfiguredEndpoint(): string | null { return localStorage.getItem(ENDPOINT_STORAGE_KEY) || null; }
 export function setConfiguredEndpoint(url: string | null): void { if (url && url.trim()) localStorage.setItem(ENDPOINT_STORAGE_KEY, url.trim()); else localStorage.removeItem(ENDPOINT_STORAGE_KEY); }

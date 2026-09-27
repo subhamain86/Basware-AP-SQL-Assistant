@@ -21,7 +21,7 @@ export function mountAppShell(root: HTMLElement): void {
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
 
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>SQL Assistant · Version 14.1</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>SQL Assistant · Version 14.2</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
 
   mountToastContainer(root);
@@ -49,10 +49,6 @@ export function mountAppShell(root: HTMLElement): void {
   function renderAll(): void { const route = routeFromHash(); store.setRoute(route); renderPage(route); }
   window.addEventListener('hashchange', renderAll);
 
-  // V14.1 — this remains a TARGETED subscription (only re-renders Settings,
-  // and only when the lock state itself actually flips) — NOT the blanket
-  // "redraw everything on every store change" pattern that was the root
-  // cause of the refresh bug on the Query Builder pages.
   let lastKnownSettingsLockState = store.settingsUnlocked;
   store.subscribe(() => { if (store.route === 'settings' && store.settingsUnlocked !== lastKnownSettingsLockState) { lastKnownSettingsLockState = store.settingsUnlocked; renderPage('settings'); } });
 

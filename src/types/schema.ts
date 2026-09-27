@@ -6,7 +6,12 @@ export interface ColumnDef {
   alias?: string; isPrimaryKey?: boolean; isForeignKey?: boolean; references?: { table: string; column: string };
   decode?: DecodeEntry[]; description: string;
 }
-export interface TableDef { name: string; module: string; description: string; columns: ColumnDef[]; }
+// V14.2 — objectType distinguishes real Tables from database Views (spec
+// section 22). Optional + defaults to 'TABLE' everywhere it's read, so
+// every V14.1 schema (which has no objectType at all) continues to work
+// unchanged — this is a pure additive field, not a breaking change.
+export type SchemaObjectType = 'TABLE' | 'VIEW';
+export interface TableDef { name: string; module: string; description: string; columns: ColumnDef[]; objectType?: SchemaObjectType; }
 export interface RelationshipDef { id: string; fromTable: string; fromColumn: string; toTable: string; toColumn: string; kind: 'one-to-many' | 'many-to-one' | 'one-to-one'; }
 export type SchemaStatus = 'active' | 'default' | 'inactive';
 export interface SchemaVersionMeta { version: string; schemaId: string; lastUpdated: string; updatedByDevice: string; source: 'local' | 'location' | 'github' | 'vault' | 'import'; checksum: string; }

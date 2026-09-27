@@ -1,5 +1,15 @@
 import type { SchemaModel } from '../types';
 
+// ============================================================================
+// V14.2 — added ORGANIZATION table + VENDOR.ORG_ID FK relationship, so the
+// spec's own worked example ("Invoice -> Supplier -> Organization") is
+// directly demonstrable: INVOICE_HEADER -> VENDOR -> ORGANIZATION is now a
+// genuine 2-hop join chain resolvable purely from schema FK/PK metadata.
+// Also added VW_OPEN_INVOICES as a VIEW (objectType: 'VIEW') to
+// demonstrate spec section 22 (Views distinguished from Tables, usable as
+// a SELECT source). Everything else is unchanged from V14.1.
+// ============================================================================
+
 export const CORE_SCHEMA: SchemaModel = {
   id: 'schema-core-ap-p2p', name: 'AP / P2P Core', version: '1.0', status: 'active',
   updatedAt: new Date().toISOString(), lastSyncedAt: null,
@@ -27,7 +37,7 @@ export const CORE_SCHEMA: SchemaModel = {
     { name: 'INVOICE_HEADER', module: 'Invoices', description: 'One row per supplier invoice.',
       columns: [
         { name: 'INVOICE_ID', label: 'Invoice ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'Primary key.' },
-        { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'VENDOR', column: 'VENDOR_ID' }, description: 'Vendor who issued the invoice.' },
+        { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'VENDOR', column: 'VENDOR_ID' }, description: 'Vendor who issued the invoice / supplier.' },
         { name: 'PO_ID', label: 'PO ID', type: 'NUMBER', nullable: true, isForeignKey: true, references: { table: 'PO_HEADER', column: 'PO_ID' }, description: 'Matched purchase order, if any.' },
         { name: 'INVOICE_DATE', label: 'Invoice Date', type: 'DATE', nullable: false, description: 'Date on the invoice document / created date.' },
         { name: 'BASE_DATE', label: 'Base Date', type: 'DATE', nullable: true, description: 'Date used as the basis for due-date calculation.' },
@@ -53,7 +63,14 @@ export const CORE_SCHEMA: SchemaModel = {
         { name: 'DUNS_NUMBER', label: 'DUNS Number', type: 'VARCHAR', length: 15, nullable: true, description: 'D-U-N-S identifier.' },
         { name: 'COUNTRY', label: 'Country', type: 'VARCHAR', length: 2, nullable: false, description: 'ISO country code.' },
         { name: 'STATUS', label: 'Status', type: 'VARCHAR', length: 1, nullable: false, decode: [{ rawValue: 'A', label: 'Active' }, { rawValue: 'I', label: 'Inactive' }], description: 'Vendor account status.' },
-        { name: 'PAYMENT_TERMS', label: 'Payment Terms', type: 'VARCHAR', length: 20, nullable: true, description: 'Standard payment terms code.' }
+        { name: 'PAYMENT_TERMS', label: 'Payment Terms', type: 'VARCHAR', length: 20, nullable: true, description: 'Standard payment terms code.' },
+        { name: 'ORG_ID', label: 'Organization ID', type: 'NUMBER', nullable: true, isForeignKey: true, references: { table: 'ORGANIZATION', column: 'ORG_ID' }, description: 'Parent organization / corporate group this vendor belongs to.' }
+      ]},
+    { name: 'ORGANIZATION', module: 'Vendors', description: 'Parent corporate organization / group that one or more vendors belong to.',
+      columns: [
+        { name: 'ORG_ID', label: 'Organization ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'Primary key.' },
+        { name: 'ORG_NAME', label: 'Organization Name', type: 'VARCHAR', length: 150, nullable: false, description: 'Name of the parent organization.' },
+        { name: 'REGION', label: 'Region', type: 'VARCHAR', length: 40, nullable: true, description: 'Geographic region the organization operates in.' }
       ]},
     { name: 'GL_ACCOUNT', module: 'General Ledger', description: 'Chart of accounts.',
       columns: [
@@ -77,6 +94,13 @@ export const CORE_SCHEMA: SchemaModel = {
         { name: 'APPROVER_ID', label: 'Approver ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'APP_USER', column: 'USER_ID' }, description: 'User who approved or rejected the invoice.' },
         { name: 'APPROVAL_DATE', label: 'Approval Date', type: 'DATE', nullable: false, description: 'Date/time of the approval action.' },
         { name: 'ACTION', label: 'Action', type: 'VARCHAR', length: 3, nullable: false, decode: [{ rawValue: 'APP', label: 'Approved' }, { rawValue: 'REJ', label: 'Rejected' }, { rawValue: 'ESC', label: 'Escalated' }], description: 'Action taken by the approver.' }
+      ]},
+    { name: 'VW_OPEN_INVOICES', module: 'Invoices', description: 'Read-only view of currently open (not yet paid) invoices with their vendor.', objectType: 'VIEW',
+      columns: [
+        { name: 'INVOICE_ID', label: 'Invoice ID', type: 'NUMBER', nullable: false, description: 'Invoice identifier.' },
+        { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, description: 'Vendor identifier.' },
+        { name: 'INVOICE_AMOUNT', label: 'Invoice Amount', type: 'NUMBER', nullable: false, description: 'Invoice total value.' },
+        { name: 'STATUS', label: 'Status', type: 'VARCHAR', length: 1, nullable: false, description: 'Invoice status (always non-Paid in this view).' }
       ]}
   ],
   relationships: [
@@ -85,7 +109,8 @@ export const CORE_SCHEMA: SchemaModel = {
     { id: 'r3', fromTable: 'INVOICE_HEADER', fromColumn: 'VENDOR_ID', toTable: 'VENDOR', toColumn: 'VENDOR_ID', kind: 'many-to-one' },
     { id: 'r4', fromTable: 'INVOICE_HEADER', fromColumn: 'PO_ID', toTable: 'PO_HEADER', toColumn: 'PO_ID', kind: 'many-to-one' },
     { id: 'r5', fromTable: 'INVOICE_LINE', fromColumn: 'INVOICE_ID', toTable: 'INVOICE_HEADER', toColumn: 'INVOICE_ID', kind: 'many-to-one' },
-    { id: 'r6', fromTable: 'APPROVAL_HISTORY', fromColumn: 'INVOICE_ID', toTable: 'INVOICE_HEADER', toColumn: 'INVOICE_ID', kind: 'many-to-one' }
+    { id: 'r6', fromTable: 'APPROVAL_HISTORY', fromColumn: 'INVOICE_ID', toTable: 'INVOICE_HEADER', toColumn: 'INVOICE_ID', kind: 'many-to-one' },
+    { id: 'r8', fromTable: 'VENDOR', fromColumn: 'ORG_ID', toTable: 'ORGANIZATION', toColumn: 'ORG_ID', kind: 'many-to-one' }
   ]
 };
 

@@ -42,7 +42,7 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
       if (c.precision !== undefined && c.precision !== null && c.precision < 0) issues.push({ severity: 'error', message: `Column "${t.name}.${c.name}" has a negative Precision.` });
     });
     if (pkCount > 1) issues.push({ severity: 'warning', message: `Table "${t.name}" has ${pkCount} primary-key columns (composite key) — confirm this is intentional.` });
-    if (pkCount === 0 && t.columns.length > 0) issues.push({ severity: 'warning', message: `Table "${t.name}" has no primary key defined.` });
+    if (pkCount === 0 && t.columns.length > 0 && t.objectType !== 'VIEW') issues.push({ severity: 'warning', message: `Table "${t.name}" has no primary key defined.` });
   });
 
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
@@ -72,9 +72,6 @@ export function validateIncomingSchemaFile(candidate: unknown): SchemaIntegrityR
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
 
-/** V14.1 — validates a whole incoming REGISTRY (multiple schemas) pulled
- * from GitHub, e.g. { schemas: [...], activeSchemaId: "..." }. Used before
- * merging a synchronized registry into the local one. */
 export function validateIncomingRegistryFile(candidate: unknown): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   if (typeof candidate !== 'object' || candidate === null) { issues.push({ severity: 'error', message: 'File is not a valid JSON object.' }); return { valid: false, issues }; }

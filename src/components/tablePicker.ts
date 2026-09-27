@@ -1,23 +1,12 @@
 import type { SchemaModel } from '../types';
 import { icon } from './icons';
 
-// ============================================================================
-// tablePicker — V14.1. ROOT-CAUSE REWRITE of the "search not working" /
-// "page refresh" bugs (spec sections 1, 4, 6): the previous implementation
-// replaced the ENTIRE picker's innerHTML (search input included) on every
-// keystroke, which destroyed and recreated the <input> DOM node each time —
-// requiring a fragile refocus/selectionRange hack, and any parent-level
-// re-render happening in between two keystrokes would silently reset the
-// search term and selected module back to blank.
-//
-// The fix: split rendering into a STATIC SHELL (module select + search
-// input + action buttons), rendered exactly ONCE, whose event listeners are
-// attached once and never touched again — and a separate LIST REGION whose
-// innerHTML is the ONLY thing that gets replaced on search/module/selection
-// changes. The search <input> element itself is never destroyed, so focus,
-// cursor position, and IME composition state are never lost, and there is
-// nothing left to "refocus" after the fact.
-// ============================================================================
+// tablePicker — static-shell + list-only re-render pattern (root-cause fix
+// carried over from V14.1, must not regress per spec section 32). V14.2
+// adds a "VIEW" chip next to any table whose objectType is 'VIEW' (spec
+// section 22) so Tables and Views are visually distinguished without
+// requiring a separate picker UI — Views are still selected exactly like
+// Tables, since a View is a valid SELECT source.
 export function renderTablePicker(container: HTMLElement, schema: SchemaModel, selected: string[], onChange: (next: string[]) => void): void {
   let searchTerm = ''; let current = [...selected]; let selectedModule = '';
 
@@ -41,7 +30,10 @@ export function renderTablePicker(container: HTMLElement, schema: SchemaModel, s
     listEl.innerHTML = modulesToRender.map((m) => {
       const tables = tablesInScope.filter((t) => t.module === m);
       if (tables.length === 0) return '';
-      return `<div class="picker-group-label">${m}</div>${tables.map((t) => `<label class="picker-row" data-table="${t.name}"><input type="checkbox" ${current.includes(t.name) ? 'checked' : ''} /><span class="picker-row-main"><strong>${t.name}</strong><span class="hint">${t.description}</span></span></label>`).join('')}`;
+      return `<div class="picker-group-label">${m}</div>${tables.map((t) => {
+        const isView = t.objectType === 'VIEW';
+        return `<label class="picker-row" data-table="${t.name}"><input type="checkbox" ${current.includes(t.name) ? 'checked' : ''} /><span class="picker-row-main"><strong>${t.name}${isView ? ` <span class="chip chip-view">${icon('eye', 11)} VIEW</span>` : ''}</strong><span class="hint">${t.description}</span></span></label>`;
+      }).join('')}`;
     }).join('') || '<p class="hint picker-empty">No tables match your search.</p>';
     if (countEl) countEl.textContent = `${current.length} selected`;
     wireRowListeners();
@@ -54,7 +46,7 @@ export function renderTablePicker(container: HTMLElement, schema: SchemaModel, s
         const name = row.dataset.table!;
         current = current.includes(name) ? current.filter((n) => n !== name) : [...current, name];
         onChange([...current]);
-        renderListOnly(); // only the list re-renders — search input untouched
+        renderListOnly();
       });
     });
   }

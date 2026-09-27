@@ -1,9 +1,24 @@
 import { icon } from './icons';
+import { logoMarkSvg } from './logoMark';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
 import { syncService } from '../services/syncService';
 import { isBrowserOnline } from '../services/onlineNlpService';
 import type { Route, Theme, SyncSource, SyncTimeOption } from '../types';
+
+// ============================================================================
+// hamburgerNav — V14.2. Two changes from V14.1 (spec section 1):
+//   1.1/1.3 — the brand row (logo + wordmark) is now wrapped in a real
+//      <button>, calling onNavigate('quickstart') directly (no hash-based
+//      full navigation flicker — same in-SPA callback every other nav
+//      link already uses), with an aria-label so it's announced as
+//      "Go to Quick Start" for assistive tech.
+//   1.2 — the logo itself is completely static: no hover/focus transform,
+//      no colour/brightness change, no glow. The only visual affordance on
+//      hover is a very subtle background tint on the WORDMARK/button area
+//      (standard button hover, matching every other button in the app) —
+//      the logo graphic itself is untouched by any CSS state selector.
+// ============================================================================
 
 interface NavLeaf { id: Route; label: string; icon: Parameters<typeof icon>[0]; tourSelector?: string; }
 interface NavGroup { id: string; label: string; icon: Parameters<typeof icon>[0]; children: NavLeaf[]; tourSelector?: string; }
@@ -42,10 +57,10 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
         <div class="container-fluid navbar-inner">
           <div class="navbar-left-cluster">
             <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
-            <div class="hero-brand-row" data-tour="brand">
-              <span class="app-logo-badge">${icon('logo', 24)}</span>
-              <div class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14.1</span></div>
-            </div>
+            <button class="hero-brand-row" id="logoHomeBtn" type="button" aria-label="Go to Quick Start" data-tour="brand">
+              <span class="app-logo-badge">${logoMarkSvg(26)}</span>
+              <span class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14.2</span></span>
+            </button>
           </div>
 
           <div class="navbar-sync-cluster" data-tour="navbar-sync">
@@ -132,6 +147,11 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     container.querySelector('#hamburgerCloseBtn')?.addEventListener('click', closeMenu);
     container.querySelector('#hamburgerOverlay')?.addEventListener('click', (e) => { if (e.target === container.querySelector('#hamburgerOverlay')) closeMenu(); });
     if (menuOpen) { const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeMenu(); document.removeEventListener('keydown', escHandler); } }; document.addEventListener('keydown', escHandler); }
+
+    // V14.2 — logo click navigates to Quick Start via the SAME in-SPA
+    // onNavigate callback used everywhere else (hash-based, no full
+    // browser reload — spec section 1.3).
+    container.querySelector<HTMLButtonElement>('#logoHomeBtn')?.addEventListener('click', () => { onNavigate('quickstart'); });
 
     container.querySelectorAll<HTMLButtonElement>('.hb-group-toggle').forEach((btn) => {
       btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const gid = btn.dataset.group!; expandedGroup = expandedGroup === gid ? null : gid; draw(); });

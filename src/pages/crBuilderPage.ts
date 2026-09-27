@@ -10,16 +10,10 @@ import { validateCrState } from '../engines/validationEngine';
 import type { CrQueryType, Dialect } from '../types';
 import { makeId } from '../utils/id';
 
-// ============================================================================
-// crBuilderPage — V14.1. Same root-cause fix as readOnlyBuilderPage (spec
-// section 1, 8): no blanket `store.subscribe(draw)`. Every local control
-// already calls its own targeted render function after mutating the store;
-// a redundant page-wide subscription was the actual cause of "refresh"-like
-// behavior wiping out in-progress selections. Only `schemaService.subscribe`
-// remains, since a genuine active-schema switch legitimately needs the
-// available table/column list refreshed.
-// ============================================================================
-
+// crBuilderPage — V14.2. No structural changes required by this spec
+// beyond preserving V14.1's no-refresh fix (still no blanket
+// store.subscribe(draw)) and staying visually aligned with the Read Only
+// Query Builder (spec section 33).
 export function renderCrBuilderPage(container: HTMLElement): void {
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'details';
@@ -139,8 +133,7 @@ export function renderCrBuilderPage(container: HTMLElement): void {
     function renderValuesList(): void {
       const list = panel.querySelector('#crValuesList'); if (!list) return;
       list.innerHTML = state.values.map((v, idx) => `<div class="mini-row" data-idx="${idx}"><select class="crv-col-select">${columnsForTable.map((c) => `<option value="${c.name}" ${c.name === v.column ? 'selected' : ''}>${c.name}</option>`).join('')}</select><input type="text" class="crv-val-input" placeholder="value" value="${v.value}" /><button class="icon-btn remove-btn" title="Remove">${icon('trash', 14)}</button></div>`).join('');
-      list.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.crv-col-select')?.addEventListener('change', (e) => { store.updateCr((s) => { s.values[idx].column = (e.target as HTMLSelectElement).value; }); renderCrSqlOutput(); }); row.querySelector('.crv-val-input')?.addEventListener('input', (e) => { store.updateCr((s) => { s.values[idx].value = (e.target as HTMLInputElement).value; }); renderCrSqlOutput(); }); row.querySelector('.remove-btn')?.addEventListener('click', () => { store.updateCr((s) => { s.values.splice(idx, 1); }); renderValuesList(); renderCrSqlOutput(); }); });
-    }
+      list.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.crv-col-select')?.addEventListener('change', (e) => { store.updateCr((s) => { s.values[idx].column = (e.target as HTMLSelectElement).value; }); renderCrSqlOutput(); }); row.querySelector('.crv-val-input')?.addEventListener('input', (e) => { store.updateCr((s) => { s.values[idx].value = (e.target as HTMLInputElement).value; }); renderCrSqlOutput(); }); row.querySelector('.remove-btn')?.addEventListener('click', () => { store.updateCr((s) => { s.values.splice(idx, 1); }); renderValuesList(); renderCrSqlOutput(); }); }); }
   }
 
   function renderSummaryTab(panel: HTMLElement, state: typeof store.cr): void {
