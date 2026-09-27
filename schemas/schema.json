@@ -4,9 +4,9 @@
       "id": "schema-core-ap-p2p",
       "name": "AP / P2P Core",
       "version": "1.0",
-      "status": "active",
-      "updatedAt": "2026-09-26T23:01:39.694Z",
-      "lastSyncedAt": "2026-09-26T23:06:48.632Z",
+      "status": "inactive",
+      "updatedAt": "2026-09-27T00:21:46.441Z",
+      "lastSyncedAt": "2026-09-27T00:24:16.697Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -182,7 +182,7 @@
                 "table": "VENDOR",
                 "column": "VENDOR_ID"
               },
-              "description": "Vendor who issued the invoice."
+              "description": "Vendor who issued the invoice / supplier."
             },
             {
               "name": "PO_ID",
@@ -390,6 +390,49 @@
               "length": 20,
               "nullable": true,
               "description": "Standard payment terms code."
+            },
+            {
+              "name": "ORG_ID",
+              "label": "Organization ID",
+              "type": "NUMBER",
+              "nullable": true,
+              "isForeignKey": true,
+              "references": {
+                "table": "ORGANIZATION",
+                "column": "ORG_ID"
+              },
+              "description": "Parent organization / corporate group this vendor belongs to."
+            }
+          ]
+        },
+        {
+          "name": "ORGANIZATION",
+          "module": "Vendors",
+          "description": "Parent corporate organization / group that one or more vendors belong to.",
+          "columns": [
+            {
+              "name": "ORG_ID",
+              "label": "Organization ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "isPrimaryKey": true,
+              "description": "Primary key."
+            },
+            {
+              "name": "ORG_NAME",
+              "label": "Organization Name",
+              "type": "VARCHAR",
+              "length": 150,
+              "nullable": false,
+              "description": "Name of the parent organization."
+            },
+            {
+              "name": "REGION",
+              "label": "Region",
+              "type": "VARCHAR",
+              "length": 40,
+              "nullable": true,
+              "description": "Geographic region the organization operates in."
             }
           ]
         },
@@ -589,6 +632,43 @@
                 }
               ],
               "description": "Action taken by the approver."
+            }
+          ]
+        },
+        {
+          "name": "VW_OPEN_INVOICES",
+          "module": "Invoices",
+          "description": "Read-only view of currently open (not yet paid) invoices with their vendor.",
+          "objectType": "VIEW",
+          "columns": [
+            {
+              "name": "INVOICE_ID",
+              "label": "Invoice ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Invoice identifier."
+            },
+            {
+              "name": "VENDOR_ID",
+              "label": "Vendor ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Vendor identifier."
+            },
+            {
+              "name": "INVOICE_AMOUNT",
+              "label": "Invoice Amount",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Invoice total value."
+            },
+            {
+              "name": "STATUS",
+              "label": "Status",
+              "type": "VARCHAR",
+              "length": 1,
+              "nullable": false,
+              "description": "Invoice status (always non-Paid in this view)."
             }
           ]
         }
@@ -641,6 +721,14 @@
           "toTable": "INVOICE_HEADER",
           "toColumn": "INVOICE_ID",
           "kind": "many-to-one"
+        },
+        {
+          "id": "r8",
+          "fromTable": "VENDOR",
+          "fromColumn": "ORG_ID",
+          "toTable": "ORGANIZATION",
+          "toColumn": "ORG_ID",
+          "kind": "many-to-one"
         }
       ]
     },
@@ -649,8 +737,8 @@
       "name": "AP / P2P Extended (with Contracts)",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-26T23:01:39.694Z",
-      "lastSyncedAt": "2026-09-26T23:06:48.632Z",
+      "updatedAt": "2026-09-27T00:21:46.441Z",
+      "lastSyncedAt": "2026-09-27T00:24:16.697Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -826,7 +914,7 @@
                 "table": "VENDOR",
                 "column": "VENDOR_ID"
               },
-              "description": "Vendor who issued the invoice."
+              "description": "Vendor who issued the invoice / supplier."
             },
             {
               "name": "PO_ID",
@@ -1034,6 +1122,49 @@
               "length": 20,
               "nullable": true,
               "description": "Standard payment terms code."
+            },
+            {
+              "name": "ORG_ID",
+              "label": "Organization ID",
+              "type": "NUMBER",
+              "nullable": true,
+              "isForeignKey": true,
+              "references": {
+                "table": "ORGANIZATION",
+                "column": "ORG_ID"
+              },
+              "description": "Parent organization / corporate group this vendor belongs to."
+            }
+          ]
+        },
+        {
+          "name": "ORGANIZATION",
+          "module": "Vendors",
+          "description": "Parent corporate organization / group that one or more vendors belong to.",
+          "columns": [
+            {
+              "name": "ORG_ID",
+              "label": "Organization ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "isPrimaryKey": true,
+              "description": "Primary key."
+            },
+            {
+              "name": "ORG_NAME",
+              "label": "Organization Name",
+              "type": "VARCHAR",
+              "length": 150,
+              "nullable": false,
+              "description": "Name of the parent organization."
+            },
+            {
+              "name": "REGION",
+              "label": "Region",
+              "type": "VARCHAR",
+              "length": 40,
+              "nullable": true,
+              "description": "Geographic region the organization operates in."
             }
           ]
         },
@@ -1233,6 +1364,43 @@
                 }
               ],
               "description": "Action taken by the approver."
+            }
+          ]
+        },
+        {
+          "name": "VW_OPEN_INVOICES",
+          "module": "Invoices",
+          "description": "Read-only view of currently open (not yet paid) invoices with their vendor.",
+          "objectType": "VIEW",
+          "columns": [
+            {
+              "name": "INVOICE_ID",
+              "label": "Invoice ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Invoice identifier."
+            },
+            {
+              "name": "VENDOR_ID",
+              "label": "Vendor ID",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Vendor identifier."
+            },
+            {
+              "name": "INVOICE_AMOUNT",
+              "label": "Invoice Amount",
+              "type": "NUMBER",
+              "nullable": false,
+              "description": "Invoice total value."
+            },
+            {
+              "name": "STATUS",
+              "label": "Status",
+              "type": "VARCHAR",
+              "length": 1,
+              "nullable": false,
+              "description": "Invoice status (always non-Paid in this view)."
             }
           ]
         },
@@ -1357,6 +1525,14 @@
           "kind": "many-to-one"
         },
         {
+          "id": "r8",
+          "fromTable": "VENDOR",
+          "fromColumn": "ORG_ID",
+          "toTable": "ORGANIZATION",
+          "toColumn": "ORG_ID",
+          "kind": "many-to-one"
+        },
+        {
           "id": "r7",
           "fromTable": "CONTRACT",
           "fromColumn": "VENDOR_ID",
@@ -1367,12 +1543,12 @@
       ]
     },
     {
-      "id": "schema_muj01w8x_4",
+      "id": "schema_muj2sn16_4",
       "name": "Imported Schema",
       "version": "1.0",
-      "status": "inactive",
-      "updatedAt": "2026-09-26T23:07:05.985Z",
-      "lastSyncedAt": null,
+      "status": "active",
+      "updatedAt": "2026-09-27T00:23:52.986Z",
+      "lastSyncedAt": "2026-09-27T00:24:16.697Z",
       "tables": [
         {
           "name": "IA_ACTION_LOG",
@@ -21980,5 +22156,5 @@
       "relationships": []
     }
   ],
-  "activeSchemaId": "schema-core-ap-p2p"
+  "activeSchemaId": "schema_muj2sn16_4"
 }
