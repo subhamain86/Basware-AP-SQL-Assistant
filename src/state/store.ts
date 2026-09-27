@@ -24,17 +24,17 @@ class AppStore {
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    const savedTheme = localStorage.getItem('sqla.theme.v145');
+    const savedTheme = localStorage.getItem('sqla.theme.v146');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') this.theme = savedTheme;
-    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v145') === '1';
+    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v146') === '1';
     schemaService.subscribe(() => this.regenerateReadOnlySql());
     ['click', 'keydown', 'mousemove'].forEach((evt) => document.addEventListener(evt, () => this.bumpActivity(), { passive: true }));
   }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   setRoute(route: Route): void { this.route = route; this.notify(); }
-  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v145', theme); this.notify(); }
-  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v145', '1'); }
+  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v146', theme); this.notify(); }
+  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v146', '1'); }
   pushToast(kind: ToastMessage['kind'], text: string): void { const toast: ToastMessage = { id: makeId('toast'), kind, text }; this.toasts.push(toast); this.notify(); setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== toast.id); this.notify(); }, 4000); }
   unlockSettings(): void { this.settingsUnlocked = true; this.bumpActivity(); this.notify(); }
   lockSettings(): void { this.settingsUnlocked = false; if (this.inactivityTimer) { clearTimeout(this.inactivityTimer); this.inactivityTimer = null; } this.notify(); }

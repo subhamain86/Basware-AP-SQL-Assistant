@@ -22,7 +22,7 @@ export function mountAppShell(root: HTMLElement): void {
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
 
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>SQL Assistant · Version 14.5</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>SQL Assistant · Version 14.6</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
 
   mountToastContainer(root);

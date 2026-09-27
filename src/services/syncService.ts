@@ -4,14 +4,15 @@ import { schemaService } from './schemaService';
 import { validateIncomingRegistryFile } from '../engines/schemaIntegrityEngine';
 import { detectConflict } from '../engines/schemaVersionEngine';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
-import { assertSyncConfigOrError, safeTrim } from '../utils/validation';
+import { assertSyncConfigOrError, safeTrim, sanitizeIncomingSchema } from '../utils/validation';
 import { makeId } from '../utils/id';
+import { beginInternalSync, endInternalSync } from './syncCoordination';
 
-const CONFIG_KEY = 'sqla.syncconfig.v145';
-const STATUS_KEY = 'sqla.syncstatus.v145';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v145';
-const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v145';
-const SYNC_LOG_KEY = 'sqla.synclog.v145';
+const CONFIG_KEY = 'sqla.syncconfig.v146';
+const STATUS_KEY = 'sqla.syncstatus.v146';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v146';
+const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v146';
+const SYNC_LOG_KEY = 'sqla.synclog.v146';
 const MAX_LOG_ENTRIES = 30;
 
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
@@ -48,6 +49,14 @@ class SyncService {
   isFileSystemAccessSupported(): boolean { return typeof (window as any).showDirectoryPicker === 'function'; }
   hasConnectedLocation(): boolean { return this.directoryHandle !== null; }
   setSource(source: SyncSource): void { this.config = { ...this.config, source }; this.persistConfig(); this.notify(); }
+  /** V14.6 note: this is the ONLY mechanism that starts a periodic
+   * background timer — it is NEVER started implicitly, and defaults to
+   * 'manual' (no timer at all) unless the user explicitly picks an
+   * interval from the "Sync Time" dropdown. Combined with the
+   * beginInternalSync/endInternalSync fix above, this guarantees
+   * synchronization only ever happens (a) on an explicit user action,
+   * (b) once after a genuine local schema edit (debounced ~1.2s), or
+   * (c) on the exact interval chosen here — never continuously. */
   setTime(time: SyncTimeOption, customTime: string | null = null): void { this.config = { ...this.config, time, customTime }; this.persistConfig(); this.rescheduleTimer(); this.notify(); }
   private rescheduleTimer(): void { if (this.scheduleTimer) { clearInterval(this.scheduleTimer); this.scheduleTimer = null; } const ms = this.intervalMsFor(this.config.time); if (ms) this.scheduleTimer = setInterval(() => { this.pullRegistryFromGitHub().catch(() => {}); }, ms); }
   private intervalMsFor(t: SyncTimeOption): number | null { switch (t) { case '15m': return 15 * 60000; case '30m': return 30 * 60000; case '1h': return 60 * 60000; case '4h': return 4 * 60 * 60000; case '6h': return 6 * 60 * 60000; case 'daily': return 24 * 60 * 60000; default: return null; } }
@@ -88,7 +97,15 @@ class SyncService {
   resolvePendingConflict(conflictId: string, decision: 'local' | 'remote'): void {
     const conflict = this.pendingConflicts.find((c) => c.id === conflictId);
     if (!conflict) return;
-    if (decision === 'remote') { try { const remoteSchema = JSON.parse(conflict.remoteSchemaJson) as SchemaModel; schemaService.replaceSchemaContent(conflict.schemaId, remoteSchema); } catch { } }
+    // V14.6 — user-initiated conflict resolution also mutates
+    // schemaService; guard it too so resolving a conflict doesn't itself
+    // trigger a spurious immediate auto-push loop iteration (it will
+    // still correctly schedule exactly ONE push afterward, via the
+    // normal debounce, to publish the user's resolution choice).
+    beginInternalSync();
+    try {
+      if (decision === 'remote') { try { const remoteSchema = JSON.parse(conflict.remoteSchemaJson) as SchemaModel; schemaService.replaceSchemaContent(conflict.schemaId, remoteSchema); } catch { } }
+    } finally { endInternalSync(); }
     this.pendingConflicts = this.pendingConflicts.filter((c) => c.id !== conflictId);
     this.persistPendingConflicts();
   }
@@ -98,16 +115,24 @@ class SyncService {
     if (missing) { this.logEvent('error', missing); return { ok: false, error: missing, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
     const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
+    beginInternalSync();
     try {
       const path = safeTrim(cfg.githubSchemaPath);
       const branch = safeTrim(cfg.githubBranch) || 'main';
       const file = await getFile(cfg.githubRepo, branch, path, cfg.githubToken);
       if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
-      const parsed = JSON.parse(file.content);
-      const integrity = validateIncomingRegistryFile(parsed);
+      const parsedRaw = JSON.parse(file.content);
+      const integrity = validateIncomingRegistryFile(parsedRaw);
       if (!integrity.valid) { this.status = 'failed'; this.notify(); const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
-      const remoteRegistry = parsed as SchemaRegistry;
+      // V14.6 — sanitize every remote schema BEFORE processing, even
+      // though validateIncomingRegistryFile already checked structural
+      // validity (integrity issues are reported, not auto-fixed).
+      // sanitizeIncomingSchema guarantees no downstream .trim() call can
+      // ever crash on this data, regardless of what validation flagged.
+      const parsed = parsedRaw as Record<string, unknown>;
+      const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
+      const remoteRegistry = { ...parsed, schemas: sanitizedSchemas } as SchemaRegistry;
       const newSchemasAdded: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
       for (const remoteSchema of remoteRegistry.schemas) {
         const local = schemaService.getSchemaById(remoteSchema.id);
@@ -126,6 +151,8 @@ class SyncService {
       const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
       this.logEvent('error', message);
       return { ok: false, error: message, newSchemasAdded: [], conflicts: [], unchanged: 0 };
+    } finally {
+      endInternalSync();
     }
   }
 
@@ -134,6 +161,12 @@ class SyncService {
     if (missing) { this.logEvent('error', missing); return { ok: false, error: missing }; }
     const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
+    // V14.6 — THE fix. beginInternalSync() here means the markAllSynced()
+    // call below (which mutates schemaService and would otherwise
+    // re-trigger autoSyncService's push scheduler) is now correctly
+    // recognized as self-inflicted and suppressed. endInternalSync() runs
+    // in `finally` so it ALWAYS clears, even if putFile() throws.
+    beginInternalSync();
     try {
       const registry = schemaService.getRegistry();
       const content = JSON.stringify(registry, null, 2);
@@ -154,6 +187,8 @@ class SyncService {
       const msg = apiErr?.message || (e as Error)?.message || 'Unknown error during synchronization.';
       this.logEvent('error', msg);
       return { ok: false, error: msg, requiresPullFirst: requiresPull };
+    } finally {
+      endInternalSync();
     }
   }
 
@@ -167,7 +202,7 @@ class SyncService {
       const fileHandle = await this.directoryHandle.getFileHandle('schema.json', { create: false });
       const file = await fileHandle.getFile();
       const text = await file.text();
-      const parsed = JSON.parse(text);
+      const parsed = sanitizeIncomingSchema(JSON.parse(text));
       const incoming = parsed as SchemaModel;
       const conflict = detectConflict(activeSchema, incoming);
       return { ok: true, conflict, incoming };
@@ -189,6 +224,7 @@ class SyncService {
   async syncNow(): Promise<{ ok: boolean; error?: string }> {
     if (this.config.source === 'github') { const result = await this.pullRegistryFromGitHub(); return { ok: result.ok, error: result.error }; }
     this.status = 'syncing'; this.notify();
+    beginInternalSync();
     try {
       const activeSchema = schemaService.getActiveSchema();
       const result = await this.pullFromSharedLocation(activeSchema);
@@ -198,6 +234,7 @@ class SyncService {
       this.notify();
       return { ok: result.ok, error: result.error };
     } catch (e) { this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
+    finally { endInternalSync(); }
   }
 }
 export const syncService = new SyncService();

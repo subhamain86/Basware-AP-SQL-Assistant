@@ -4,9 +4,9 @@ import { validateDecodeEntries } from '../engines/decodeEngine';
 import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
-import { validateSchemaName } from '../utils/validation';
+import { validateSchemaName, sanitizeIncomingSchema } from '../utils/validation';
 
-const STORAGE_KEY = 'sqla.registry.v145';
+const STORAGE_KEY = 'sqla.registry.v146';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 
 export class SchemaService {
@@ -40,12 +40,17 @@ export class SchemaService {
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
 
+  /** V14.6 — `schema` is sanitized via sanitizeIncomingSchema() BEFORE
+   * being stored, guaranteeing every table/column name, description, and
+   * decode value is a real string (never undefined) regardless of what
+   * the uploaded JSON actually contained. */
   importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string } {
     const nameError = this.validateNewSchemaName(customName);
     if (nameError) return { ok: false, error: nameError };
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
+    const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;
     const id = makeId('schema');
-    const withDefaults: SchemaModel = { id, name: customName.trim(), version: schema.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: schema.tables, relationships: schema.relationships || [], originalFileName: originalFileName || undefined };
+    const withDefaults: SchemaModel = { id, name: customName.trim(), version: sanitized.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: sanitized.tables, relationships: sanitized.relationships || [], originalFileName: originalFileName || undefined };
     this.registry.schemas.push(withDefaults);
     this.persist();
     return { ok: true, schemaId: id };
@@ -177,8 +182,9 @@ export class SchemaService {
   async applySynchronizedSchema(schemaId: string, incoming: SchemaModel, source: 'location' | 'github'): Promise<void> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return;
-    schema.tables = incoming.tables;
-    schema.relationships = incoming.relationships;
+    const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
+    schema.tables = sanitized.tables;
+    schema.relationships = sanitized.relationships;
     schema.lastSyncedAt = new Date().toISOString();
     schema.versionMeta = await stampNewVersion(schema, source);
     this.persist();
@@ -187,13 +193,18 @@ export class SchemaService {
   replaceSchemaContent(schemaId: string, incoming: SchemaModel): void {
     const idx = this.registry.schemas.findIndex((s) => s.id === schemaId);
     if (idx === -1) return;
+    const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
     const wasActive = this.registry.schemas[idx].status === 'active';
-    this.registry.schemas[idx] = { ...incoming, status: wasActive ? 'active' : incoming.status };
+    this.registry.schemas[idx] = { ...sanitized, status: wasActive ? 'active' : sanitized.status };
     this.persist();
   }
+  /** V14.6 — sanitized before storage: a schema arriving from the shared
+   * repository during automatic sync is just as "external/untrusted" as
+   * a manual JSON import, and must be defended against the same way. */
   addSchemaFromRemote(incoming: SchemaModel): void {
     if (this.registry.schemas.some((s) => s.id === incoming.id)) return;
-    this.registry.schemas.push({ ...incoming, status: 'inactive' });
+    const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
+    this.registry.schemas.push({ ...sanitized, status: 'inactive' });
     this.persist();
   }
   markAllSynced(): void {

@@ -255,6 +255,8 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--brand); out
 .sync-log-error { border-color: rgba(214,69,80,.3); }
 .sync-log-push svg { color: var(--brand); }
 .sync-log-pull svg { color: #2f9e5b; }
+.sync-log-suppressed svg { color: #9aa7c2; }
+.sync-log-suppressed { opacity: .75; }
 
 .schema-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: .75rem; }
 .schema-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }

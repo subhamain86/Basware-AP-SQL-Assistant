@@ -1,1 +1,1 @@
-{ "name": "sql-assistant", "version": "14.5.0", "type": "module", "scripts": { "build": "tsc -p tsconfig.json --noEmit && vite build" } }
+{ "name": "sql-assistant", "version": "14.6.0", "type": "module", "scripts": { "build": "tsc -p tsconfig.json --noEmit && vite build" } }

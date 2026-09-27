@@ -80,6 +80,11 @@ export function renderSchemaManagementSection(container: HTMLElement, opts: { al
         openSchemaNameModal({
           title: 'Name the Imported Schema', suggestedName: suggested, originalFileName,
           onConfirm: (name) => {
+            // V14.6: importSchema() internally runs sanitizeIncomingSchema()
+            // on this data BEFORE storing — a malformed/undefined table or
+            // column name in the uploaded file will never crash the app; it
+            // becomes an empty string, which the schema validator then
+            // reports as a clear issue if the user tries to use it.
             const result = schemaService.importSchema(parsed, name, originalFileName);
             if (result.ok) { preview.innerHTML = `<div class="issue-box mini ok">${icon('check', 14)} Imported as "${name}" — it will sync automatically once the Secret Vault is unlocked.</div>`; store.pushToast('success', 'Schema imported.'); }
             else preview.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;

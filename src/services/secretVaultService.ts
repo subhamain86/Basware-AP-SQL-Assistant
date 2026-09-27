@@ -2,9 +2,9 @@ import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob, t
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { safeString, safeTrim } from '../utils/validation';
 
-const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v145';
-const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v145';
-const DEVICE_TAG_KEY = 'sqla.deviceTag.v145';
+const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v146';
+const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v146';
+const DEVICE_TAG_KEY = 'sqla.deviceTag.v146';
 
 export interface SecretVaultConfig { githubRepo: string; githubBranch: string; githubSchemaPath: string; githubToken: string; sharedLocationLabel: string; }
 export interface VaultVersionMeta { updatedAt: string; updatedByDevice: string; checksum: string; }

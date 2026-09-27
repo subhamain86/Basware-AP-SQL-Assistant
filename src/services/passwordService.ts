@@ -1,6 +1,6 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
-const STORAGE_KEY = 'sqla.pwvault.v145';
-const MARKER = 'sqla-verified-marker-v145';
+const STORAGE_KEY = 'sqla.pwvault.v146';
+const MARKER = 'sqla-verified-marker-v146';
 const DEFAULT_PASSWORD = 'admin';
 let defaultBlobCache: string | null = null;
 async function getStoredBlobRaw(): Promise<string> {

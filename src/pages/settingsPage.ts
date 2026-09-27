@@ -196,12 +196,13 @@ export function renderSettingsPage(container: HTMLElement): void {
           <div id="conflictBannerMountSync" class="mt"></div>
         </div>
         <div class="builder-panel">
-          <h3>${icon('clock', 15)} Custom Sync Time</h3>
+          <h3>${icon('clock', 15)} Sync Time <span class="hint">(controls the periodic background PULL interval only)</span></h3>
+          <p class="hint">The navbar "Sync Time" dropdown is the ONLY thing that starts a recurring background check — it defaults to <strong>Manual</strong> (no periodic timer at all). Every other synchronization event is one-shot: exactly once after a genuine local schema edit (a short debounce, never repeating on its own), or once when you explicitly select "Sync Now".</p>
           ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}" /></label><button class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time (navbar) is not "Custom".</p>'}
           <h3 class="mt">${icon('shield-alert', 15)} Conflict Management</h3>
           <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a background sync finds a schema that changed both locally and remotely, it appears as a persistent conflict (not just a disappearing toast) here and on the Schema page, with Use Local / Use Remote resolution.</p>
           <h3 class="mt">${icon('history', 15)} Synchronization Activity Log</h3>
-          <p class="hint">A live record of automatic discovery/push/pull events — proof that "automatic synchronization" is genuinely happening in the background.</p>
+          <p class="hint">A live, timestamped record of every automatic discovery/push/pull event. If synchronization is ever firing more often than expected, this log is the first place to check — each entry has a real timestamp, so repeated events would be immediately visible here.</p>
           <div id="syncLogMount"></div>
         </div>
       </div>`;
