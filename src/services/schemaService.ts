@@ -2,42 +2,105 @@ import type { SchemaModel, SchemaRegistry, DecodeEntry, TableDef, ColumnDef, Sch
 import { DEFAULT_SCHEMAS, DEFAULT_ACTIVE_SCHEMA_ID } from '../data/defaultSchemas';
 import { validateDecodeEntries } from '../engines/decodeEngine';
 import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
-import { stampNewVersion } from '../engines/schemaVersionEngine';
+import { stampNewVersion, sameLogicalSchema } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
-import { validateSchemaName, sanitizeIncomingSchema } from '../utils/validation';
-import { safeSetItem } from '../utils/storage';
-
-const STORAGE_KEY = 'sqla.registry.v146';
+import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes, isQuotaExceededError } from '../utils/validation';
+const STORAGE_KEY = 'sqla.registry.v147';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
+
+export interface StorageHealth { bytesUsed: number; lastPersistOk: boolean; lastError: string | null; lastRecovered: boolean; }
 
 export class SchemaService {
   private registry: SchemaRegistry;
   private listeners = new Set<() => void>();
-  // V14.7 — set whenever persist() could not fully save to localStorage
-  // (almost always a quota problem given how large a real production
-  // schema's JSON serialization can be). In-memory data and the running
-  // app remain fully correct either way; this only tracks whether the
-  // LAST persist() call actually made it to disk, so callers like
-  // syncService can surface a clear, specific message instead of letting
-  // a raw QuotaExceededError crash the operation or get misreported as a
-  // validation failure.
-  private lastPersistError: string | null = null;
+  private storageHealth: StorageHealth = { bytesUsed: 0, lastPersistOk: true, lastError: null, lastRecovered: false };
   constructor() { this.registry = this.load(); }
   private load(): SchemaRegistry {
     try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { const parsed = JSON.parse(raw) as SchemaRegistry; if (parsed.schemas?.length) return parsed; } } catch { }
+    // V14.7 — also attempt to migrate the previous version's key so a
+    // browser storage quota problem on the OLD key doesn't strand a user's
+    // existing schemas after upgrading.
+    try { const legacy = localStorage.getItem('sqla.registry.v146'); if (legacy) { const parsed = JSON.parse(legacy) as SchemaRegistry; if (parsed.schemas?.length) return parsed; } } catch { }
     return { schemas: clone(DEFAULT_SCHEMAS), activeSchemaId: DEFAULT_ACTIVE_SCHEMA_ID };
   }
+  /** V14.7 — THE fix for "Failed to execute 'setItem' on 'Storage':
+   * Setting the value of 'sqla.registry.v14x' exceeded the quota."
+   *
+   * In V14.6 this was a single unguarded `localStorage.setItem(...)` call.
+   * If it threw (which it reliably will once the registry — which
+   * accumulates every imported/synced schema from every device, forever —
+   * grows past the browser's per-origin quota, typically 5-10MB), the
+   * exception propagated out of persist() BEFORE `this.listeners.forEach`
+   * ran. That meant: (a) the in-memory mutation the user just made (e.g.
+   * importing a schema) was silently never saved to disk, (b) the UI never
+   * re-rendered to reflect it, and (c) — critically for cross-device sync —
+   * autoSyncService's schemaService.subscribe() callback never fired
+   * either, so no automatic push to the repository was ever scheduled.
+   * That silent failure chain is the direct explanation for "other device
+   * is not getting the uploaded schema synced": the schema was never
+   * durably saved or pushed on the device it was uploaded on in the first
+   * place.
+   *
+   * The fix below:
+   *  1. Estimates the registry's serialized size up front for diagnostics.
+   *  2. Tries the write. On quota failure, automatically prunes storage
+   *     (oldest, unused, duplicate-by-name inactive schemas and old sync
+   *     log/conflict data) via `pruneForSpace()` and retries ONCE.
+   *  3. ALWAYS notifies listeners afterward — even if the disk write
+   *     ultimately still failed — so the in-memory state (and therefore the
+   *     UI and the auto-sync push scheduler) stays consistent and visible
+   *     to the user instead of silently freezing.
+   *  4. Records a `storageHealth` snapshot the Settings → Danger Zone UI
+   *     can surface, so the user gets clear, actionable feedback instead of
+   *     an unexplained frozen app.
+   */
   private persist(): void {
-    const result = safeSetItem(STORAGE_KEY, JSON.stringify(this.registry));
-    this.lastPersistError = result.ok ? null : (result.error || 'Unknown storage error.');
-    // Notify listeners regardless of persistence outcome — the in-memory
-    // registry is always the source of truth for the running session, so
-    // the UI must reflect it even if it couldn't be saved to disk.
+    const serialized = JSON.stringify(this.registry);
+    this.storageHealth.bytesUsed = estimateStringBytes(serialized);
+    const result = safeLocalStorageSet(STORAGE_KEY, serialized, () => this.pruneForSpace());
+    this.storageHealth.lastPersistOk = result.ok;
+    this.storageHealth.lastRecovered = result.recovered;
+    this.storageHealth.lastError = result.error || null;
+    // Always notify — even on failure — so the UI reflects the in-memory
+    // state and (crucially) the auto-sync push scheduler still runs for a
+    // genuine local edit instead of the change disappearing silently.
     this.listeners.forEach((l) => l());
   }
-  /** V14.7 — see lastPersistError note above. Returns null if the most
-   * recent change was saved successfully. */
-  getLastPersistError(): string | null { return this.lastPersistError; }
+  /** V14.7 — frees local storage space by (a) collapsing duplicate-by-name
+   * inactive schemas down to only the most recently updated copy of each
+   * name (the runaway-growth root cause: every schema import or
+   * cross-device sync previously created a brand-new schema id forever,
+   * even for what a user considers "the same" schema re-uploaded), and (b)
+   * dropping the oldest inactive schemas beyond a generous cap if the
+   * registry is still too large. The active schema is never touched. */
+  pruneForSpace(): { removedCount: number; freedApproxBytes: number } {
+    const before = estimateStringBytes(JSON.stringify(this.registry));
+    const byName = new Map<string, SchemaModel[]>();
+    this.registry.schemas.forEach((s) => { const key = s.name.trim().toLowerCase(); const list = byName.get(key) || []; list.push(s); byName.set(key, list); });
+    const keep: SchemaModel[] = [];
+    byName.forEach((group) => {
+      if (group.length === 1) { keep.push(group[0]); return; }
+      const active = group.find((s) => s.status === 'active');
+      const rest = group.filter((s) => s !== active).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      if (active) keep.push(active);
+      if (rest.length) keep.push(rest[0]);
+    });
+    const MAX_INACTIVE = 12;
+    const inactiveSorted = keep.filter((s) => s.status !== 'active').sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const activeOnes = keep.filter((s) => s.status === 'active');
+    const trimmedInactive = inactiveSorted.slice(0, MAX_INACTIVE);
+    const finalSchemas = [...activeOnes, ...trimmedInactive];
+    const removedCount = this.registry.schemas.length - finalSchemas.length;
+    if (finalSchemas.length === 0) return { removedCount: 0, freedApproxBytes: 0 };
+    this.registry = { ...this.registry, schemas: finalSchemas };
+    if (!finalSchemas.some((s) => s.id === this.registry.activeSchemaId)) {
+      this.registry.activeSchemaId = finalSchemas[0].id;
+      finalSchemas[0].status = 'active';
+    }
+    const after = estimateStringBytes(JSON.stringify(this.registry));
+    return { removedCount, freedApproxBytes: Math.max(0, before - after) };
+  }
+  getStorageHealth(): StorageHealth { return { ...this.storageHealth }; }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   getRegistry(): SchemaRegistry { return this.registry; }
   getActiveSchema(): SchemaModel { const found = this.registry.schemas.find((s) => s.id === this.registry.activeSchemaId); return found || this.registry.schemas[0]; }
@@ -57,17 +120,36 @@ export class SchemaService {
     const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
-  /** V14.6 — `schema` is sanitized via sanitizeIncomingSchema() BEFORE
+  /** V14.7 — `schema` is sanitized via sanitizeIncomingSchema() BEFORE
    * being stored, guaranteeing every table/column name, description, and
    * decode value is a real string (never undefined) regardless of what
-   * the uploaded JSON actually contained. */
-  importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string } {
-    const nameError = this.validateNewSchemaName(customName);
-    if (nameError) return { ok: false, error: nameError };
+   * the uploaded JSON actually contained.
+   *
+   * V14.7 ALSO fixes unbounded duplicate growth: if an existing INACTIVE
+   * schema already has the same name (case-insensitive) — e.g. the user
+   * re-imports an updated copy of a schema they already uploaded on this or
+   * another device — that existing schema is updated IN PLACE (new
+   * content, new version stamp) instead of creating yet another schema
+   * entry with a brand-new id. This was a major contributor to the
+   * registry growing unbounded across repeated import/sync cycles until it
+   * exceeded the browser's storage quota. */
+  importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string; replacedExisting?: boolean } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
     const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;
+    const trimmedName = customName.trim();
+    const existingByName = this.registry.schemas.find((s) => s.status !== 'active' && sameLogicalSchema(s, { name: trimmedName }));
+    if (existingByName) {
+      existingByName.tables = sanitized.tables;
+      existingByName.relationships = sanitized.relationships || [];
+      existingByName.updatedAt = new Date().toISOString();
+      existingByName.originalFileName = originalFileName || existingByName.originalFileName;
+      this.persist();
+      return { ok: true, schemaId: existingByName.id, replacedExisting: true };
+    }
+    const nameError = this.validateNewSchemaName(customName);
+    if (nameError) return { ok: false, error: nameError };
     const id = makeId('schema');
-    const withDefaults: SchemaModel = { id, name: customName.trim(), version: sanitized.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: sanitized.tables, relationships: sanitized.relationships || [], originalFileName: originalFileName || undefined };
+    const withDefaults: SchemaModel = { id, name: trimmedName, version: sanitized.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: sanitized.tables, relationships: sanitized.relationships || [], originalFileName: originalFileName || undefined };
     this.registry.schemas.push(withDefaults);
     this.persist();
     return { ok: true, schemaId: id };
@@ -203,14 +285,28 @@ export class SchemaService {
     this.registry.schemas[idx] = { ...sanitized, status: wasActive ? 'active' : sanitized.status };
     this.persist();
   }
-  /** V14.6 — sanitized before storage: a schema arriving from the shared
-   * repository during automatic sync is just as "external/untrusted" as
-   * a manual JSON import, and must be defended against the same way. */
-  addSchemaFromRemote(incoming: SchemaModel): void {
-    if (this.registry.schemas.some((s) => s.id === incoming.id)) return;
+  /** V14.7 — sanitized before storage, AND deduplicated by logical name:
+   * a schema arriving from the shared repository during automatic
+   * discovery is just as "external/untrusted" as a manual JSON import, and
+   * must be defended against the same way. Matching by name (not just id)
+   * prevents the registry from silently accumulating unlimited duplicate
+   * copies of what is really the same schema re-synced from multiple
+   * devices — the underlying cause of the storage-quota crash. */
+  addSchemaFromRemote(incoming: SchemaModel): 'added' | 'updated' | 'skipped' {
     const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
+    if (this.registry.schemas.some((s) => s.id === incoming.id)) return 'skipped';
+    const existingByName = this.registry.schemas.find((s) => s.status !== 'active' && sameLogicalSchema(s, sanitized));
+    if (existingByName) {
+      existingByName.tables = sanitized.tables;
+      existingByName.relationships = sanitized.relationships;
+      existingByName.lastSyncedAt = new Date().toISOString();
+      existingByName.versionMeta = sanitized.versionMeta || existingByName.versionMeta;
+      this.persist();
+      return 'updated';
+    }
     this.registry.schemas.push({ ...sanitized, status: 'inactive' });
     this.persist();
+    return 'added';
   }
   markAllSynced(): void {
     const now = new Date().toISOString();

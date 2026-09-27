@@ -1,24 +1,19 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob, type EncryptedBlob } from './cryptoService';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
-import { safeString, safeTrim } from '../utils/validation';
-
-const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v146';
-const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v146';
-const DEVICE_TAG_KEY = 'sqla.deviceTag.v146';
-
+import { safeString, safeTrim, safeLocalStorageSet } from '../utils/validation';
+const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v147';
+const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v147';
+const DEVICE_TAG_KEY = 'sqla.deviceTag.v147';
 export interface SecretVaultConfig { githubRepo: string; githubBranch: string; githubSchemaPath: string; githubToken: string; sharedLocationLabel: string; }
 export interface VaultVersionMeta { updatedAt: string; updatedByDevice: string; checksum: string; }
 interface StoredVaultFile { blob: EncryptedBlob; meta: VaultVersionMeta; }
-
 export const DEFAULT_BOOTSTRAP_CONFIG: Omit<SecretVaultConfig, 'githubToken' | 'sharedLocationLabel'> = {
   githubRepo: 'subhamain86/Basware-AP-SQL-Assistant',
   githubBranch: 'main',
   githubSchemaPath: 'sql-assistant-data/schemas/registry.json'
 };
 const VAULT_BLOB_PATH = 'sql-assistant-data/vault/secret-vault.enc.json';
-
 function bootstrapConfig(): SecretVaultConfig { return { ...DEFAULT_BOOTSTRAP_CONFIG, githubToken: '', sharedLocationLabel: '' }; }
-
 function normalizeVaultConfig(raw: unknown): SecretVaultConfig {
   const r = (raw && typeof raw === 'object') ? (raw as Partial<SecretVaultConfig>) : {};
   return {
@@ -29,17 +24,15 @@ function normalizeVaultConfig(raw: unknown): SecretVaultConfig {
     sharedLocationLabel: safeString(r.sharedLocationLabel, '')
   };
 }
-
 export function maskToken(token: unknown): string {
   const t = safeString(token);
   if (!t) return 'Not configured';
   const visibleTail = t.length > 4 ? t.slice(-4) : '';
   return `${'•'.repeat(12)}${visibleTail}`;
 }
-
 function getDeviceTag(): string {
   let tag = localStorage.getItem(DEVICE_TAG_KEY);
-  if (!tag) { tag = 'device-' + Math.random().toString(36).slice(2, 8); localStorage.setItem(DEVICE_TAG_KEY, tag); }
+  if (!tag) { tag = 'device-' + Math.random().toString(36).slice(2, 8); safeLocalStorageSet(DEVICE_TAG_KEY, tag); }
   return tag;
 }
 async function computeConfigChecksum(config: SecretVaultConfig): Promise<string> {
@@ -47,9 +40,7 @@ async function computeConfigChecksum(config: SecretVaultConfig): Promise<string>
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical) as BufferSource);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-
 export interface VaultBootstrapOutcome { ok: boolean; source: 'local' | 'repository' | 'created-fresh'; error?: string; }
-
 class SecretVaultService {
   private unlockedConfig: SecretVaultConfig | null = null;
   private unlockedPassword: string | null = null;
@@ -57,21 +48,17 @@ class SecretVaultService {
   private listeners = new Set<() => void>();
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
-
   exists(): boolean { return localStorage.getItem(SECRET_VAULT_STORAGE_KEY) !== null; }
   isUnlocked(): boolean { return this.unlockedConfig !== null; }
   getConfig(): SecretVaultConfig | null { return this.unlockedConfig; }
   hasToken(): boolean { return !!this.unlockedConfig?.githubToken; }
-
   private async persistLocal(config: SecretVaultConfig, password: string, meta: VaultVersionMeta): Promise<void> {
     const blob = await encryptWithSecret(password, JSON.stringify(config));
-    localStorage.setItem(SECRET_VAULT_STORAGE_KEY, JSON.stringify({ blob, meta } as StoredVaultFile));
+    safeLocalStorageSet(SECRET_VAULT_STORAGE_KEY, JSON.stringify({ blob, meta } as StoredVaultFile));
     this.lastMeta = meta;
   }
-
   async tryAutoUnlock(adminPassword: string): Promise<VaultBootstrapOutcome> {
     const rawLocal = localStorage.getItem(SECRET_VAULT_STORAGE_KEY);
-
     if (rawLocal) {
       try {
         const parsed = JSON.parse(rawLocal) as StoredVaultFile;
@@ -84,7 +71,6 @@ class SecretVaultService {
         return { ok: true, source: 'local' };
       } catch { return { ok: false, source: 'local', error: 'Secret Vault data is corrupted.' }; }
     }
-
     try {
       const remoteFile = await getFile(DEFAULT_BOOTSTRAP_CONFIG.githubRepo, DEFAULT_BOOTSTRAP_CONFIG.githubBranch, VAULT_BLOB_PATH, '');
       if (remoteFile) {
@@ -100,7 +86,6 @@ class SecretVaultService {
         }
       }
     } catch { }
-
     const config = bootstrapConfig();
     const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(config) };
     await this.persistLocal(config, adminPassword, meta);
@@ -109,9 +94,7 @@ class SecretVaultService {
     this.notify();
     return { ok: true, source: 'created-fresh' };
   }
-
   lock(): void { this.unlockedConfig = null; this.unlockedPassword = null; this.notify(); }
-
   async saveConfig(newConfig: Partial<SecretVaultConfig>, adminPasswordOverride?: string): Promise<{ ok: boolean; error?: string }> {
     if (!this.unlockedConfig) return { ok: false, error: 'Secret Vault is locked.' };
     const password = adminPasswordOverride || this.unlockedPassword;
@@ -124,7 +107,6 @@ class SecretVaultService {
     this.pushToRepository().catch(() => {});
     return { ok: true };
   }
-
   async reencryptForNewPassword(oldPassword: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
     const raw = localStorage.getItem(SECRET_VAULT_STORAGE_KEY);
     if (!raw) return { ok: true };
@@ -140,7 +122,6 @@ class SecretVaultService {
       return { ok: true };
     } catch { return { ok: false, error: 'Secret Vault data is corrupted.' }; }
   }
-
   async pushToRepository(): Promise<{ ok: boolean; error?: string }> {
     if (!this.unlockedConfig || !this.unlockedPassword) return { ok: false, error: 'Secret Vault is locked.' };
     try {
@@ -149,13 +130,11 @@ class SecretVaultService {
       const content = JSON.stringify({ blob, meta } as StoredVaultFile, null, 2);
       const lastSha = localStorage.getItem(VAULT_LAST_SHA_KEY);
       const result = await putFile(DEFAULT_BOOTSTRAP_CONFIG.githubRepo, DEFAULT_BOOTSTRAP_CONFIG.githubBranch, VAULT_BLOB_PATH, this.unlockedConfig.githubToken, content, `Update Secret Vault configuration (${new Date().toISOString()})`, lastSha);
-      localStorage.setItem(VAULT_LAST_SHA_KEY, result.sha);
+      safeLocalStorageSet(VAULT_LAST_SHA_KEY, result.sha);
       this.lastMeta = meta;
       return { ok: true };
     } catch (e) { return { ok: false, error: isGitHubApiError(e) ? e.message : (e as Error).message || 'Unknown error while synchronizing the Secret Vault.' }; }
   }
-
   resetVault(): void { localStorage.removeItem(SECRET_VAULT_STORAGE_KEY); localStorage.removeItem(VAULT_LAST_SHA_KEY); this.unlockedConfig = null; this.unlockedPassword = null; this.lastMeta = null; this.notify(); }
 }
-
 export const secretVaultService = new SecretVaultService();

@@ -15,6 +15,14 @@ function splitRepo(repoFullNameRaw: unknown): { owner: string; repo: string } | 
   return { owner: parts[0], repo: parts[1] };
 }
 function isRepoError(x: { owner: string; repo: string } | GitHubApiError): x is GitHubApiError { return 'message' in x; }
+/** V14.7 — getFile() has always worked without a token for PUBLIC
+ * repositories (GitHub allows unauthenticated GET on public repo contents,
+ * just at a lower rate limit). This is deliberately exploited by
+ * syncService's new `discoverPublicRegistry()` so that devices can find a
+ * newly-uploaded schema WITHOUT first unlocking the password-protected
+ * Secret Vault — fixing the "other device is not getting the uploaded
+ * schema synced" report, since pulling previously required the vault to be
+ * unlocked on every device before any discovery could happen at all. */
 export async function getFile(repoFullNameRaw: unknown, branchRaw: unknown, pathRaw: unknown, tokenRaw: unknown): Promise<GitHubFileResult | null> {
   const parsed = splitRepo(repoFullNameRaw);
   if (isRepoError(parsed)) throw parsed;
@@ -27,7 +35,7 @@ export async function getFile(repoFullNameRaw: unknown, branchRaw: unknown, path
   try { res = await fetch(url, { headers: authHeaders(token) }); }
   catch (e) { throw { status: null, message: 'Network error — could not reach GitHub. Check your internet connection.' } as GitHubApiError; }
   if (res.status === 404) return null;
-  if (res.status === 401 || res.status === 403) throw { status: res.status, message: 'GitHub authentication failed — check the access token stored in the Secret Vault.', field: 'githubToken' } as GitHubApiError;
+  if (res.status === 401 || res.status === 403) throw { status: res.status, message: 'GitHub authentication failed — check the access token stored in the Secret Vault, or you have hit the unauthenticated rate limit.', field: 'githubToken' } as GitHubApiError;
   if (!res.ok) throw { status: res.status, message: `GitHub returned an unexpected error (HTTP ${res.status}).` } as GitHubApiError;
   const data = await res.json();
   if (Array.isArray(data)) throw { status: null, message: `"${path}" is a folder, not a file — configure a file path.`, field: 'githubSchemaPath' } as GitHubApiError;

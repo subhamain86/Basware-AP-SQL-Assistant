@@ -1,6 +1,14 @@
-import type { CrQueryState } from '../types';
-import { buildWhereClause } from './filterEngine';
+import type { CrQueryState, FilterCondition } from '../types';
 export interface CrBuildResult { sql: string; blocked: boolean; reason?: string; }
+function buildWhereClause(filters: FilterCondition[]): string {
+  if (filters.length === 0) return '';
+  return filters.map((f, idx) => {
+    const clause = f.operator === 'IS NULL' ? `${f.table}.${f.column} IS NULL`
+      : f.operator === 'IS NOT NULL' ? `${f.table}.${f.column} IS NOT NULL`
+      : `${f.table}.${f.column} ${f.operator} ${formatValue(f.value)}`;
+    return idx === 0 ? clause : `${f.combinator} ${clause}`;
+  }).join('\n  ');
+}
 function formatValue(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === '') return 'NULL';

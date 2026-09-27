@@ -5,7 +5,6 @@ import { schemaService } from '../services/schemaService';
 import { syncService } from '../services/syncService';
 import { isBrowserOnline } from '../services/onlineNlpService';
 import type { Route, Theme, SyncSource, SyncTimeOption } from '../types';
-
 interface NavLeaf { id: Route; label: string; icon: Parameters<typeof icon>[0]; tourSelector?: string; }
 interface NavGroup { id: string; label: string; icon: Parameters<typeof icon>[0]; children: NavLeaf[]; tourSelector?: string; }
 const NAV_STRUCTURE: (NavLeaf | NavGroup)[] = [
@@ -22,23 +21,19 @@ const NAV_STRUCTURE: (NavLeaf | NavGroup)[] = [
 function isGroup(entry: NavLeaf | NavGroup): entry is NavGroup { return 'children' in entry; }
 const SYNC_SOURCE_LABELS: Record<SyncSource, string> = { 'shared-location': 'Shared Location', github: 'GitHub' };
 const SYNC_TIME_LABELS: Record<SyncTimeOption, string> = { manual: 'Manual', '15m': 'Every 15 minutes', '30m': 'Every 30 minutes', '1h': 'Every 1 hour', '4h': 'Every 4 hours', '6h': 'Every 6 hours', daily: 'Daily', custom: 'Custom' };
-
 export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => void, onStartTour: () => void, signatureName: string): void {
   let menuOpen = false;
   let expandedGroup: string | null = null;
   let sourceMenuOpen = false;
   let timeMenuOpen = false;
-
   function activeRoute(): Route { return store.route; }
   function routeIsInGroup(group: NavGroup): boolean { return group.children.some((c) => c.id === activeRoute()); }
-
   function draw(): void {
     const activeSchema = schemaService.getActiveSchema();
     const cfg = syncService.getConfig();
     const settingsLockIcon = store.settingsUnlocked ? 'unlock' : 'lock';
     const online = isBrowserOnline();
     const conflictCount = syncService.getPendingConflicts().length;
-
     container.innerHTML = `
       <nav class="navbar">
         <div class="container-fluid navbar-inner">
@@ -46,10 +41,9 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
             <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
             <button class="hero-brand-row" id="logoHomeBtn" type="button" aria-label="Go to Quick Start" data-tour="brand">
               <span class="app-logo-badge">${logoMarkSvg(26)}</span>
-              <span class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14.6</span></span>
+              <span class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V14.7</span></span>
             </button>
           </div>
-
           <div class="navbar-sync-cluster" data-tour="navbar-sync">
             <div class="sync-dropdown-wrap">
               <button class="sync-dropdown-btn" id="syncSourceBtn" type="button" aria-haspopup="true" aria-expanded="${sourceMenuOpen}">${icon('folder-sync', 15)} ${SYNC_SOURCE_LABELS[cfg.source]} ${icon('chevron-down', 13)}</button>
@@ -66,7 +60,6 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
             </div>
             ${conflictCount > 0 ? `<span class="conflict-nav-badge" title="${conflictCount} unresolved sync conflict(s)">${icon('shield-alert', 13)} ${conflictCount}</span>` : ''}
           </div>
-
           <div class="navbar-right-cluster">
             <span class="schema-badge" data-tour="active-schema-badge" title="Active schema">${icon('database', 14)} ${activeSchema.name}</span>
             <span class="net-status-badge ${online ? 'is-online' : 'is-offline'}" title="${online ? 'Browser reports online' : 'Browser reports offline — NLP will use the local engine'}">${icon(online ? 'wifi' : 'wifi-off', 14)}</span>
@@ -80,7 +73,7 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
               </div>
             </div>
             <button class="btn btn-outline btn-sm navbar-tour-btn" id="tourBtnNav" type="button" data-tour="guided-walkthrough-btn">${icon('play', 15)}<span class="tour-btn-label">Guided Walkthrough</span></button>
-            <span class="navbar-signature" data-tour="signature" title="Crafted by ${signatureName}">${icon('user', 14)} ${signatureName}</span>
+            <span class="navbar-signature" data-tour="signature" title="Crafted by ${signatureName}">${icon('user', 14)} <span>${signatureName}</span></span>
           </div>
         </div>
       </nav>
@@ -125,11 +118,9 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
       </div>`;
     wireEvents();
   }
-
   function themeIconName(): Parameters<typeof icon>[0] { return store.theme === 'light' ? 'sun' : store.theme === 'dark' ? 'moon' : 'monitor'; }
   function closeMenu(): void { menuOpen = false; expandedGroup = null; draw(); }
   function openMenu(): void { menuOpen = true; draw(); }
-
   function wireEvents(): void {
     container.querySelector<HTMLButtonElement>('#navToggle')?.addEventListener('click', () => { menuOpen ? closeMenu() : openMenu(); });
     container.querySelector('#hamburgerCloseBtn')?.addEventListener('click', closeMenu);
@@ -153,7 +144,6 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
     container.querySelector<HTMLSelectElement>('#hbSyncTimeSelect')?.addEventListener('change', (e) => { syncService.setTime((e.target as HTMLSelectElement).value as SyncTimeOption); });
     document.addEventListener('click', () => { themeMenu?.setAttribute('hidden', ''); if (sourceMenuOpen || timeMenuOpen) { sourceMenuOpen = false; timeMenuOpen = false; draw(); } });
   }
-
   store.subscribe(draw);
   schemaService.subscribe(draw);
   syncService.subscribe(draw);

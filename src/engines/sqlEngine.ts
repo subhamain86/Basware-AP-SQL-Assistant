@@ -1,53 +1,60 @@
-import type { ReadOnlyQueryState, SchemaModel, TableDef, Dialect, SelectedColumnSpec } from '../types';
-import { buildWhereClause } from './filterEngine';
-import { buildDecodeExpression } from './decodeEngine';
-import { computeAutoJoinPlan, type AutoJoinPlan } from './joinAutoEngine';
-function findTable(schema: SchemaModel, name: string): TableDef | undefined { return schema.tables.find((t) => t.name === name); }
-function limitClause(dialect: Dialect, limit: number | null): { top: string; tail: string } {
-  if (!limit || limit <= 0) return { top: '', tail: '' };
-  switch (dialect) { case 'SQL Server': return { top: `TOP ${limit} `, tail: '' }; case 'Oracle': return { top: '', tail: `\nFETCH FIRST ${limit} ROWS ONLY` }; default: return { top: '', tail: `\nLIMIT ${limit}` }; }
+import type { ReadOnlyQueryState, SchemaModel, SelectedColumnSpec } from '../types';
+import { renderFilterClause } from './filterEngine';
+import { buildSchemaDecodeExpression } from './decodeEngine';
+import { computeAutoJoinPlan } from './joinAutoEngine';
+
+function renderColumn(spec: SelectedColumnSpec, schema: SchemaModel, dialect: ReadOnlyQueryState['dialect']): string {
+  if (spec.manualExpr) return spec.manualExpr;
+  const base = spec.aggregate ? `${spec.aggregate}(${spec.table}.${spec.column})` : `${spec.table}.${spec.column}`;
+  if (spec.displayMode === 'schema-decode') {
+    const table = schema.tables.find((t) => t.name === spec.table);
+    const col = table?.columns.find((c) => c.name === spec.column);
+    if (col && col.decode?.length) {
+      const alias = spec.alias || `${spec.column}_DESC`;
+      return buildSchemaDecodeExpression(`${spec.table}.${spec.column}`, col, alias, dialect);
+    }
+  }
+  return spec.alias ? `${base} AS ${spec.alias}` : base;
 }
-function renderColumn(sc: SelectedColumnSpec, schema: SchemaModel, dialect: Dialect): string {
-  if (sc.manualExpr) return `  ${sc.manualExpr}`;
-  const table = findTable(schema, sc.table); const col = table?.columns.find((c) => c.name === sc.column);
-  if (!col) return `  ${sc.table}.${sc.column}`;
-  let expr = `${sc.table}.${sc.column}`;
-  if (sc.aggregate) expr = `${sc.aggregate}(${expr})`;
-  const mode = sc.displayMode ?? (sc.useDecode ? 'schema-decode' : 'raw');
-  if (mode === 'schema-decode' && col.decode && col.decode.length > 0 && !sc.aggregate) return `  ${buildDecodeExpression(col, sc.table, dialect, sc.alias || undefined)}`;
-  const alias = sc.alias ? ` AS ${sc.alias}` : sc.aggregate ? ` AS ${sc.aggregate}_${sc.column}` : '';
-  return `  ${expr}${alias}`;
+
+function buildWhereClauseFromFilters(state: ReadOnlyQueryState): string {
+  if (state.filters.length === 0) return '';
+  const parts = state.filters.map((f, idx) => {
+    const clause = renderFilterClause(f.table, f.column, f.operator, f.value, f.value2);
+    return idx === 0 ? clause : `${f.combinator} ${clause}`;
+  });
+  return parts.join('\n  ');
 }
+
 export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): string {
   if (state.selectedTables.length === 0) return '-- Select at least one table (or describe your requirement above) to generate SQL.';
-  const primaryTable = state.selectedTables[0]; const primary = findTable(schema, primaryTable);
-  if (!primary) return `-- Unknown table: ${primaryTable}`;
-  const { top, tail } = limitClause(state.dialect, state.advanced.limit);
-  const selectCols = state.selectedColumns.length ? state.selectedColumns.map((sc) => renderColumn(sc, schema, state.dialect)).join(',\n') : `  ${primaryTable}.*`;
-  const explicitJoinLines = state.joins.map((j) => `${j.joinType} ${j.table} ON ${j.onLeftTable}.${j.onLeftColumn} = ${j.table}.${j.onRightColumn}`);
-  const explicitlyJoinedTables = new Set(state.joins.map((j) => j.table));
-  const otherSelectedTables = state.selectedTables.filter((t) => t !== primaryTable && !explicitlyJoinedTables.has(t));
-  const autoPlan: AutoJoinPlan = computeAutoJoinPlan(schema, primaryTable, otherSelectedTables, state.joinPathChoices);
-  const joinLines = [...explicitJoinLines, ...autoPlan.joinLines].join('\n');
-  const whereClause = buildWhereClause(state.filters);
-  const orderClause = state.sorts.length ? state.sorts.map((s) => `${s.table}.${s.column} ${s.direction}`).join(', ') : '';
-  const groupByClause = state.advanced.groupByColumns.length ? state.advanced.groupByColumns.join(', ') : '';
-  let core = `SELECT ${top}${state.advanced.distinct ? 'DISTINCT\n' : '\n'}${selectCols}\nFROM ${primaryTable}`;
-  if (joinLines) core += `\n${joinLines}`;
-  if (autoPlan.unresolvedWarnings.length) core += autoPlan.unresolvedWarnings.map((w) => `\n-- NOTE: ${w}`).join('');
-  if (whereClause) core += `\nWHERE ${whereClause}`;
-  if (groupByClause) core += `\nGROUP BY ${groupByClause}`;
-  if (state.advanced.havingClause.trim()) core += `\nHAVING ${state.advanced.havingClause.trim()}`;
-  if (orderClause) core += `\nORDER BY ${orderClause}`;
-  core += tail;
-  if (state.advanced.recursive) {
-    const pk = primary.columns.find((c) => c.isPrimaryKey)?.name || 'ID';
-    core = `WITH RECURSIVE hierarchy AS (\n  SELECT ${primaryTable}.*, 0 AS depth\n  FROM ${primaryTable}\n  WHERE ${primaryTable}.${pk} = :root_id\n  UNION ALL\n  SELECT child.*, hierarchy.depth + 1\n  FROM ${primaryTable} child\n  JOIN hierarchy ON child.PARENT_ID = hierarchy.${pk}\n)\nSELECT * FROM hierarchy` + tail;
+  const primaryTable = state.selectedTables[0];
+  const otherTables = state.selectedTables.slice(1);
+  const explicitJoinTables = new Set(state.joins.map((j) => j.table));
+  const autoJoinTargets = otherTables.filter((t) => !explicitJoinTables.has(t));
+  const autoPlan = computeAutoJoinPlan(schema, primaryTable, autoJoinTargets, state.joinPathChoices);
+
+  const selectList = state.selectedColumns.length
+    ? state.selectedColumns.map((c) => renderColumn(c, schema, state.dialect)).join(',\n  ')
+    : '*';
+
+  const lines: string[] = [];
+  if (state.advanced.ctes.length) {
+    const cteParts = state.advanced.ctes.filter((c) => c.name.trim() && c.body.trim()).map((c) => `${c.name} AS (\n  ${c.body}\n)`);
+    if (cteParts.length) lines.push(`WITH ${state.advanced.recursive ? 'RECURSIVE ' : ''}${cteParts.join(',\n')}`);
   }
-  if (state.advanced.saveAsView && state.advanced.saveAsView.trim()) core = `WITH ${state.advanced.saveAsView.trim()} AS (\n${core.split('\n').map((l) => '  ' + l).join('\n')}\n)\nSELECT * FROM ${state.advanced.saveAsView.trim()}${tail}`;
-  if (state.advanced.ctes.length > 0) {
-    const cteBodies = state.advanced.ctes.filter((c) => c.name.trim() && c.body.trim()).map((c) => `  ${c.name.trim()} AS (\n${c.body.trim().split('\n').map((l) => '    ' + l).join('\n')}\n  )`).join(',\n');
-    if (cteBodies) { if (core.trim().toUpperCase().startsWith('WITH ')) core = core.replace(/^WITH /i, `WITH\n${cteBodies},\n`); else core = `WITH\n${cteBodies}\n${core}`; }
+  lines.push(`SELECT ${state.advanced.distinct ? 'DISTINCT ' : ''}${state.advanced.limit && state.dialect === 'SQL Server' ? `TOP ${state.advanced.limit} ` : ''}${selectList}`);
+  lines.push(`FROM ${primaryTable}`);
+  autoPlan.joinLines.forEach((jl) => lines.push(jl));
+  state.joins.forEach((j) => lines.push(`${j.joinType} ${j.table} ON ${j.onLeftTable}.${j.onLeftColumn} = ${j.table}.${j.onRightColumn}`));
+  const where = buildWhereClauseFromFilters(state);
+  if (where) lines.push(`WHERE ${where}`);
+  if (state.advanced.groupByColumns.length) lines.push(`GROUP BY ${state.advanced.groupByColumns.join(', ')}`);
+  if (state.advanced.havingClause.trim()) lines.push(`HAVING ${state.advanced.havingClause.trim()}`);
+  if (state.sorts.length) lines.push(`ORDER BY ${state.sorts.map((s) => `${s.table}.${s.column} ${s.direction}`).join(', ')}`);
+  if (state.advanced.limit && state.dialect !== 'SQL Server') {
+    if (state.dialect === 'Oracle') lines.push(`FETCH FIRST ${state.advanced.limit} ROWS ONLY`);
+    else lines.push(`LIMIT ${state.advanced.limit}`);
   }
-  return core;
+  return lines.join('\n') + ';';
 }

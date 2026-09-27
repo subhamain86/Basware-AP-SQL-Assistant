@@ -1,5 +1,4 @@
 import type { SchemaModel } from '../types';
-
 export const CORE_SCHEMA: SchemaModel = {
   id: 'schema-core-ap-p2p', name: 'AP / P2P Core', version: '1.0', status: 'active',
   updatedAt: new Date().toISOString(), lastSyncedAt: null,
@@ -103,7 +102,6 @@ export const CORE_SCHEMA: SchemaModel = {
     { id: 'r8', fromTable: 'VENDOR', fromColumn: 'ORG_ID', toTable: 'ORGANIZATION', toColumn: 'ORG_ID', kind: 'many-to-one' }
   ]
 };
-
 export const EXTENDED_SCHEMA: SchemaModel = {
   id: 'schema-extended-p2p', name: 'AP / P2P Extended (with Contracts)', version: '1.0', status: 'inactive',
   updatedAt: new Date().toISOString(), lastSyncedAt: null,
@@ -121,6 +119,5 @@ export const EXTENDED_SCHEMA: SchemaModel = {
   ],
   relationships: [ ...CORE_SCHEMA.relationships, { id: 'r7', fromTable: 'CONTRACT', fromColumn: 'VENDOR_ID', toTable: 'VENDOR', toColumn: 'VENDOR_ID', kind: 'many-to-one' } ]
 };
-
 export const DEFAULT_SCHEMAS: SchemaModel[] = [CORE_SCHEMA, EXTENDED_SCHEMA];
 export const DEFAULT_ACTIVE_SCHEMA_ID = CORE_SCHEMA.id;

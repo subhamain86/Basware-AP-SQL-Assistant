@@ -1,6 +1,5 @@
 import type { SchemaModel, QueryRequirement, SelectedColumnSpec, FilterCondition, SortSpec, ColumnDef, TableDef, ClarificationQuestion } from '../types';
 import { makeId } from '../utils/id';
-
 interface ColumnRef { table: string; column: ColumnDef; }
 function allColumns(schema: SchemaModel): ColumnRef[] { return schema.tables.flatMap((t) => t.columns.map((c) => ({ table: t.name, column: c }))); }
 const TABLE_SYNONYMS: Record<string, string> = {
@@ -19,7 +18,6 @@ function descriptionOverlapScore(phraseTokens: string[], candidateText: string):
   if (candidateTokens.size === 0) return 0;
   let hits = 0; phraseTokens.forEach((t) => { if (candidateTokens.has(t)) hits += 1; }); return hits;
 }
-
 function findTableMentions(text: string, schema: SchemaModel): TableDef[] {
   const upper = text.toUpperCase(); const found: TableDef[] = [];
   for (const t of schema.tables) {
@@ -39,7 +37,6 @@ function findTableMentions(text: string, schema: SchemaModel): TableDef[] {
   if (bestNew) found.push(bestNew.t);
   return found;
 }
-
 function findColumnMentions(text: string, tables: TableDef[]): ColumnRef[] {
   const upper = text.toUpperCase(); const cols: ColumnRef[] = [];
   const pool = tables.length ? tables.flatMap((t) => t.columns.map((c) => ({ table: t.name, column: c }))) : [];
@@ -63,7 +60,6 @@ function findColumnMentions(text: string, tables: TableDef[]): ColumnRef[] {
   }
   return cols;
 }
-
 interface ComparisonPhrase { pattern: RegExp; operator: FilterCondition['operator']; }
 const COMPARISON_PHRASES: ComparisonPhrase[] = [
   { pattern: /greater than or equal to|at least|no less than|>=/, operator: '>=' }, { pattern: /less than or equal to|at most|no more than|<=/, operator: '<=' },
@@ -121,54 +117,38 @@ function findUnresolvedTerms(text: string, schema: SchemaModel): string[] {
   candidateTerms.forEach((term) => { const norm = term.toLowerCase().trim(); if (norm.length < 6) return; const looksLikeFieldRef = /_/.test(term) || norm.split(' ').length >= 2; if (!looksLikeFieldRef) return; const known = knownColumnTokens.has(norm) || knownTableTokens.has(norm) || Array.from(knownColumnTokens).some((k) => k.includes(norm) || norm.includes(k)); if (!known && /status|date|amount|name|code|flag|id/i.test(norm)) unresolved.push(term); });
   return Array.from(new Set(unresolved)).slice(0, 3);
 }
-
 export function parseRequirement(rawText: string, schema: SchemaModel): QueryRequirement {
   const notes: string[] = []; const queryPlan: string[] = []; const clarifications: ClarificationQuestion[] = [];
   const text = rawText.trim();
-  if (!text) return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0, notes: ['No requirement text was provided.'], queryPlan: [], clarifications: [], unresolvedTerms: [] };
-  queryPlan.push(`1. Load the saved Active Schema: "${schema.name}" (v${schema.versionMeta?.version ?? schema.version}).`);
-  queryPlan.push('2. Validate Active Schema availability (tables present, not empty).');
-  queryPlan.push('3. Parse natural-language requirement and extract relevant schema metadata.');
+  if (!text) return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0, notes: ['No requirement text was provided — using manual selections only.'], queryPlan: [], clarifications: [], unresolvedTerms: [] };
   const tables = findTableMentions(text, schema);
-  if (tables.length === 0) { notes.push('No table names were recognized in the active schema — try mentioning a business object like "invoice", "purchase order", or "vendor", or describe it in your own words (e.g. "who approved this").'); return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0.1, notes, queryPlan, clarifications: [], unresolvedTerms: findUnresolvedTerms(text, schema) }; }
-  queryPlan.push(`4. Identify target table(s) from the active schema: ${tables.map((t) => t.name).join(', ')}.`);
-  notes.push(`Recognized table(s): ${tables.map((t) => t.name).join(', ')}.`);
-  if (tables.length > 1) { queryPlan.push(`5. Determine required JOIN path(s) between ${tables.map((t) => t.name).join(' and ')} using schema primary/foreign key relationships.`); notes.push('Multiple tables were identified — the required JOIN(s) will be generated automatically from schema relationships (including via an intermediate table where needed).'); }
+  if (tables.length === 0) { notes.push('Could not confidently identify any table from the active schema — try mentioning a table or business term explicitly.'); return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0.1, notes, queryPlan, clarifications, unresolvedTerms: findUnresolvedTerms(text, schema) }; }
+  queryPlan.push(`Identified table(s): ${tables.map((t) => t.name).join(', ')}.`);
+  const columnRefs = findColumnMentions(text, tables);
+  const matchedColumns: SelectedColumnSpec[] = columnRefs.map((ref) => ({ id: makeId('col'), table: ref.table, column: ref.column.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }));
+  if (matchedColumns.length) queryPlan.push(`Identified column(s): ${columnRefs.map((c) => `${c.table}.${c.column.name}`).join(', ')}.`);
   const combinator = detectCombinator(text);
-  const mentionedColumns = findColumnMentions(text, tables);
-  queryPlan.push(mentionedColumns.length ? `Identify requested columns: ${mentionedColumns.map((c) => c.column.name).join(', ')}.` : 'No specific columns mentioned — will default to key identifying columns.');
-  const numericFilters = extractNumericFilters(text, mentionedColumns.length ? mentionedColumns : allColumns(schema).filter((c) => tables.some((t) => t.name === c.table)), combinator);
-  const dateCandidate = extractDateFilterCandidates(text, tables);
   const decodeFilters = extractDecodeFilters(text, tables);
-  const allFilters = [...numericFilters, ...decodeFilters];
-  if (dateCandidate) { allFilters.push(dateCandidate.filter); if (dateCandidate.alternativeColumns.length > 0) clarifications.push({ question: `I found ${dateCandidate.alternativeColumns.length + 1} possible date fields for this requirement. Which one should be used?`, options: [dateCandidate.filter.column, ...dateCandidate.alternativeColumns.map((c) => c.column.name)] }); }
-  queryPlan.push(allFilters.length ? `Apply ${allFilters.length} filter condition(s) (combined with ${combinator}).` : 'No filter conditions detected.');
-  if (allFilters.length) notes.push(`Inferred ${allFilters.length} filter condition(s) from the text.`); else notes.push('No explicit filter conditions were recognized — showing all rows for the matched table(s).');
-  const limit = extractLimit(text); const distinct = extractDistinct(text); const sorts = extractSorts(text, tables);
-  queryPlan.push(sorts.length ? `Sort by ${sorts[0].table}.${sorts[0].column} ${sorts[0].direction}.` : 'No sorting requested.');
-  if (limit) { queryPlan.push(`Limit results to ${limit} rows.`); notes.push(`Result limit of ${limit} detected.`); }
-  if (distinct) notes.push('DISTINCT requested.');
-  let selectedColumns: SelectedColumnSpec[] = mentionedColumns.map((c) => ({ id: makeId('col'), table: c.table, column: c.column.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }));
-  if (selectedColumns.length === 0) {
-    tables.forEach((t) => { const defaultCols = t.columns.filter((c) => c.isPrimaryKey || /date|amount|name|status/i.test(c.name)).slice(0, 5); defaultCols.forEach((c) => selectedColumns.push({ id: makeId('col'), table: t.name, column: c.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' })); });
-    notes.push('No specific columns mentioned — defaulted to key identifying columns for the matched table(s).');
-  }
-  queryPlan.push('Validate all table/column names against the active schema (never invent objects not present).');
-  queryPlan.push('Generate SQL. Validate generated SQL against Active Schema before display.');
+  const numericFilters = extractNumericFilters(text, columnRefs, combinator);
+  const dateResult = extractDateFilterCandidates(text, tables);
+  const matchedFilters: FilterCondition[] = [...decodeFilters, ...numericFilters];
+  if (dateResult) { matchedFilters.push(dateResult.filter); queryPlan.push(`Applied a relative date filter on ${dateResult.filter.table}.${dateResult.filter.column}.`); if (dateResult.alternativeColumns.length) clarifications.push({ question: `Multiple date columns exist on ${tables[0].name} — did you mean a different one?`, options: dateResult.alternativeColumns.map((c) => `${c.table}.${c.column.name}`) }); }
+  if (matchedFilters.length) queryPlan.push(`Built ${matchedFilters.length} filter(s).`);
+  const matchedSorts = extractSorts(text, tables);
+  const limit = extractLimit(text);
+  const distinct = extractDistinct(text);
   const unresolvedTerms = findUnresolvedTerms(text, schema);
-  if (unresolvedTerms.length) notes.push(`Could not resolve: ${unresolvedTerms.join(', ')} — not present in the active schema.`);
-  const confidence = Math.min(1, 0.35 + tables.length * 0.15 + allFilters.length * 0.15 + (selectedColumns.length ? 0.15 : 0) - (clarifications.length ? 0.1 : 0));
-  return { rawText, matchedTables: tables.map((t) => t.name), matchedColumns: selectedColumns, matchedFilters: allFilters, matchedSorts: sorts, limit, distinct, confidence, notes, queryPlan, clarifications, unresolvedTerms };
+  const confidence = Math.min(1, 0.3 + (matchedColumns.length ? 0.2 : 0) + (matchedFilters.length ? 0.25 : 0) + (tables.length ? 0.25 : 0));
+  return { rawText, matchedTables: tables.map((t) => t.name), matchedColumns, matchedFilters, matchedSorts, limit, distinct, confidence, notes, queryPlan, clarifications, unresolvedTerms };
 }
-
 export function filterToKnownTables(names: string[], schema: SchemaModel): { known: string[]; unknown: string[] } {
   const knownSet = new Set(schema.tables.map((t) => t.name));
-  const known: string[] = []; const unknown: string[] = [];
-  names.forEach((n) => { if (knownSet.has(n)) known.push(n); else unknown.push(n); });
+  const known = names.filter((n) => knownSet.has(n));
+  const unknown = names.filter((n) => !knownSet.has(n));
   return { known, unknown };
 }
 export function filterToKnownColumns(pairs: { table: string; column: string }[], schema: SchemaModel): { known: { table: string; column: string }[]; unknown: { table: string; column: string }[] } {
   const known: { table: string; column: string }[] = []; const unknown: { table: string; column: string }[] = [];
-  pairs.forEach((p) => { const table = schema.tables.find((t) => t.name === p.table); const colExists = table?.columns.some((c) => c.name === p.column); if (colExists) known.push(p); else unknown.push(p); });
+  pairs.forEach((p) => { const table = schema.tables.find((t) => t.name === p.table); const exists = table?.columns.some((c) => c.name === p.column); if (exists) known.push(p); else unknown.push(p); });
   return { known, unknown };
 }

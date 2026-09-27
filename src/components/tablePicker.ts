@@ -9,32 +9,23 @@ export function renderTablePicker(container: HTMLElement, schema: SchemaModel, s
     return { tablesInScope, modulesToRender };
   }
   function renderListOnly(): void {
-    const listEl = container.querySelector<HTMLElement>('.picker-list');
-    const countEl = container.querySelector<HTMLElement>('.picker-count');
+    const listEl = container.querySelector('.picker-list'); const countEl = container.querySelector('.picker-count');
     if (!listEl) return;
     const { tablesInScope, modulesToRender } = computeScope();
     listEl.innerHTML = modulesToRender.map((m) => {
       const tables = tablesInScope.filter((t) => t.module === m);
       if (tables.length === 0) return '';
-      return `<div class="picker-group-label">${m}</div>${tables.map((t) => { const isView = t.objectType === 'VIEW'; return `<label class="picker-row" data-table="${t.name}"><input type="checkbox" ${current.includes(t.name) ? 'checked' : ''} /><span class="picker-row-main"><strong>${t.name}${isView ? ` <span class="chip chip-view">${icon('eye', 11)} VIEW</span>` : ''}</strong><span class="hint">${t.description}</span></span></label>`; }).join('')}`;
-    }).join('') || '<p class="hint picker-empty">No tables match your search.</p>';
+      return `<div class="picker-group-label">${m}</div>${tables.map((t) => { const isView = t.objectType === 'VIEW'; return `<label class="picker-row" data-table="${t.name}"><input type="checkbox" ${current.includes(t.name) ? 'checked' : ''}/><div class="picker-row-main"><strong>${t.name}${isView ? ` ${icon('eye', 11)} VIEW` : ''}</strong><span class="hint">${t.description}</span></div></label>`; }).join('')}`;
+    }).join('') || '<div class="picker-empty">No tables match your search.</div>';
     if (countEl) countEl.textContent = `${current.length} selected`;
     wireRowListeners();
   }
   function wireRowListeners(): void {
-    container.querySelectorAll<HTMLElement>('.picker-row').forEach((row) => {
-      row.addEventListener('click', (e) => { e.preventDefault(); const name = row.dataset.table!; current = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]; onChange([...current]); renderListOnly(); });
-    });
+    container.querySelectorAll<HTMLElement>('.picker-row').forEach((row) => { row.addEventListener('click', (e) => { e.preventDefault(); const name = row.dataset.table!; current = current.includes(name) ? current.filter((n) => n !== name) : [...current, name]; onChange([...current]); renderListOnly(); }); });
   }
   function renderShellOnce(): void {
     const modules = Array.from(new Set(schema.tables.map((t) => t.module))).sort();
-    container.innerHTML = `
-      <div class="picker">
-        <label class="block-label tiny-label" data-tour="module-selector">Module<select class="module-select"><option value="">All Modules</option>${modules.map((m) => `<option value="${m}">${m}</option>`).join('')}</select></label>
-        <div class="picker-search">${icon('search', 14)}<input type="text" class="picker-search-input" placeholder="Search tables…" autocomplete="off" /></div>
-        <div class="picker-actions"><button type="button" class="btn-link" data-action="select-all">Select all</button><button type="button" class="btn-link" data-action="clear">Clear</button><span class="picker-count">${current.length} selected</span></div>
-        <div class="picker-list" role="listbox" aria-multiselectable="true"></div>
-      </div>`;
+    container.innerHTML = `<div class="picker"><div class="picker-actions"><select class="module-select"><option value="">All Modules</option>${modules.map((m) => `<option value="${m}">${m}</option>`).join('')}</select><div class="picker-search">${icon('search', 14)}<input class="picker-search-input" placeholder="Search tables..."/></div></div><div class="picker-actions"><button type="button" class="btn-link" data-action="select-all">Select all</button><button type="button" class="btn-link" data-action="clear">Clear</button><span class="picker-count"></span></div><div class="picker-list"></div></div>`;
     const searchInput = container.querySelector<HTMLInputElement>('.picker-search-input')!;
     searchInput.addEventListener('input', (e) => { searchTerm = (e.target as HTMLInputElement).value; renderListOnly(); });
     const moduleSelect = container.querySelector<HTMLSelectElement>('.module-select')!;

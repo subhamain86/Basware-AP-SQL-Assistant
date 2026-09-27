@@ -5,7 +5,6 @@ import { buildSelectSQL } from '../engines/sqlEngine';
 import { validateReadOnlySql } from '../engines/validationEngine';
 import { rectify } from '../engines/errorRectifierEngine';
 import { validateSqlAgainstSchema } from '../engines/sqlSchemaValidator';
-
 export interface AIService {
   generateSQL(requirement: QueryRequirement, schema: SchemaModel, state: ReadOnlyQueryState): SQLGenerationResult;
   planQuery(nlText: string, schema: SchemaModel): QueryRequirement;

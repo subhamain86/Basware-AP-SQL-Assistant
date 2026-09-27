@@ -8,19 +8,12 @@ export interface ManualDecodePrefill { table: string; column: string; }
 export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualCasePrefill): void {
   const seedExpr = prefill ? `${prefill.table}.${prefill.column} = 'X'` : '';
   const seedAlias = prefill ? `${prefill.column}_LABEL` : '';
-  const bodyHtml = `
-    <p class="hint">Build a CASE expression manually — useful when the column you need doesn't already have a schema-defined CASE/DECODE.</p>
-    <div id="whenRows" class="mini-list"></div>
-    <button type="button" class="btn btn-outline btn-sm" id="addWhenBtn">${icon('plus', 14)} Add WHEN</button>
-    <label class="block-label mt">ELSE value<input type="text" id="caseElse" placeholder="e.g. Unknown" /></label>
-    <label class="block-label">Alias <span class="req">*</span><input type="text" id="caseAlias" value="${seedAlias}" placeholder="e.g. STATUS_LABEL" /></label>
-    <div id="caseIssues"></div>
-    <div class="modal-actions"><button type="button" class="btn btn-ghost" id="caseCancel">Cancel</button><button type="button" class="btn btn-primary" id="caseSave">${icon('save', 14)} Add Column</button></div>`;
+  const bodyHtml = `<p class="hint">Build a CASE expression manually — useful when the column you need doesn't already have a schema-defined CASE/DECODE.</p><div id="whenRows"></div><button type="button" class="btn btn-outline btn-sm" id="addWhenBtn">${icon('plus', 14)} Add WHEN</button><div class="block-label"><span>ELSE value</span><input id="caseElse" type="text"/></div><div class="block-label"><span>Alias *</span><input id="caseAlias" type="text" value="${seedAlias}"/></div><div id="caseIssues"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="caseCancel">Cancel</button><button type="button" class="btn btn-primary" id="caseSave">${icon('save', 14)} Add Column</button></div>`;
   const modal = openModal(`${icon('code', 18)} Manual CASE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const whenRowsEl = modal.element.querySelector<HTMLElement>('#whenRows')!;
   let whens: { whenExpr: string; thenValue: string }[] = [{ whenExpr: seedExpr, thenValue: '' }];
   function renderWhens(): void {
-    whenRowsEl.innerHTML = whens.map((w, i) => `<div class="mini-row wrap" data-idx="${i}"><input type="text" class="when-expr" placeholder="e.g. STATUS = 'A'" value="${w.whenExpr}" /><span class="hint">THEN</span><input type="text" class="when-then" placeholder="e.g. Active" value="${w.thenValue}" /><button class="icon-btn remove-when" title="Remove">${icon('trash', 14)}</button></div>`).join('');
+    whenRowsEl.innerHTML = whens.map((w, i) => `<div class="mini-row wrap" data-idx="${i}"><input class="when-expr" placeholder="WHEN expression" value="${w.whenExpr}"/><span>THEN</span><input class="when-then" placeholder="value" value="${w.thenValue}"/><button type="button" class="icon-btn remove-when">${icon('trash', 14)}</button></div>`).join('');
     whenRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.when-expr')?.addEventListener('input', (e) => { whens[idx].whenExpr = (e.target as HTMLInputElement).value; }); row.querySelector('.when-then')?.addEventListener('input', (e) => { whens[idx].thenValue = (e.target as HTMLInputElement).value; }); row.querySelector('.remove-when')?.addEventListener('click', () => { whens.splice(idx, 1); renderWhens(); }); });
   }
   renderWhens();
@@ -30,8 +23,7 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
     const alias = (modal.element.querySelector<HTMLInputElement>('#caseAlias')?.value || '').trim();
     const elseVal = modal.element.querySelector<HTMLInputElement>('#caseElse')?.value || '';
     const issuesMount = modal.element.querySelector<HTMLElement>('#caseIssues')!;
-    const issues: string[] = [];
-    if (!alias) issues.push('Alias is required.');
+    const issues: string[] = []; if (!alias) issues.push('Alias is required.');
     const validWhens = whens.filter((w) => w.whenExpr.trim() && w.thenValue.trim());
     if (validWhens.length === 0) issues.push('Add at least one complete WHEN / THEN pair.');
     if (issues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${issues.map((i) => `<li>${i}</li>`).join('')}</ul></div>`; return; }
@@ -43,20 +35,12 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
 export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill, replaceSpecId?: string, seedAliasOverride?: string): void {
   const seedSource = prefill ? `${prefill.table}.${prefill.column}` : '';
   const seedAlias = seedAliasOverride || (prefill ? `${prefill.column}_DESC` : '');
-  const bodyHtml = `
-    <p class="hint">Build a DECODE (Oracle) / CASE (other dialects) expression manually.</p>
-    <label class="block-label">Source column/expression <span class="req">*</span><input type="text" id="decodeSource" value="${seedSource}" placeholder="e.g. VENDOR.STATUS" /></label>
-    <div id="pairRows" class="mini-list mt"></div>
-    <button type="button" class="btn btn-outline btn-sm" id="addPairBtn">${icon('plus', 14)} Add raw=label pair</button>
-    <label class="block-label mt">ELSE value<input type="text" id="decodeElse" placeholder="e.g. Unknown" /></label>
-    <label class="block-label">Alias <span class="req">*</span><input type="text" id="decodeAlias" value="${seedAlias}" placeholder="e.g. STATUS_DESC" /></label>
-    <div id="decodeIssues"></div>
-    <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} ${replaceSpecId ? 'Apply' : 'Add Column'}</button></div>`;
+  const bodyHtml = `<p class="hint">Build a DECODE (Oracle) / CASE (other dialects) expression manually.</p><div class="block-label"><span>Source column/expression *</span><input id="decodeSource" type="text" value="${seedSource}"/></div><div id="pairRows"></div><button type="button" class="btn btn-outline btn-sm" id="addPairBtn">${icon('plus', 14)} Add raw=label pair</button><div class="block-label"><span>ELSE value</span><input id="decodeElse" type="text"/></div><div class="block-label"><span>Alias *</span><input id="decodeAlias" type="text" value="${seedAlias}"/></div><div id="decodeIssues"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} ${replaceSpecId ? 'Apply' : 'Add Column'}</button></div>`;
   const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const pairRowsEl = modal.element.querySelector<HTMLElement>('#pairRows')!;
   let pairs: { rawValue: string; label: string }[] = [{ rawValue: '', label: '' }];
   function renderPairs(): void {
-    pairRowsEl.innerHTML = pairs.map((p, i) => `<div class="mini-row wrap" data-idx="${i}"><input type="text" class="pair-raw" placeholder="raw value" value="${p.rawValue}" /><span class="hint">=</span><input type="text" class="pair-label" placeholder="label" value="${p.label}" /><button class="icon-btn remove-pair" title="Remove">${icon('trash', 14)}</button></div>`).join('');
+    pairRowsEl.innerHTML = pairs.map((p, i) => `<div class="mini-row wrap" data-idx="${i}"><input class="pair-raw" placeholder="raw value" value="${p.rawValue}"/><span>=</span><input class="pair-label" placeholder="label" value="${p.label}"/><button type="button" class="icon-btn remove-pair">${icon('trash', 14)}</button></div>`).join('');
     pairRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.pair-raw')?.addEventListener('input', (e) => { pairs[idx].rawValue = (e.target as HTMLInputElement).value; }); row.querySelector('.pair-label')?.addEventListener('input', (e) => { pairs[idx].label = (e.target as HTMLInputElement).value; }); row.querySelector('.remove-pair')?.addEventListener('click', () => { pairs.splice(idx, 1); renderPairs(); }); });
   }
   renderPairs();
@@ -67,9 +51,7 @@ export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: Selected
     const alias = (modal.element.querySelector<HTMLInputElement>('#decodeAlias')?.value || '').trim();
     const elseVal = modal.element.querySelector<HTMLInputElement>('#decodeElse')?.value || '';
     const issuesMount = modal.element.querySelector<HTMLElement>('#decodeIssues')!;
-    const issues: string[] = [];
-    if (!source) issues.push('Source column/expression is required.');
-    if (!alias) issues.push('Alias is required.');
+    const issues: string[] = []; if (!source) issues.push('Source column/expression is required.'); if (!alias) issues.push('Alias is required.');
     const validPairs = pairs.filter((p) => p.rawValue.trim() && p.label.trim());
     if (validPairs.length === 0) issues.push('Add at least one complete raw=label pair.');
     if (issues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${issues.map((i) => `<li>${i}</li>`).join('')}</ul></div>`; return; }

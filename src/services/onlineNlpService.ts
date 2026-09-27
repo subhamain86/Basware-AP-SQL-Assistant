@@ -1,4 +1,4 @@
-const ENDPOINT_STORAGE_KEY = 'sqla.onlineNlpEndpoint.v146';
+const ENDPOINT_STORAGE_KEY = 'sqla.onlineNlpEndpoint.v147';
 const TIMEOUT_MS = 3500;
 export function getConfiguredEndpoint(): string | null { return localStorage.getItem(ENDPOINT_STORAGE_KEY) || null; }
 export function setConfiguredEndpoint(url: string | null): void { if (url && url.trim()) localStorage.setItem(ENDPOINT_STORAGE_KEY, url.trim()); else localStorage.removeItem(ENDPOINT_STORAGE_KEY); }

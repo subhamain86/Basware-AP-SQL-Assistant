@@ -1,6 +1,7 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
-const STORAGE_KEY = 'sqla.pwvault.v146';
-const MARKER = 'sqla-verified-marker-v146';
+import { safeLocalStorageSet } from '../utils/validation';
+const STORAGE_KEY = 'sqla.pwvault.v147';
+const MARKER = 'sqla-verified-marker-v147';
 const DEFAULT_PASSWORD = 'admin';
 let defaultBlobCache: string | null = null;
 async function getStoredBlobRaw(): Promise<string> {
@@ -21,7 +22,8 @@ export async function changePassword(oldPassword: string, newPassword: string): 
   const isValid = await verifyPassword(oldPassword);
   if (!isValid) return { ok: false, error: 'Current password is incorrect.' };
   const newBlob = await encryptWithSecret(newPassword, MARKER);
-  localStorage.setItem(STORAGE_KEY, serializeBlob(newBlob));
+  const result = safeLocalStorageSet(STORAGE_KEY, serializeBlob(newBlob));
+  if (!result.ok) return { ok: false, error: result.error };
   return { ok: true };
 }
 export function resetPasswordToDefault(): void { localStorage.removeItem(STORAGE_KEY); }

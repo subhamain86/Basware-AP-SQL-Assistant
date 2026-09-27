@@ -36,7 +36,7 @@ export function computeAutoJoinPlan(schema: SchemaModel, primaryTable: string, o
       ];
       if (options.length === 0) continue;
       const isAmbiguous = options.length > 1;
-      let chosenId = joinPathChoices[key] && options.some((o) => o.id === joinPathChoices[key]) ? joinPathChoices[key] : (isAmbiguous ? null : options[0].id);
+      const chosenId = joinPathChoices[key] && options.some((o) => o.id === joinPathChoices[key]) ? joinPathChoices[key] : (isAmbiguous ? null : options[0].id);
       resolutions.push({ pairKey: key, tableA: anchor, tableB: target, options, isAmbiguous, chosenOptionId: chosenId });
       if (chosenId) {
         const chosen = options.find((o) => o.id === chosenId)!;
