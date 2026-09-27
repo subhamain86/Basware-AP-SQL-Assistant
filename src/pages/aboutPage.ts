@@ -7,34 +7,41 @@ export function renderAboutPage(container: HTMLElement): void {
       <div class="builder-panel narrow">
         <p>SQL Assistant is a self-contained tool that helps support teams construct accurate SQL without needing
         deep, memorized knowledge of the underlying database schema.</p>
-        <p><strong>Version 14.2</strong> adds: a more polished, professional navbar logo (static — no hover/focus
-        appearance changes — select it any time to return to Quick Start); automatic JOIN generation from schema
-        primary/foreign key relationships, including through an intermediate table, with a clear resolution UI
-        when more than one valid path exists; a fixed, focus-preserving Select Columns search; per-column Alias and
-        DECODE controls that only appear once a column is selected (Raw Column / Schema DECODE / Manual DECODE);
-        a single "Build Query" action beneath Manual Selectors; a substantially expanded Advanced Options area
-        (WITH/CTEs, GROUP BY, HAVING, ORDER BY, LIMIT, DISTINCT, aggregates, CASE/DECODE, and View support); and a
-        Secret Vault that unlocks with the same Admin Password already used for Settings — no separate passphrase,
-        and non-secret repository details pre-filled automatically so only a personal GitHub token needs to be
-        supplied on each new machine.</p>
+        <p><strong>Version 14.5</strong> is a focused stability, synchronization, schema persistence, AI/NLP, and
+        Select Columns upgrade. Every created, imported, updated, or renamed schema is automatically persisted to
+        the shared repository and synchronized across authorized devices — no manual Pull Request, Pull, or GitHub
+        configuration is required from the end user. A single, comprehensive validation gate
+        (<code>assertSyncConfigOrError</code>) now checks every synchronization input by name before any value is
+        touched, completely resolving the "Cannot read properties of undefined (reading 'trim')" crash class rather
+        than suppressing individual symptoms. The Secret Vault synchronizes its protected configuration across
+        machines as encrypted ciphertext only — access tokens and other credentials are never written to the
+        repository, logs, or UI in plaintext. The Online AI/NLP engine now explicitly validates Active Schema
+        availability before every request, and an independent validator scans the final generated SQL text
+        itself for any table or column reference not present in the Active Schema. Select Columns search was
+        re-verified end-to-end and a "Select All" control was added that always selects every column for the
+        selected table(s), completely independent of the current search filter — and repository synchronization,
+        including newly-arrived schemas, never clears or resets the Query Builder's current selections.</p>
         <pre class="sql-output">UI (pages/, components/ — static-shell + targeted re-render pattern)
   down
-Application State (state/store.ts — mergeReadOnlyFromNlp for AND/OR, joinPathChoices)
+Application State (state/store.ts — sync-independent, prune-only-invalid-refs on schema change)
   down
-Service Layer (aiService, schemaService, passwordService, secretVaultService,
-               syncService, githubApiService, onlineNlpService, nlpOrchestrator)
+Service Layer (aiService [+ sqlSchemaValidator], schemaService, passwordService,
+               secretVaultService [cross-device bootstrap], autoSyncService [automatic discovery],
+               syncService [assertSyncConfigOrError gate + sync log], onlineNlpService,
+               nlpOrchestrator [Active Schema availability check + rich context])
   down
-Engines (sqlEngine [CTE + join integration], joinAutoEngine [NEW], nlpEngine [schema-aware],
-         crNlpEngine, validationEngine, errorRectifierEngine, optimizeEngine, decodeEngine,
-         filterEngine, schemaIntegrityEngine, schemaVersionEngine [reused for conflicts])
+Engines (sqlEngine, joinAutoEngine, nlpEngine, crNlpEngine, validationEngine,
+         errorRectifierEngine, optimizeEngine, decodeEngine, filterEngine,
+         schemaIntegrityEngine, schemaVersionEngine, sqlSchemaValidator)
+  down
+utils/validation.ts (safeTrim/safeString + assertSyncConfigOrError comprehensive gate)
   down
 cryptoService (PBKDF2 + AES-GCM, Web Crypto API only)</pre>
         <p><strong>Current AI provider:</strong> ${aiService.providerName} (${aiService.isAvailable ? 'available' : 'unavailable'}).</p>
         <p>Strictly a SQL-text generator — never opens a database connection, never executes a query. Read Only
         blocks destructive SQL at the engine level; Manual Schema Update's delete requires three confirmations,
         the last requiring the Admin Password (never shown anywhere in the UI); the GitHub access token lives only
-        in the Secret Vault, always shown masked, and is never synchronized (each authorized user supplies their
-        own, by design — a static client-only app has no secure way to share that specific secret automatically).</p>
+        as encrypted ciphertext, always shown masked in the UI, and is never synchronized in plaintext.</p>
         <p class="hint">Crafted by Subham Ain · Senior Support Consultant</p>
       </div>
     </section>`;

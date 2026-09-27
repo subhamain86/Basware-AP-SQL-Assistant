@@ -126,20 +126,17 @@ export function parseRequirement(rawText: string, schema: SchemaModel): QueryReq
   const notes: string[] = []; const queryPlan: string[] = []; const clarifications: ClarificationQuestion[] = [];
   const text = rawText.trim();
   if (!text) return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0, notes: ['No requirement text was provided.'], queryPlan: [], clarifications: [], unresolvedTerms: [] };
-  queryPlan.push('1. Read the Active Schema (tables, columns, descriptions, relationships, decode definitions).');
-  queryPlan.push('2. Parse natural-language requirement.');
+  queryPlan.push(`1. Load the saved Active Schema: "${schema.name}" (v${schema.versionMeta?.version ?? schema.version}).`);
+  queryPlan.push('2. Validate Active Schema availability (tables present, not empty).');
+  queryPlan.push('3. Parse natural-language requirement and extract relevant schema metadata.');
   const tables = findTableMentions(text, schema);
   if (tables.length === 0) { notes.push('No table names were recognized in the active schema — try mentioning a business object like "invoice", "purchase order", or "vendor", or describe it in your own words (e.g. "who approved this").'); return { rawText, matchedTables: [], matchedColumns: [], matchedFilters: [], matchedSorts: [], limit: null, distinct: false, confidence: 0.1, notes, queryPlan, clarifications: [], unresolvedTerms: findUnresolvedTerms(text, schema) }; }
-  queryPlan.push(`3. Identify target table(s) from the active schema: ${tables.map((t) => t.name).join(', ')}.`);
+  queryPlan.push(`4. Identify target table(s) from the active schema: ${tables.map((t) => t.name).join(', ')}.`);
   notes.push(`Recognized table(s): ${tables.map((t) => t.name).join(', ')}.`);
-  // V14.2 — when more than one table is matched, note that joins between
-  // them will be resolved automatically from schema relationships (spec
-  // section 3) — the actual join computation happens in sqlEngine via
-  // joinAutoEngine, this is purely a transparency note for the user.
-  if (tables.length > 1) { queryPlan.push(`4. Determine required JOIN path(s) between ${tables.map((t) => t.name).join(' and ')} using schema primary/foreign key relationships.`); notes.push('Multiple tables were identified — the required JOIN(s) will be generated automatically from schema relationships (including via an intermediate table where needed).'); }
+  if (tables.length > 1) { queryPlan.push(`5. Determine required JOIN path(s) between ${tables.map((t) => t.name).join(' and ')} using schema primary/foreign key relationships.`); notes.push('Multiple tables were identified — the required JOIN(s) will be generated automatically from schema relationships (including via an intermediate table where needed).'); }
   const combinator = detectCombinator(text);
   const mentionedColumns = findColumnMentions(text, tables);
-  queryPlan.push(mentionedColumns.length ? `${tables.length > 1 ? '5' : '4'}. Identify requested columns: ${mentionedColumns.map((c) => c.column.name).join(', ')}.` : `${tables.length > 1 ? '5' : '4'}. No specific columns mentioned — will default to key identifying columns.`);
+  queryPlan.push(mentionedColumns.length ? `Identify requested columns: ${mentionedColumns.map((c) => c.column.name).join(', ')}.` : 'No specific columns mentioned — will default to key identifying columns.');
   const numericFilters = extractNumericFilters(text, mentionedColumns.length ? mentionedColumns : allColumns(schema).filter((c) => tables.some((t) => t.name === c.table)), combinator);
   const dateCandidate = extractDateFilterCandidates(text, tables);
   const decodeFilters = extractDecodeFilters(text, tables);
@@ -157,9 +154,21 @@ export function parseRequirement(rawText: string, schema: SchemaModel): QueryReq
     notes.push('No specific columns mentioned — defaulted to key identifying columns for the matched table(s).');
   }
   queryPlan.push('Validate all table/column names against the active schema (never invent objects not present).');
-  queryPlan.push('Generate SQL.');
+  queryPlan.push('Generate SQL. Validate generated SQL against Active Schema before display.');
   const unresolvedTerms = findUnresolvedTerms(text, schema);
   if (unresolvedTerms.length) notes.push(`Could not resolve: ${unresolvedTerms.join(', ')} — not present in the active schema.`);
   const confidence = Math.min(1, 0.35 + tables.length * 0.15 + allFilters.length * 0.15 + (selectedColumns.length ? 0.15 : 0) - (clarifications.length ? 0.1 : 0));
   return { rawText, matchedTables: tables.map((t) => t.name), matchedColumns: selectedColumns, matchedFilters: allFilters, matchedSorts: sorts, limit, distinct, confidence, notes, queryPlan, clarifications, unresolvedTerms };
+}
+
+export function filterToKnownTables(names: string[], schema: SchemaModel): { known: string[]; unknown: string[] } {
+  const knownSet = new Set(schema.tables.map((t) => t.name));
+  const known: string[] = []; const unknown: string[] = [];
+  names.forEach((n) => { if (knownSet.has(n)) known.push(n); else unknown.push(n); });
+  return { known, unknown };
+}
+export function filterToKnownColumns(pairs: { table: string; column: string }[], schema: SchemaModel): { known: { table: string; column: string }[]; unknown: { table: string; column: string }[] } {
+  const known: { table: string; column: string }[] = []; const unknown: { table: string; column: string }[] = [];
+  pairs.forEach((p) => { const table = schema.tables.find((t) => t.name === p.table); const colExists = table?.columns.some((c) => c.name === p.column); if (colExists) known.push(p); else unknown.push(p); });
+  return { known, unknown };
 }

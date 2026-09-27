@@ -9,34 +9,20 @@ import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
 import { aiService } from '../services/aiService';
 import { orchestrateReadOnlyNlp } from '../services/nlpOrchestrator';
+import { performBackgroundPull } from '../services/autoSyncService';
+import { secretVaultService } from '../services/secretVaultService';
 import { validateFullReadOnly } from '../engines/validationEngine';
 import { optimizeSuggestions } from '../engines/optimizeEngine';
 import { computeAutoJoinPlan } from '../engines/joinAutoEngine';
 import type { Dialect, ColumnDef } from '../types';
 import { makeId } from '../utils/id';
 
-// ============================================================================
-// readOnlyBuilderPage — V14.2. Key changes from V14.1:
-//   - Select Columns tab: bottom "Manual CASE (custom)" / "Manual DECODE
-//     (custom)" buttons REMOVED (moved into Advanced Options, spec section
-//     23 — "Advanced Options should become the central location for
-//     advanced SELECT functionality rather than continuously adding
-//     separate buttons to the main Query Builder"). columnPicker now
-//     handles per-column Alias/Display-as inline (spec 7-11).
-//   - A single "Build Query" button now sits directly below the Manual
-//     Selectors tabs (spec section 12) — the only action button there.
-//   - Advanced Options gained: Automatic Joins summary + ambiguity
-//     resolution, WITH/CTE builder, and the relocated Manual CASE/DECODE
-//     (custom) buttons (spec sections 2-5, 13, 20-21, 23).
-//   - Still NO blanket `store.subscribe(draw)` — only
-//     `schemaService.subscribe(draw)` — preserving the V14.1 no-refresh
-//     fix (spec section 32).
-// ============================================================================
-
 export function renderReadOnlyBuilderPage(container: HTMLElement): void {
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'tables-columns';
   let isBuilding = false;
+
+  if (secretVaultService.isUnlocked()) performBackgroundPull('readonly-page-mount').catch(() => {});
 
   function draw(): void {
     const state = store.readOnly;
@@ -107,6 +93,7 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
     if (nlBtn) { nlBtn.disabled = false; nlBtn.innerHTML = `${icon('zap', 15)} Build from Description`; }
 
     const engineBadge = orchestrated.engineUsed === 'online' ? `<span class="engine-badge engine-online">${icon('cloud', 13)} Online AI/NLP</span>` : `<span class="engine-badge engine-offline">${icon('wifi-off', 13)} Offline/local engine${orchestrated.onlineAttempted ? ' (online attempt failed/unavailable)' : ''}</span>`;
+    const schemaAuditLine = `<div class="schema-audit-line">${icon('database', 12)} Active Schema used: <strong>${schema.name}</strong> (v${schema.versionMeta?.version ?? schema.version})</div>`;
     const notesMount = container.querySelector('#nlNotes');
     if (notesMount) {
       const clarifHtml = requirement.clarifications.length ? `<div class="issue-box mini warn">${icon('alert-triangle', 14)}<div>${requirement.clarifications.map((cq) => `<div>${cq.question}</div><div class="row-actions wrap">${cq.options.map((opt) => `<button type="button" class="btn btn-outline btn-sm clarify-btn" data-col="${opt}">${opt}</button>`).join('')}</div>`).join('')}</div></div>` : '';
@@ -115,6 +102,7 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
           ${icon('info', 14)}
           <div>
             ${engineBadge}
+            ${schemaAuditLine}
             <strong class="mt block">Query Plan</strong>
             <ol class="mini-list plan-list">${requirement.queryPlan.map((p) => `<li>${p}</li>`).join('')}</ol>
             <strong>Notes</strong>
@@ -197,11 +185,6 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
 
   function renderAdvancedTab(panel: HTMLElement, state: typeof store.readOnly, schema: ReturnType<typeof schemaService.getActiveSchema>): void {
     const allCols = state.selectedTables.flatMap((t) => { const table = schema.tables.find((x) => x.name === t); return table ? table.columns.map((c) => ({ table: t, column: c.name, label: `${t}.${c.name}`, decode: c.decode })) : []; });
-
-    // V14.2 — Automatic Joins summary (spec sections 2-5). Computed fresh
-    // on every render so the UI always reflects the current table
-    // selection; ambiguous pairs get a dropdown, resolved/unambiguous
-    // pairs are shown read-only for transparency.
     const primaryTable = state.selectedTables[0];
     const otherTables = state.selectedTables.slice(1).filter((t) => !state.joins.some((j) => j.table === t));
     const joinPlan = primaryTable ? computeAutoJoinPlan(schema, primaryTable, otherTables, state.joinPathChoices) : null;
@@ -234,26 +217,14 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
         </div>
       </div>`;
 
-    // --- Automatic Joins rendering ---
     function renderAutoJoinsList(): void {
       const listEl = panel.querySelector('#autoJoinsList'); if (!listEl) return;
       if (!joinPlan || joinPlan.resolutions.length === 0) { listEl.innerHTML = `<p class="hint">${state.selectedTables.length < 2 ? 'Select 2 or more tables (or describe a multi-table requirement) to see automatic joins here.' : 'No additional joins needed yet.'}</p>`; return; }
       listEl.innerHTML = joinPlan.resolutions.map((r) => {
-        if (!r.isAmbiguous) {
-          const opt = r.options.find((o) => o.id === r.chosenOptionId) || r.options[0];
-          return `<div class="mini-row wrap"><span class="hint">${icon('check', 13)} ${r.tableA} ↔ ${r.tableB}:</span> <span>${opt.label}</span></div>`;
-        }
+        if (!r.isAmbiguous) { const opt = r.options.find((o) => o.id === r.chosenOptionId) || r.options[0]; return `<div class="mini-row wrap"><span class="hint">${icon('check', 13)} ${r.tableA} ↔ ${r.tableB}:</span> <span>${opt.label}</span></div>`; }
         return `<div class="mini-row wrap"><span class="hint">${icon('alert-triangle', 13)} ${r.tableA} ↔ ${r.tableB} — multiple paths found:</span><select class="join-path-select" data-pairkey="${r.pairKey}"><option value="">— choose a relationship —</option>${r.options.map((o) => `<option value="${o.id}" ${o.id === r.chosenOptionId ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div>`;
       }).join('') + (joinPlan.unresolvedWarnings.length ? joinPlan.unresolvedWarnings.map((w) => `<div class="issue-box mini warn">${icon('alert-triangle', 13)} ${w}</div>`).join('') : '');
-      listEl.querySelectorAll<HTMLSelectElement>('.join-path-select').forEach((sel) => {
-        sel.addEventListener('change', (e) => {
-          const key = sel.dataset.pairkey!;
-          const value = (e.target as HTMLSelectElement).value;
-          store.updateReadOnly((s) => { if (value) s.joinPathChoices[key] = value; else delete s.joinPathChoices[key]; });
-          renderSqlOutput();
-          renderAdvancedTab(panel, store.readOnly, schema);
-        });
-      });
+      listEl.querySelectorAll<HTMLSelectElement>('.join-path-select').forEach((sel) => { sel.addEventListener('change', (e) => { const key = sel.dataset.pairkey!; const value = (e.target as HTMLSelectElement).value; store.updateReadOnly((s) => { if (value) s.joinPathChoices[key] = value; else delete s.joinPathChoices[key]; }); renderSqlOutput(); renderAdvancedTab(panel, store.readOnly, schema); }); });
     }
     renderAutoJoinsList();
 
@@ -272,21 +243,14 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
     panel.querySelector<HTMLInputElement>('#limitInput')?.addEventListener('input', (e) => { const v = (e.target as HTMLInputElement).value; store.updateReadOnly((s) => { s.advanced.limit = v ? parseInt(v, 10) : null; }); renderSqlOutput(); });
     panel.querySelector<HTMLInputElement>('#viewNameInput')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.saveAsView = (e.target as HTMLInputElement).value || null; }); renderSqlOutput(); });
 
-    // --- WITH / CTE builder (spec 13.1) ---
     function renderCteList(): void {
       const list = panel.querySelector('#cteList'); if (!list) return;
       list.innerHTML = state.advanced.ctes.length ? state.advanced.ctes.map((c, idx) => `<div class="cte-row" data-idx="${idx}"><input type="text" class="cte-name-input" placeholder="cte_name" value="${c.name}" /><textarea class="cte-body-input" rows="3" placeholder="SELECT ...">${c.body}</textarea><button class="icon-btn remove-cte-btn" title="Remove">${icon('trash', 14)}</button></div>`).join('') : '<p class="hint">No CTEs defined yet.</p>';
-      list.querySelectorAll<HTMLElement>('.cte-row').forEach((row) => {
-        const idx = parseInt(row.dataset.idx || '0', 10);
-        row.querySelector('.cte-name-input')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.ctes[idx].name = (e.target as HTMLInputElement).value; }); renderSqlOutput(); });
-        row.querySelector('.cte-body-input')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.ctes[idx].body = (e.target as HTMLTextAreaElement).value; }); renderSqlOutput(); });
-        row.querySelector('.remove-cte-btn')?.addEventListener('click', () => { store.updateReadOnly((s) => { s.advanced.ctes.splice(idx, 1); }); renderSqlOutput(); renderCteList(); });
-      });
+      list.querySelectorAll<HTMLElement>('.cte-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.cte-name-input')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.ctes[idx].name = (e.target as HTMLInputElement).value; }); renderSqlOutput(); }); row.querySelector('.cte-body-input')?.addEventListener('input', (e) => { store.updateReadOnly((s) => { s.advanced.ctes[idx].body = (e.target as HTMLTextAreaElement).value; }); renderSqlOutput(); }); row.querySelector('.remove-cte-btn')?.addEventListener('click', () => { store.updateReadOnly((s) => { s.advanced.ctes.splice(idx, 1); }); renderSqlOutput(); renderCteList(); }); });
     }
     renderCteList();
     panel.querySelector('#addCteBtn')?.addEventListener('click', () => { store.updateReadOnly((s) => { s.advanced.ctes.push({ id: makeId('cte'), name: `cte_${s.advanced.ctes.length + 1}`, body: '' }); }); renderSqlOutput(); renderCteList(); });
 
-    // --- Manual CASE/DECODE (custom columns), relocated here from Select Columns (spec 23) ---
     function renderManualCols(): void {
       const mount = panel.querySelector<HTMLElement>('#manualColsList'); if (!mount) return;
       const manualCols = store.readOnly.selectedColumns.filter((c) => c.manualExpr && !state.selectedTables.some((t) => c.table === t));

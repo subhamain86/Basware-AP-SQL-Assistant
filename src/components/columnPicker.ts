@@ -3,24 +3,6 @@ import { icon } from './icons';
 import { makeId } from '../utils/id';
 import { validateAlias } from '../utils/sqlIdentifier';
 
-// ============================================================================
-// columnPicker — V14.2. Rewrite for spec sections 6-11:
-//   6. Search fix — re-verified static-shell pattern (search input never
-//      destroyed, so it can never lose focus or reset on an unrelated
-//      re-render), extended to explicitly support "search across multiple
-//      selected tables" (already true structurally, now covered by tests).
-//   7. Alias — appears ONLY once a column's checkbox is checked. Before
-//      selection: just the column name. After selection: name + an
-//      inline Alias <input>, validated live via validateAlias().
-//   8-10. DECODE — also appears ONLY once selected, as a compact
-//      "Display as" <select> with up to 3 options: Raw Column / Schema
-//      DECODE (only shown if the column actually has one) / Manual DECODE
-//      (custom). Choosing "Manual DECODE" opens the manual builder
-//      pre-filled for that exact column; on save, that column's entry is
-//      REPLACED in place (same alias preserved) rather than appending a
-//      second, duplicate entry (spec section 11).
-// ============================================================================
-
 export interface ColumnPickerCallbacks {
   onChange: (next: SelectedColumnSpec[]) => void;
   onRequestManualDecodeForColumn: (table: string, column: ColumnDef, existingSpecId: string) => void;
@@ -30,14 +12,20 @@ export function renderColumnPicker(container: HTMLElement, schema: SchemaModel, 
   let searchTerm = '';
   let current = [...selectedColumns];
 
+  function realColumnsInScope(): { table: string; column: ColumnDef }[] {
+    return selectedTables.flatMap((tableName) => { const table = schema.tables.find((t) => t.name === tableName); return table ? table.columns.map((c) => ({ table: tableName, column: c })) : []; });
+  }
   function isSelected(table: string, column: string): boolean { return current.some((c) => c.table === table && c.column === column && !c.manualExpr); }
   function selectedSpec(table: string, column: string): SelectedColumnSpec | undefined { return current.find((c) => c.table === table && c.column === column && !c.manualExpr); }
+  function allRealColumnsSelected(): boolean { const scope = realColumnsInScope(); if (scope.length === 0) return false; return scope.every((ref) => isSelected(ref.table, ref.column.name)); }
 
   function renderListOnly(): void {
     const listEl = container.querySelector<HTMLElement>('.picker-list');
     const countEl = container.querySelector<HTMLElement>('.picker-count');
+    const selectAllCheckbox = container.querySelector<HTMLInputElement>('.select-all-checkbox');
     if (!listEl) return;
-    if (selectedTables.length === 0) { listEl.innerHTML = '<p class="hint picker-empty">Select one or more tables first.</p>'; if (countEl) countEl.textContent = ''; return; }
+    if (selectedTables.length === 0) { listEl.innerHTML = '<p class="hint picker-empty">Select one or more tables first.</p>'; if (countEl) countEl.textContent = ''; if (selectAllCheckbox) { selectAllCheckbox.checked = false; selectAllCheckbox.disabled = true; } return; }
+    if (selectAllCheckbox) { selectAllCheckbox.disabled = false; selectAllCheckbox.checked = allRealColumnsSelected(); }
     const term = searchTerm.toLowerCase();
     listEl.innerHTML = selectedTables.map((tableName) => {
       const table = schema.tables.find((t) => t.name === tableName);
@@ -80,11 +68,8 @@ export function renderColumnPicker(container: HTMLElement, schema: SchemaModel, 
 
       row.querySelector('.column-checkbox')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (isSelected(t, cName)) {
-          current = current.filter((x) => !(x.table === t && x.column === cName && !x.manualExpr));
-        } else {
-          current = [...current, { id: makeId('col'), table: t, column: cName, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }];
-        }
+        if (isSelected(t, cName)) current = current.filter((x) => !(x.table === t && x.column === cName && !x.manualExpr));
+        else current = [...current, { id: makeId('col'), table: t, column: cName, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }];
         callbacks.onChange([...current]);
         renderListOnly();
       });
@@ -103,13 +88,7 @@ export function renderColumnPicker(container: HTMLElement, schema: SchemaModel, 
         const value = (e.target as HTMLSelectElement).value as 'raw' | 'schema-decode' | 'manual-decode';
         const spec = selectedSpec(t, cName);
         if (!spec) return;
-        if (value === 'manual-decode') {
-          // Defer switching the mode until the modal is actually saved —
-          // request the manual builder now, keyed to this spec's id so
-          // the caller can REPLACE it in place rather than duplicating.
-          callbacks.onRequestManualDecodeForColumn(t, colDef, spec.id);
-          return;
-        }
+        if (value === 'manual-decode') { callbacks.onRequestManualDecodeForColumn(t, colDef, spec.id); return; }
         spec.displayMode = value;
         spec.useDecode = value === 'schema-decode';
         callbacks.onChange([...current]);
@@ -118,23 +97,37 @@ export function renderColumnPicker(container: HTMLElement, schema: SchemaModel, 
     });
   }
 
+  function toggleSelectAll(checked: boolean): void {
+    if (checked) {
+      const scope = realColumnsInScope();
+      scope.forEach((ref) => { if (!isSelected(ref.table, ref.column.name)) current.push({ id: makeId('col'), table: ref.table, column: ref.column.name, alias: '', useDecode: false, aggregate: null, displayMode: 'raw' }); });
+    } else {
+      const scopeTableSet = new Set(selectedTables);
+      current = current.filter((c) => c.manualExpr || !scopeTableSet.has(c.table));
+    }
+    callbacks.onChange([...current]);
+    renderListOnly();
+  }
+
   function renderShellOnce(): void {
     container.innerHTML = `
       <div class="picker">
         <div class="picker-search">${icon('search', 14)}<input type="text" class="picker-search-input" placeholder="Search columns…" autocomplete="off" /></div>
+        <label class="select-all-row" title="Selects every column for the currently selected table(s), regardless of the search filter above.">
+          <input type="checkbox" class="select-all-checkbox" />
+          <span>${icon('checkbox-checked', 14)} Select All <span class="hint">(all columns for the selected table(s) — search only filters what's shown)</span></span>
+        </label>
         <div class="picker-actions"><button type="button" class="btn-link" data-action="clear">Clear</button><span class="picker-count">${current.filter((c) => !c.manualExpr).length} selected</span></div>
         <div class="picker-list"></div>
       </div>`;
     const searchInput = container.querySelector<HTMLInputElement>('.picker-search-input')!;
     searchInput.addEventListener('input', (e) => { searchTerm = (e.target as HTMLInputElement).value; renderListOnly(); });
+    const selectAllCheckbox = container.querySelector<HTMLInputElement>('.select-all-checkbox')!;
+    selectAllCheckbox.addEventListener('change', (e) => { toggleSelectAll((e.target as HTMLInputElement).checked); });
     container.querySelector('[data-action="clear"]')?.addEventListener('click', () => { current = current.filter((c) => c.manualExpr); callbacks.onChange([...current]); renderListOnly(); });
     renderListOnly();
   }
 
   renderShellOnce();
-
-  // Exposed so the page-level code can update a specific spec's
-  // displayMode/manualExpr after the manual-decode modal is saved, then
-  // trigger a targeted re-render without rebuilding the search shell.
   (container as any)._refreshList = renderListOnly;
 }

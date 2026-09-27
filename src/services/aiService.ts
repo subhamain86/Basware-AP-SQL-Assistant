@@ -4,6 +4,7 @@ import { parseCrRequirement } from '../engines/crNlpEngine';
 import { buildSelectSQL } from '../engines/sqlEngine';
 import { validateReadOnlySql } from '../engines/validationEngine';
 import { rectify } from '../engines/errorRectifierEngine';
+import { validateSqlAgainstSchema } from '../engines/sqlSchemaValidator';
 
 export interface AIService {
   generateSQL(requirement: QueryRequirement, schema: SchemaModel, state: ReadOnlyQueryState): SQLGenerationResult;
@@ -29,7 +30,9 @@ export class LocalRuleBasedAIService implements AIService {
     if (!safety.valid) { warnings.push('AI self-review rejected the generated statement (destructive keyword detected) — falling back to a safe placeholder.'); sql = '-- AI self-review blocked this generated statement for safety. Please refine your request or use the manual selectors.'; }
     if (requirement.confidence < 0.5) warnings.push('Low confidence interpretation — please review the manual selectors before relying on this SQL.');
     if (requirement.unresolvedTerms.length) warnings.push(`The following requested term(s) were not found in the active schema: ${requirement.unresolvedTerms.join(', ')}.`);
-    return { sql, requirement, warnings, ok: requirement.matchedTables.length > 0 && safety.valid };
+    const schemaCheck = validateSqlAgainstSchema(sql, schema);
+    if (!schemaCheck.valid) warnings.push(...schemaCheck.warnings.map((w) => `Schema validation: ${w}`));
+    return { sql, requirement, warnings, ok: requirement.matchedTables.length > 0 && safety.valid && schemaCheck.valid };
   }
   validateSQL(sql: string): ValidationResult { return validateReadOnlySql(sql); }
   rectifySQL(errorText: string, sql: string): RectifyResult { return rectify(errorText, sql); }

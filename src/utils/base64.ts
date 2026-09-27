@@ -1,6 +1,3 @@
-// UTF-8 safe base64 encode/decode helpers for the GitHub Contents API,
-// which requires base64-encoded UTF-8 file content. Native btoa/atob only
-// operate on Latin1 byte strings and throw on out-of-range characters.
 export function utf8ToBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';

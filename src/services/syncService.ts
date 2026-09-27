@@ -1,22 +1,24 @@
-import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, SchemaRegistry } from '../types';
+import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, SchemaRegistry, PendingConflict, SyncLogEntry } from '../types';
 import { secretVaultService } from './secretVaultService';
 import { schemaService } from './schemaService';
 import { validateIncomingRegistryFile } from '../engines/schemaIntegrityEngine';
 import { detectConflict } from '../engines/schemaVersionEngine';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
+import { assertSyncConfigOrError, safeTrim } from '../utils/validation';
+import { makeId } from '../utils/id';
 
-// syncService — V14.2. Same registry push/pull + conflict-detection
-// mechanism as V14.1, now sourcing GitHub configuration from
-// secretVaultService instead of the old separate-passphrase vaultService
-// (spec sections 24-31: preserve existing sync functionality, but the
-// user no longer needs to separately know/enter repo details — they come
-// pre-filled from the Secret Vault's bootstrap defaults).
-const CONFIG_KEY = 'sqla.syncconfig.v142';
-const STATUS_KEY = 'sqla.syncstatus.v142';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v142';
+const CONFIG_KEY = 'sqla.syncconfig.v145';
+const STATUS_KEY = 'sqla.syncstatus.v145';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v145';
+const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v145';
+const SYNC_LOG_KEY = 'sqla.synclog.v145';
+const MAX_LOG_ENTRIES = 30;
+
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
+function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
+function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 
-export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; conflicts: { schemaId: string; schemaName: string; localVersion: string; remoteVersion: string; changedPaths: string[]; remoteSchema: SchemaModel }[]; unchanged: number; }
+export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; conflicts: PendingConflict[]; unchanged: number; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 
 class SyncService {
@@ -26,13 +28,23 @@ class SyncService {
   private directoryHandle: FileSystemDirectoryHandle | null = null;
   private listeners = new Set<() => void>();
   private scheduleTimer: ReturnType<typeof setInterval> | null = null;
+  private pendingConflicts: PendingConflict[] = loadPendingConflicts();
+  private syncLog: SyncLogEntry[] = loadSyncLog();
 
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   private persistConfig(): void { localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config)); }
+  private persistPendingConflicts(): void { localStorage.setItem(PENDING_CONFLICTS_KEY, JSON.stringify(this.pendingConflicts)); this.notify(); }
+  private logEvent(kind: SyncLogEntry['kind'], message: string): void {
+    this.syncLog = [{ id: makeId('synclog'), timestamp: new Date().toISOString(), kind, message }, ...this.syncLog].slice(0, MAX_LOG_ENTRIES);
+    localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
+    this.notify();
+  }
   getConfig(): SyncConfig { return this.config; }
   getStatus(): SyncStatus { return this.status; }
   getLastSyncedAt(): string | null { return this.lastSyncedAt; }
+  getPendingConflicts(): PendingConflict[] { return this.pendingConflicts; }
+  getSyncLog(): SyncLogEntry[] { return this.syncLog; }
   isFileSystemAccessSupported(): boolean { return typeof (window as any).showDirectoryPicker === 'function'; }
   hasConnectedLocation(): boolean { return this.directoryHandle !== null; }
   setSource(source: SyncSource): void { this.config = { ...this.config, source }; this.persistConfig(); this.notify(); }
@@ -54,70 +66,94 @@ class SyncService {
   private lastKnownSha(): string | null { return localStorage.getItem(LAST_KNOWN_SHA_KEY); }
   private setLastKnownSha(sha: string | null): void { if (sha) localStorage.setItem(LAST_KNOWN_SHA_KEY, sha); else localStorage.removeItem(LAST_KNOWN_SHA_KEY); }
 
-  /** Returns a clear, non-secret-exposing message describing exactly what
-   * is missing before a GitHub sync can proceed (spec section 30). */
   private missingConfigMessage(): string | null {
-    if (!secretVaultService.isUnlocked()) return 'The Secret Vault is locked. Enter the Admin Password to unlock it and enable GitHub synchronization.';
+    if (!secretVaultService.isUnlocked()) return 'The Secret Vault is locked. Enter the Admin Password to unlock it and enable synchronization.';
     const cfg = secretVaultService.getConfig()!;
-    if (!cfg.githubRepo.trim()) return 'No GitHub repository is configured yet. Open Settings → Secret Vault to configure one (a default is provided).';
-    if (!cfg.githubToken.trim()) return 'No GitHub access token is configured yet. Open Settings → Secret Vault and enter your personal access token — this is the one piece of information each authorized user must supply individually, since it is a personal credential.';
-    return null;
+    const result = assertSyncConfigOrError([
+      { key: 'githubRepo', label: 'Repository', value: cfg.githubRepo, required: true },
+      { key: 'githubBranch', label: 'Branch', value: cfg.githubBranch, required: false },
+      { key: 'githubSchemaPath', label: 'Repository Path', value: cfg.githubSchemaPath, required: true },
+      { key: 'githubToken', label: 'Access Token', value: cfg.githubToken, required: true, sensitive: true }
+    ]);
+    return result.ok ? null : result.message;
+  }
+
+  private addPendingConflict(schemaId: string, schemaName: string, localVersion: string, remoteVersion: string, changedPaths: string[], remoteSchema: SchemaModel): PendingConflict {
+    const existing = this.pendingConflicts.find((c) => c.schemaId === schemaId);
+    const conflict: PendingConflict = { id: existing?.id || makeId('conflict'), schemaId, schemaName, localVersion, remoteVersion, changedPaths, remoteSchemaJson: JSON.stringify(remoteSchema), detectedAt: new Date().toISOString() };
+    this.pendingConflicts = [...this.pendingConflicts.filter((c) => c.schemaId !== schemaId), conflict];
+    this.persistPendingConflicts();
+    return conflict;
+  }
+  resolvePendingConflict(conflictId: string, decision: 'local' | 'remote'): void {
+    const conflict = this.pendingConflicts.find((c) => c.id === conflictId);
+    if (!conflict) return;
+    if (decision === 'remote') { try { const remoteSchema = JSON.parse(conflict.remoteSchemaJson) as SchemaModel; schemaService.replaceSchemaContent(conflict.schemaId, remoteSchema); } catch { } }
+    this.pendingConflicts = this.pendingConflicts.filter((c) => c.id !== conflictId);
+    this.persistPendingConflicts();
   }
 
   async pullRegistryFromGitHub(): Promise<PullOutcome> {
     const missing = this.missingConfigMessage();
-    if (missing) return { ok: false, error: missing, newSchemasAdded: [], conflicts: [], unchanged: 0 };
+    if (missing) { this.logEvent('error', missing); return { ok: false, error: missing, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
     const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
     try {
-      const file = await getFile(cfg.githubRepo, cfg.githubBranch || 'main', cfg.githubSchemaPath || 'schema.json', cfg.githubToken);
-      if (!file) { this.status = 'never'; this.notify(); return { ok: false, error: 'No schema file found yet at the configured path — push your local schemas first to create it.', newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
+      const path = safeTrim(cfg.githubSchemaPath);
+      const branch = safeTrim(cfg.githubBranch) || 'main';
+      const file = await getFile(cfg.githubRepo, branch, path, cfg.githubToken);
+      if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
       const parsed = JSON.parse(file.content);
       const integrity = validateIncomingRegistryFile(parsed);
-      if (!integrity.valid) { this.status = 'failed'; this.notify(); return { ok: false, error: 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '), newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
+      if (!integrity.valid) { this.status = 'failed'; this.notify(); const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], conflicts: [], unchanged: 0 }; }
       const remoteRegistry = parsed as SchemaRegistry;
-      const newSchemasAdded: string[] = []; const conflicts: PullOutcome['conflicts'] = []; let unchanged = 0;
+      const newSchemasAdded: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
       for (const remoteSchema of remoteRegistry.schemas) {
         const local = schemaService.getSchemaById(remoteSchema.id);
         if (!local) { schemaService.addSchemaFromRemote(remoteSchema); newSchemasAdded.push(remoteSchema.name); continue; }
         const conflict = detectConflict(local, remoteSchema);
         if (!conflict.hasConflict) { unchanged += 1; continue; }
-        conflicts.push({ schemaId: remoteSchema.id, schemaName: remoteSchema.name, localVersion: conflict.localVersion, remoteVersion: conflict.remoteVersion, changedPaths: conflict.changedPaths, remoteSchema });
+        conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
       }
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
       localStorage.setItem(STATUS_KEY, this.status);
+      this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
       this.notify();
       return { ok: true, newSchemasAdded, conflicts, unchanged };
     } catch (e) {
       this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify();
-      const message = isGitHubApiError(e) ? e.message : (e as Error).message || 'Unknown error during pull.';
+      const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
+      this.logEvent('error', message);
       return { ok: false, error: message, newSchemasAdded: [], conflicts: [], unchanged: 0 };
     }
   }
 
   async pushRegistryToGitHub(commitMessage?: string): Promise<PushOutcome> {
     const missing = this.missingConfigMessage();
-    if (missing) return { ok: false, error: missing };
+    if (missing) { this.logEvent('error', missing); return { ok: false, error: missing }; }
     const cfg = secretVaultService.getConfig()!;
     this.status = 'syncing'; this.notify();
     try {
       const registry = schemaService.getRegistry();
       const content = JSON.stringify(registry, null, 2);
-      const path = cfg.githubSchemaPath || 'schema.json';
-      const branch = cfg.githubBranch || 'main';
-      const result = await putFile(cfg.githubRepo, branch, path, cfg.githubToken, content, commitMessage || `Update SQL Assistant schema registry (${new Date().toISOString()})`, this.lastKnownSha());
+      const path = safeTrim(cfg.githubSchemaPath);
+      const branch = safeTrim(cfg.githubBranch) || 'main';
+      const result = await putFile(cfg.githubRepo, branch, path, cfg.githubToken, content, safeTrim(commitMessage) || `Update SQL Assistant schema registry (${new Date().toISOString()})`, this.lastKnownSha());
       this.setLastKnownSha(result.sha);
       schemaService.markAllSynced();
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
       localStorage.setItem(STATUS_KEY, this.status);
+      this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s)).`);
       this.notify();
       return { ok: true };
     } catch (e) {
       this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify();
       const apiErr = isGitHubApiError(e) ? e : null;
       const requiresPull = !!apiErr && (apiErr.status === 409 || apiErr.status === 422);
-      return { ok: false, error: apiErr?.message || (e as Error).message || 'Unknown error during push.', requiresPullFirst: requiresPull };
+      const msg = apiErr?.message || (e as Error)?.message || 'Unknown error during synchronization.';
+      this.logEvent('error', msg);
+      return { ok: false, error: msg, requiresPullFirst: requiresPull };
     }
   }
 
@@ -148,10 +184,6 @@ class SyncService {
     } catch (e) { return { ok: false, error: 'Could not write to the connected location: ' + (e as Error).message }; }
   }
 
-  /** V14.2 — the simple, user-facing "Sync with GitHub" entry point (spec
-   * section 29): internally retrieves config from the Secret Vault,
-   * connects, pulls the latest data, and reports success/failure clearly —
-   * no technical repository details are surfaced to the caller. */
   async syncWithGitHubSimple(): Promise<PullOutcome> { return this.pullRegistryFromGitHub(); }
 
   async syncNow(): Promise<{ ok: boolean; error?: string }> {
@@ -165,7 +197,7 @@ class SyncService {
       localStorage.setItem(STATUS_KEY, this.status);
       this.notify();
       return { ok: result.ok, error: result.error };
-    } catch (e) { this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error).message }; }
+    } catch (e) { this.status = 'failed'; localStorage.setItem(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
   }
 }
 export const syncService = new SyncService();

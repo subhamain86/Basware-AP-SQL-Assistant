@@ -9,6 +9,7 @@ import { renderSettingsPage } from '../pages/settingsPage';
 import { renderAboutPage } from '../pages/aboutPage';
 import { GuidedTour } from '../components/tourOverlay';
 import { store } from '../state/store';
+import { initAutoSync, setAutoSyncToastHandler } from '../services/autoSyncService';
 import type { Route } from '../types';
 
 const VALID_ROUTES: Route[] = ['quickstart', 'readonly', 'cr', 'schema-used', 'error-rectifier', 'settings', 'about'];
@@ -21,10 +22,13 @@ export function mountAppShell(root: HTMLElement): void {
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
 
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>SQL Assistant · Version 14.2</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>SQL Assistant · Version 14.5</span><span class="hint">Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
 
   mountToastContainer(root);
+
+  setAutoSyncToastHandler((kind, text) => store.pushToast(kind, text));
+  initAutoSync();
 
   function routeFromHash(): Route { const h = window.location.hash.replace('#', '') as Route; return VALID_ROUTES.includes(h) ? h : 'quickstart'; }
   function navigate(route: Route): void { window.location.hash = route; }

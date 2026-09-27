@@ -24,17 +24,17 @@ class AppStore {
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    const savedTheme = localStorage.getItem('sqla.theme.v142');
+    const savedTheme = localStorage.getItem('sqla.theme.v145');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') this.theme = savedTheme;
-    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v142') === '1';
+    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v145') === '1';
     schemaService.subscribe(() => this.regenerateReadOnlySql());
     ['click', 'keydown', 'mousemove'].forEach((evt) => document.addEventListener(evt, () => this.bumpActivity(), { passive: true }));
   }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   setRoute(route: Route): void { this.route = route; this.notify(); }
-  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v142', theme); this.notify(); }
-  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v142', '1'); }
+  setTheme(theme: Theme): void { this.theme = theme; localStorage.setItem('sqla.theme.v145', theme); this.notify(); }
+  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; localStorage.setItem('sqla.tourseen.v145', '1'); }
   pushToast(kind: ToastMessage['kind'], text: string): void { const toast: ToastMessage = { id: makeId('toast'), kind, text }; this.toasts.push(toast); this.notify(); setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== toast.id); this.notify(); }, 4000); }
   unlockSettings(): void { this.settingsUnlocked = true; this.bumpActivity(); this.notify(); }
   lockSettings(): void { this.settingsUnlocked = false; if (this.inactivityTimer) { clearTimeout(this.inactivityTimer); this.inactivityTimer = null; } this.notify(); }
@@ -63,19 +63,15 @@ class AppStore {
       const tableSet = new Set(s.selectedTables);
       requirement.matchedTables.forEach((t) => tableSet.add(t));
       s.selectedTables = Array.from(tableSet);
-
       const colKey = (c: SelectedColumnSpec) => c.manualExpr ? `manual:${c.id}` : `${c.table}::${c.column}`;
       const existingKeys = new Set(s.selectedColumns.map(colKey));
       requirement.matchedColumns.forEach((c) => { const k = colKey(c); if (!existingKeys.has(k)) { s.selectedColumns.push(c); existingKeys.add(k); } });
-
       const filterKey = (f: FilterCondition) => `${f.table}::${f.column}::${f.operator}::${f.value}`;
       const existingFilterKeys = new Set(s.filters.map(filterKey));
       requirement.matchedFilters.forEach((f) => { const k = filterKey(f); if (!existingFilterKeys.has(k)) { s.filters.push(f); existingFilterKeys.add(k); } });
-
       const sortKey = (so: SortSpec) => `${so.table}::${so.column}`;
       const existingSortKeys = new Set(s.sorts.map(sortKey));
       requirement.matchedSorts.forEach((so) => { const k = sortKey(so); if (!existingSortKeys.has(k)) { s.sorts.push(so); existingSortKeys.add(k); } });
-
       if (requirement.limit && !s.advanced.limit) s.advanced.limit = requirement.limit;
       if (requirement.distinct) s.advanced.distinct = true;
     });

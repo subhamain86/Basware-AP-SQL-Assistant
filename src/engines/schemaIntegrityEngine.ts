@@ -1,11 +1,9 @@
 import type { SchemaModel, TableDef, SchemaIntegrityResult, SchemaIntegrityIssue } from '../types';
 import { VALID_DATA_TYPES } from '../types';
-
 export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   const seenTableColumn = new Set<string>();
   const tableNames = new Set(tables.map((t) => t.name.trim().toUpperCase()));
-
   tables.forEach((t) => {
     if (!t.name || !t.name.trim()) { issues.push({ severity: 'error', message: 'A table is missing its Table Name.' }); return; }
     if (t.columns.length === 0) { issues.push({ severity: 'warning', message: `Table "${t.name}" has no columns defined.` }); }
@@ -44,10 +42,8 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
     if (pkCount > 1) issues.push({ severity: 'warning', message: `Table "${t.name}" has ${pkCount} primary-key columns (composite key) — confirm this is intentional.` });
     if (pkCount === 0 && t.columns.length > 0 && t.objectType !== 'VIEW') issues.push({ severity: 'warning', message: `Table "${t.name}" has no primary key defined.` });
   });
-
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
-
 export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: string, columnName: string, originalTableName: string | null, originalColumnName: string | null): SchemaIntegrityIssue[] {
   const issues: SchemaIntegrityIssue[] = [];
   if (!tableName.trim()) issues.push({ severity: 'error', message: 'Table Name is required.' });
@@ -60,7 +56,6 @@ export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: s
   if (clash) issues.push({ severity: 'error', message: `Column "${tableName}.${columnName}" already exists in this schema.` });
   return issues;
 }
-
 export function validateIncomingSchemaFile(candidate: unknown): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   if (typeof candidate !== 'object' || candidate === null) { issues.push({ severity: 'error', message: 'File is not a valid JSON object.' }); return { valid: false, issues }; }
@@ -71,7 +66,6 @@ export function validateIncomingSchemaFile(candidate: unknown): SchemaIntegrityR
   issues.push(...structural.issues);
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
-
 export function validateIncomingRegistryFile(candidate: unknown): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   if (typeof candidate !== 'object' || candidate === null) { issues.push({ severity: 'error', message: 'File is not a valid JSON object.' }); return { valid: false, issues }; }

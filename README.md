@@ -1,113 +1,102 @@
-# SQL Assistant — V14.2
+# SQL Assistant — V14.5
 
-An incremental upgrade of V14.1: navbar/logo polish, automatic JOIN generation, per-column Alias/DECODE controls,
-an expanded Advanced Options area, and a Secret Vault that unifies with the Admin Password so GitHub sync no
-longer requires technical repository knowledge. **All existing V14.1 functionality, UI, Query Builder logic, NLP
-engine, schema management, synchronization, and Vault behavior are preserved.**
+A focused stability, synchronization, schema persistence, AI/NLP, and Select Columns upgrade to V14.3. **All
+existing V14.3 functionality, UI, Query Builder logic, NLP engine, schema management, Secret Vault, GitHub
+integration, and synchronization functionality are preserved — nothing was redesigned or removed.**
 
 ## Just want to open it? `dist/index.html`
 
-Fully self-contained (~230 KB, zero external references). Double-click it — no server, no build step. Verified
-via `file://` in a real headless browser with **zero console errors, zero page errors** across 33 targeted tests.
+Fully self-contained (~245 KB, zero external references). Double-click it — no server, no build step. Verified
+via `file://` in a real headless browser: **zero real console errors, zero page errors** across 18 targeted tests.
 
-## What's new in V14.2
+## 1-2, 4, 11. Cross-Device Schema Synchronization — no manual Pull Request
 
-### 1. Navbar / Logo (spec section 1)
-A more polished, layered logo mark (database stack + magnifying-glass accent) replaces the flat V14.1 badge —
-built entirely from the app's own existing brand blue (`#2f6fed` / `#1c3f8f`); no new colours were introduced.
-*(Note: the spec referenced "the requested #D colour/theme" — formatting appears to have been stripped from the
-source document in transit. We've interpreted this as "reuse the existing brand colour," since no other colour
-reference was available — happy to adjust to a specific hex if a different one was intended.)* The logo has
-**zero** hover/focus/active styling of its own (verified: identical markup before/after hover) and is wrapped in a
-real `<button>` that navigates to Quick Start via the same in-SPA callback every other nav link uses — no full
-page reload.
+`autoSyncService.ts` (`performDiscovery()`) implements the exact required flow: Start SQL Assistant → Unlock/
+authenticate Secret Vault → Connect to shared repository → Check latest schema catalogue → Retrieve available
+schemas → Synchronize local schema catalogue → Display schemas. This runs automatically the moment Settings/Vault
+is unlocked, and again on mount of the Read Only builder and Schema pages ("before opening Schema selection").
+Every schema mutation (create/import/update/rename) triggers a debounced automatic push in the background. Manual
+"Sync Now" buttons remain as an explicit, reassuring fallback — never a requirement. The **one** unavoidable
+manual step is entering the Admin Password once per session to unlock Settings — that is the actual security
+boundary and can't be bypassed without abandoning authentication.
 
-### 2-5. Automatic Joins (the centerpiece of this release)
-A new `joinAutoEngine.ts` inspects the Active Schema's declared PK/FK relationships to connect selected tables
-automatically:
-- **Direct relationships** are used when they exist.
-- **One-hop bridges** are detected when two tables aren't directly related but share a connecting table — the
-  spec's own example (**Invoice → Supplier → Organization**) is now literally demonstrable: we added an
-  `ORGANIZATION` table + `VENDOR.ORG_ID` FK to the default schema specifically to prove this out, and it's
-  verified working end-to-end.
-- **Ambiguous pairs** (more than one valid path) are surfaced with a dropdown in Advanced Options → Automatic
-  Joins, rather than silently guessing.
-- **No relationship found** now produces a clear warning comment — V14.1's old `ON 1=1` arbitrary-guess fallback
-  has been removed entirely, since an always-true join condition is worse than no join at all.
+## 3. Admin-Customized Schema Name
 
-### 6-11. Select Columns — search, Alias, DECODE
-- Column search re-verified (static-shell pattern, never loses focus, works across multiple selected tables).
-- **Alias** now appears only once a column is checked — a clean `Column Name` before, `☑ Column Name | Alias` after.
-- **DECODE** likewise appears only once selected, as a "Display as" choice: **Raw Column** / **Schema DECODE**
-  (only shown if one exists) / **Manual DECODE…** (opens a builder pre-filled for that exact column; on save, it
-  replaces that column's entry in place — never creating a duplicate).
+A dedicated naming modal (`schemaNameModal.ts`) is shown for both **Add Schema** and **Import Schema** — the
+schema name is never silently taken from an uploaded filename. Validated live for syntax and uniqueness via
+`schemaService.validateNewSchemaName()`. The original filename is preserved separately as `originalFileName`
+(provenance/audit only) and never used for the schema's identity.
 
-### 12. Manual Selectors — single "Build Query" button
-A single `Build Query` action now sits directly below the Manual Selectors tabs — no other buttons in that row.
+## 5-7. Secret Vault Cross-Device Sync — never plaintext
 
-### 13-23. Advanced Options — expanded into the central SELECT-configuration area
-WITH/CTEs (new), GROUP BY, HAVING, ORDER BY, LIMIT, DISTINCT, aggregates, CASE, DECODE, and Views are all here.
-The "Manual CASE (custom)" / "Manual DECODE (custom)" buttons were relocated here from Select Columns, per the
-spec's explicit instruction that Advanced Options — not the main Query Builder — should be the central home for
-advanced functionality.
+On a **brand-new machine**, unlocking Settings with the Admin Password automatically fetches the encrypted vault
+blob (AES-GCM ciphertext, PBKDF2-derived key — never plaintext) from the shared repository via an unauthenticated
+read (the bootstrap repo is public, breaking the chicken-and-egg problem), decrypts it locally, and the same
+GitHub token configured on the first machine is now available — automatically. The token is always shown masked
+in the UI (`••••••••••••abcd`).
 
-### 22. Views vs. Tables
-`TableDef` gained an optional `objectType: 'TABLE' | 'VIEW'` field (defaults to `'TABLE'` everywhere it's read, so
-existing schemas are unaffected). A `VIEW` chip now appears next to any view in every table listing; a `VW_OPEN_INVOICES`
-example view was added to the default schema to demonstrate this.
+## 8-10. Synchronization Error — root cause found and fixed
 
-### 24-30. Secret Vault (the other centerpiece)
-The Vault now unlocks with the **same Admin Password** already used for Settings — spec section 27 explicitly
-asked for this, and it removes an entire second secret users had to remember. Non-secret bootstrap defaults
-(repository/branch/path) are baked into the app and pre-fill automatically, collapsed behind an "Advanced
-repository settings" disclosure — a typical user only ever supplies their personal GitHub token. The token is
-**always masked** (`••••••••••••abcd`), with a "Change Token" flow that never displays the previous value. A
-simple **"Sync with GitHub"** button is the primary action on both the Schema page and Settings → Synchronization;
-manual push/pull remain available for power users behind a collapsed "Advanced" section.
+**Root cause:** `JSON.stringify()` silently drops any object property whose value is `undefined` (standard JS
+behavior). A Secret Vault config saved by an earlier code path, or where a field was momentarily `undefined`,
+could round-trip through `localStorage`/the repository missing that key — even though its TypeScript type claims
+the field is always a `string`. TypeScript enforces nothing at runtime, so `cfg.someField.trim()` would throw
+exactly the reported error.
 
-**Honest scope note:** the GitHub access token is inherently a personal credential per GitHub's own security
-model — it is intentionally never synchronized or auto-recovered, since a static client-only app has no secure
-way to do that without a backend. This is stated plainly in the UI and About page rather than implying a false
-"fully automatic secret sync."
+**The fix — a single comprehensive gate, not scattered patches:**
+- **`utils/validation.ts` → `assertSyncConfigOrError()`** — checks every named sync-relevant field (Schema Name,
+  Repository, Branch, Repository Path, Access Token, Vault config) **before** any value is touched, and returns
+  one aggregated, human-readable message naming exactly which field is missing — **never** the value (critical
+  for the access token). Matches the spec's own example message format exactly: *"Repository synchronization
+  configuration is incomplete. Please verify the required configuration in Secret Vault. Missing: Access Token."*
+- **`safeString`/`safeTrim`** — never throw regardless of what's actually passed at runtime; used as
+  defense-in-depth throughout `githubApiService.ts` and `secretVaultService.ts`.
+- Tested explicitly with missing schema name, missing repository config, missing branch, missing path, missing
+  Vault config, invalid configuration, and valid configuration — **zero unhandled JavaScript errors** in every
+  case.
 
-## What's in this zip
+## 12-16. Online AI/NLP — Active Schema is mandatory
 
-```
-sqla142/
-├── dist/index.html          ← Open this. Fully self-contained.
-├── inline-build.mjs          ← Build-time inliner with byte-identical verification
-├── src/
-│   ├── engines/               + joinAutoEngine (NEW — direct + bridge join detection)
-│   ├── services/               secretVaultService (NEW — replaces vaultService, Admin-Password-unified)
-│   ├── components/             logoMark (NEW), columnPicker (rewritten — inline Alias/Display-as),
-│   │                            manualExprBuilder (+ replace-in-place support)
-│   ├── utils/                  sqlIdentifier (NEW — alias validation)
-│   └── pages/                  readOnlyBuilderPage (Automatic Joins UI, CTE builder, single Build Query button),
-│                                settingsPage (Secret Vault tab), schemaPage (View chip, simplified sync)
-├── package.json / tsconfig.json / vite.config.ts
-└── README.md
-```
+`nlpOrchestrator.ts` runs the exact required flow: Load Saved Active Schema → **Validate Active Schema
+availability** (explicit step, `validateActiveSchemaAvailability()`) → Extract relevant schema metadata → Send
+Natural Language + Schema Context → Online AI/NLP → Generate SQL → **Validate SQL against Active Schema** → Display
+SQL. Rich schema context (modules, tables, columns, types, descriptions, PK/FK, relationships, decode definitions,
+views) is sent to the endpoint; anything it returns is strictly filtered against the Active Schema before use. An
+independent engine (`sqlSchemaValidator.ts`) performs one final pass over the **assembled SQL text itself**,
+catching any invented table/column reference regardless of where it entered the pipeline. Switching Active Schema
+takes effect on the very next request automatically — there is no caching to invalidate.
+
+## 17-20. Select Columns — search (re-verified) + Select All
+
+The static-shell pattern was audited one more time given repeated reports: the search `<input>` and the **Select
+All** checkbox are both part of a shell rendered exactly once — every interaction only replaces `.picker-list`'s
+innerHTML, so the search box never loses focus and the page never refreshes. **Select All** always operates on
+every real column across the selected table(s), completely **ignoring** the current search filter (per the
+spec's own recommended behavior) — and never resets an already-selected column's Alias/CASE/DECODE configuration.
+
+## 21. Synchronization and Query Builder Independence
+
+Repository synchronization only ever calls `schemaService`'s change notification, which triggers a targeted SQL
+regeneration in `state/store.ts` using whatever the **current** selections already are — it only prunes
+references to tables that literally no longer exist. Verified: selecting tables/columns, navigating away, and
+navigating back preserves the full query state (selected tables, columns, CTEs, filters) with no reset.
 
 ## Verified before packaging (real browser tests, not just compilation)
 
 - `tsc --noEmit`: 0 errors · `vite build`: clean
-- Logo: renders correctly, markup byte-identical before/after hover, click navigates to Quick Start
-- Automatic Joins: direct joins confirmed; the Invoice→Vendor→Organization bridge chain confirmed working
-  end-to-end in generated SQL; confirmed the old `1=1` arbitrary-join fallback no longer appears anywhere
-- Select Columns: search filters correctly and never loses focus; Alias hidden before selection, shown and
-  functional immediately after; DECODE confirmed NOT auto-applied, confirmed applying correctly once explicitly
-  chosen via "Display as"
-- Exactly one button (`Build Query`) confirmed present below Manual Selectors
-- CTE/WITH builder confirmed generating correct SQL
-- View chip confirmed present and visually distinguished from Tables
-- Secret Vault: confirmed auto-unlocking with the Admin Password, confirmed no separate passphrase prompt exists
-  anywhere, confirmed masked token display, confirmed bootstrap repository defaults pre-filled
-- **Full V14.1 regression pass**: no-refresh behavior, AND/OR merge, description-aware NLP, Settings password fix,
-  Manual Schema Update module/table scoping, and hamburger submenu collapse/expand all re-verified intact
-- Mobile (390px): hamburger opens correctly, zero horizontal overflow
-- **Zero console errors, zero page errors** across 33 targeted tests spanning both new features and regressions
+- Settings unlock with default password `admin` succeeds with **zero** `undefined.trim()` crash
+- Secret Vault confirmed auto-unlocking; token always masked, never plaintext
+- Missing-config validation message confirmed naming the exact field ("Access Token") with **no** "undefined"
+  anywhere in the text
+- Synchronization Activity Log confirmed present and recording events in real time
+- Schema naming modal confirmed opening for Add Schema; custom name confirmed used and displayed; duplicate name
+  correctly rejected with a clear message
+- Select Columns: search confirmed filtering (partial + case-insensitive) without losing input focus; Select All
+  confirmed selecting every column regardless of the active search filter
+- Automatic bridge joins, View chip, description-aware NLP with schema audit line all re-verified intact
+- **Zero real console errors, zero page errors** across the entire test run
 
 ## Demo credentials
 
-Admin Password: `admin` (used internally only — never shown in the UI). This same password unlocks the Secret
-Vault automatically — no separate passphrase to create or remember.
+Admin Password: `admin` (used internally only — never shown in the UI). This same password automatically unlocks
+(or bootstraps, on a brand-new machine) the Secret Vault.

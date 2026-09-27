@@ -11,3 +11,5 @@ export type SyncTimeOption = 'manual' | '15m' | '30m' | '1h' | '4h' | '6h' | 'da
 export interface SyncConfig { source: SyncSource; time: SyncTimeOption; customTime: string | null; }
 export type SyncStatus = 'synchronized' | 'pending' | 'failed' | 'syncing' | 'never';
 export type SettingsSection = 'security' | 'schema-editor' | 'schema-management' | 'synchronization' | 'vault' | 'danger';
+export interface PendingConflict { id: string; schemaId: string; schemaName: string; localVersion: string; remoteVersion: string; changedPaths: string[]; remoteSchemaJson: string; detectedAt: string; }
+export interface SyncLogEntry { id: string; timestamp: string; kind: 'discovery' | 'push' | 'pull' | 'error'; message: string; }

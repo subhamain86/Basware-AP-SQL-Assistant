@@ -10,10 +10,6 @@ import { validateCrState } from '../engines/validationEngine';
 import type { CrQueryType, Dialect } from '../types';
 import { makeId } from '../utils/id';
 
-// crBuilderPage — V14.2. No structural changes required by this spec
-// beyond preserving V14.1's no-refresh fix (still no blanket
-// store.subscribe(draw)) and staying visually aligned with the Read Only
-// Query Builder (spec section 33).
 export function renderCrBuilderPage(container: HTMLElement): void {
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'details';
@@ -75,8 +71,9 @@ export function renderCrBuilderPage(container: HTMLElement): void {
     if (requirement.filters.length) store.updateCr((s) => { s.filters = requirement.filters; });
 
     const engineBadge = orchestrated.engineUsed === 'online' ? `<span class="engine-badge engine-online">${icon('cloud', 13)} Online AI/NLP</span>` : `<span class="engine-badge engine-offline">${icon('wifi-off', 13)} Offline/local engine${orchestrated.onlineAttempted ? ' (online attempt failed/unavailable)' : ''}</span>`;
+    const schemaAuditLine = `<div class="schema-audit-line">${icon('database', 12)} Active Schema used: <strong>${schema.name}</strong> (v${schema.versionMeta?.version ?? schema.version})</div>`;
     const notesMount = container.querySelector('#crNlNotes');
-    if (notesMount) notesMount.innerHTML = `<div class="notes-box">${icon('info', 14)}<div>${engineBadge}<ul class="mt">${requirement.notes.map((n) => `<li>${n}</li>`).join('')}</ul></div></div>`;
+    if (notesMount) notesMount.innerHTML = `<div class="notes-box">${icon('info', 14)}<div>${engineBadge}${schemaAuditLine}<ul class="mt">${requirement.notes.map((n) => `<li>${n}</li>`).join('')}</ul></div></div>`;
     renderTabsSection(store.cr, schema);
     renderCrSqlOutput();
     const rebuiltBtn = container.querySelector<HTMLButtonElement>('#crNlBuildBtn');

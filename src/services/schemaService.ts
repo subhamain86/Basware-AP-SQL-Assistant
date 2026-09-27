@@ -4,8 +4,9 @@ import { validateDecodeEntries } from '../engines/decodeEngine';
 import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
+import { validateSchemaName } from '../utils/validation';
 
-const STORAGE_KEY = 'sqla.registry.v142';
+const STORAGE_KEY = 'sqla.registry.v145';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 
 export class SchemaService {
@@ -24,6 +25,7 @@ export class SchemaService {
   getSchemaById(id: string): SchemaModel | undefined { return this.registry.schemas.find((s) => s.id === id); }
   getModulesForSchema(schemaId: string): string[] { const s = this.getSchemaById(schemaId); if (!s) return []; return Array.from(new Set(s.tables.map((t) => t.module))).sort(); }
   getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
+  getAllSchemaNames(excludeId?: string): string[] { return this.registry.schemas.filter((s) => s.id !== excludeId).map((s) => s.name); }
 
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
@@ -33,29 +35,40 @@ export class SchemaService {
   }
   resetToDefaultSchema(): void { this.switchActiveSchema(DEFAULT_ACTIVE_SCHEMA_ID); }
 
-  async syncSchema(schemaId: string): Promise<SchemaModel> {
-    await new Promise((r) => setTimeout(r, 650));
-    const schema = this.registry.schemas.find((s) => s.id === schemaId);
-    if (!schema) throw new Error('Schema not found.');
-    schema.lastSyncedAt = new Date().toISOString();
-    this.persist();
-    return schema;
+  validateNewSchemaName(name: unknown, excludeId?: string): string | null {
+    const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
+    return result.valid ? null : (result.message || 'Invalid schema name.');
   }
 
-  importSchema(schema: SchemaModel): { ok: boolean; error?: string; schemaId?: string } {
+  importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string } {
+    const nameError = this.validateNewSchemaName(customName);
+    if (nameError) return { ok: false, error: nameError };
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
-    const id = schema.id || makeId('schema');
-    const withDefaults: SchemaModel = { id, name: schema.name || 'Imported Schema', version: schema.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: schema.tables, relationships: schema.relationships || [] };
+    const id = makeId('schema');
+    const withDefaults: SchemaModel = { id, name: customName.trim(), version: schema.version || '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: schema.tables, relationships: schema.relationships || [], originalFileName: originalFileName || undefined };
     this.registry.schemas.push(withDefaults);
     this.persist();
     return { ok: true, schemaId: id };
   }
 
-  addNewSchema(name: string): SchemaModel {
-    const fresh: SchemaModel = { id: makeId('schema'), name: name || 'New Schema', version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: [], relationships: [] };
+  addNewSchema(name: string): { ok: boolean; error?: string; schema?: SchemaModel } {
+    const nameError = this.validateNewSchemaName(name);
+    if (nameError) return { ok: false, error: nameError };
+    const fresh: SchemaModel = { id: makeId('schema'), name: name.trim(), version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: [], relationships: [] };
     this.registry.schemas.push(fresh);
     this.persist();
-    return fresh;
+    return { ok: true, schema: fresh };
+  }
+
+  renameSchema(schemaId: string, newName: string): { ok: boolean; error?: string } {
+    const schema = this.getSchemaById(schemaId);
+    if (!schema) return { ok: false, error: 'Schema not found.' };
+    const nameError = this.validateNewSchemaName(newName, schemaId);
+    if (nameError) return { ok: false, error: nameError };
+    schema.name = newName.trim();
+    schema.updatedAt = new Date().toISOString();
+    this.persist();
+    return { ok: true };
   }
 
   deleteSchema(schemaId: string): { ok: boolean; error?: string } {

@@ -1,6 +1,3 @@
-// cryptoService — PBKDF2 + AES-GCM via the browser's built-in Web Crypto API.
-// No external dependency. Honest scope: client-side protection only, raises
-// the bar against casual localStorage inspection; not server-grade security.
 const PBKDF2_ITERATIONS = 150000;
 function toBase64(bytes: Uint8Array): string { let binary = ''; bytes.forEach((b) => { binary += String.fromCharCode(b); }); return btoa(binary); }
 function fromBase64(b64: string): Uint8Array { const binary = atob(b64); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes; }

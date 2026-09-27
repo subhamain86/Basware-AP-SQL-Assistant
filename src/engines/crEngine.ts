@@ -13,13 +13,10 @@ export function buildCrSQL(state: CrQueryState): CrBuildResult {
   if (!state.table) return { sql: '-- Choose a table for this Change Request.', blocked: true, reason: 'No table selected.' };
   const whereClause = buildWhereClause(state.filters);
   const needsWhere = state.queryType === 'UPDATE' || state.queryType === 'DELETE';
-  if (needsWhere && !whereClause && !state.confirmNoWhere) {
-    return { sql: '-- A WHERE condition is required to identify which records should be updated or deleted.\n-- Add at least one filter, or explicitly confirm this query should have no WHERE condition.', blocked: true, reason: 'Missing mandatory WHERE clause.' };
-  }
+  if (needsWhere && !whereClause && !state.confirmNoWhere) return { sql: '-- A WHERE condition is required to identify which records should be updated or deleted.\n-- Add at least one filter, or explicitly confirm this query should have no WHERE condition.', blocked: true, reason: 'Missing mandatory WHERE clause.' };
   if (state.queryType === 'INSERT') {
     if (state.values.length === 0) return { sql: '-- Add at least one column/value pair to build an INSERT statement.', blocked: true };
-    const cols = state.values.map((v) => v.column).join(', ');
-    const vals = state.values.map((v) => formatValue(v.value)).join(', ');
+    const cols = state.values.map((v) => v.column).join(', '); const vals = state.values.map((v) => formatValue(v.value)).join(', ');
     return { sql: `INSERT INTO ${state.table} (${cols})\nVALUES (${vals});`, blocked: false };
   }
   if (state.queryType === 'UPDATE') {

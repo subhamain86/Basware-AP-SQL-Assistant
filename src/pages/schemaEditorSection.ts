@@ -10,9 +10,6 @@ import { secretVaultService } from '../services/secretVaultService';
 import type { SchemaEditorRow, ColumnDataType } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
-// schemaEditorSection — V14.2. Workflow unchanged: Select Schema -> Select
-// Module -> Select Table -> Populate Table. Uses the secretVaultService for
-// the inline "Sync Now" shortcut.
 export function renderSchemaEditorSection(container: HTMLElement): void {
   let editingSchemaId = schemaService.getActiveSchema().id;
   let selectedModule: string | null = null;
@@ -33,6 +30,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
         <select id="editorSchemaSelect">${allSchemas.map((s) => `<option value="${s.id}" ${s.id === editingSchema.id ? 'selected' : ''}>${s.name}${s.status === 'active' ? ' (Active)' : ''}</option>`).join('')}</select>
       </label>
       <p class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong>${editingSchema.status === 'active' ? ' <span class="chip chip-active">Active — changes apply immediately</span>' : ' <span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'}
+        <span class="hint auto-sync-hint">${icon('folder-sync', 12)} Changes sync automatically once the Secret Vault is unlocked</span>
         <button type="button" class="btn btn-outline btn-sm sync-now-inline-btn" id="syncNowInlineBtn">${icon('github', 13)} Sync Now</button>
       </p>
       <div id="syncNowInlineResult"></div>

@@ -1,15 +1,5 @@
 import type { SchemaModel } from '../types';
 
-// ============================================================================
-// V14.2 — added ORGANIZATION table + VENDOR.ORG_ID FK relationship, so the
-// spec's own worked example ("Invoice -> Supplier -> Organization") is
-// directly demonstrable: INVOICE_HEADER -> VENDOR -> ORGANIZATION is now a
-// genuine 2-hop join chain resolvable purely from schema FK/PK metadata.
-// Also added VW_OPEN_INVOICES as a VIEW (objectType: 'VIEW') to
-// demonstrate spec section 22 (Views distinguished from Tables, usable as
-// a SELECT source). Everything else is unchanged from V14.1.
-// ============================================================================
-
 export const CORE_SCHEMA: SchemaModel = {
   id: 'schema-core-ap-p2p', name: 'AP / P2P Core', version: '1.0', status: 'active',
   updatedAt: new Date().toISOString(), lastSyncedAt: null,

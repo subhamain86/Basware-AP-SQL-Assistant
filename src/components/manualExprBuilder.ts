@@ -3,17 +3,8 @@ import { openModal } from './modal';
 import { buildManualCaseExpression, buildManualDecodeExpression } from '../engines/decodeEngine';
 import type { Dialect, SelectedColumnSpec } from '../types';
 import { makeId } from '../utils/id';
-
-// manualExprBuilder — V14.2. `openManualDecodeBuilder` now accepts an
-// optional `replaceSpecId` (spec section 11: "Do not create duplicate
-// aliases or duplicate column expressions"). When set, `onAdd` is expected
-// to REPLACE that existing SelectedColumnSpec in place (same id) rather
-// than push a brand-new one — this is what lets the per-column "Display
-// as: Manual DECODE…" option convert an already-selected raw/schema-decode
-// column into a manual expression without creating a duplicate entry.
 export interface ManualCasePrefill { table: string; column: string; }
 export interface ManualDecodePrefill { table: string; column: string; }
-
 export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualCasePrefill): void {
   const seedExpr = prefill ? `${prefill.table}.${prefill.column} = 'X'` : '';
   const seedAlias = prefill ? `${prefill.column}_LABEL` : '';
@@ -28,15 +19,9 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
   const modal = openModal(`${icon('code', 18)} Manual CASE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const whenRowsEl = modal.element.querySelector<HTMLElement>('#whenRows')!;
   let whens: { whenExpr: string; thenValue: string }[] = [{ whenExpr: seedExpr, thenValue: '' }];
-
   function renderWhens(): void {
     whenRowsEl.innerHTML = whens.map((w, i) => `<div class="mini-row wrap" data-idx="${i}"><input type="text" class="when-expr" placeholder="e.g. STATUS = 'A'" value="${w.whenExpr}" /><span class="hint">THEN</span><input type="text" class="when-then" placeholder="e.g. Active" value="${w.thenValue}" /><button class="icon-btn remove-when" title="Remove">${icon('trash', 14)}</button></div>`).join('');
-    whenRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => {
-      const idx = parseInt(row.dataset.idx || '0', 10);
-      row.querySelector('.when-expr')?.addEventListener('input', (e) => { whens[idx].whenExpr = (e.target as HTMLInputElement).value; });
-      row.querySelector('.when-then')?.addEventListener('input', (e) => { whens[idx].thenValue = (e.target as HTMLInputElement).value; });
-      row.querySelector('.remove-when')?.addEventListener('click', () => { whens.splice(idx, 1); renderWhens(); });
-    });
+    whenRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.when-expr')?.addEventListener('input', (e) => { whens[idx].whenExpr = (e.target as HTMLInputElement).value; }); row.querySelector('.when-then')?.addEventListener('input', (e) => { whens[idx].thenValue = (e.target as HTMLInputElement).value; }); row.querySelector('.remove-when')?.addEventListener('click', () => { whens.splice(idx, 1); renderWhens(); }); });
   }
   renderWhens();
   modal.element.querySelector('#addWhenBtn')?.addEventListener('click', () => { whens.push({ whenExpr: '', thenValue: '' }); renderWhens(); });
@@ -55,7 +40,6 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
     modal.close();
   });
 }
-
 export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill, replaceSpecId?: string, seedAliasOverride?: string): void {
   const seedSource = prefill ? `${prefill.table}.${prefill.column}` : '';
   const seedAlias = seedAliasOverride || (prefill ? `${prefill.column}_DESC` : '');
@@ -68,18 +52,12 @@ export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: Selected
     <label class="block-label">Alias <span class="req">*</span><input type="text" id="decodeAlias" value="${seedAlias}" placeholder="e.g. STATUS_DESC" /></label>
     <div id="decodeIssues"></div>
     <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} ${replaceSpecId ? 'Apply' : 'Add Column'}</button></div>`;
-  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true, closeOnBackdrop: !replaceSpecId ? true : true });
+  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const pairRowsEl = modal.element.querySelector<HTMLElement>('#pairRows')!;
   let pairs: { rawValue: string; label: string }[] = [{ rawValue: '', label: '' }];
-
   function renderPairs(): void {
     pairRowsEl.innerHTML = pairs.map((p, i) => `<div class="mini-row wrap" data-idx="${i}"><input type="text" class="pair-raw" placeholder="raw value" value="${p.rawValue}" /><span class="hint">=</span><input type="text" class="pair-label" placeholder="label" value="${p.label}" /><button class="icon-btn remove-pair" title="Remove">${icon('trash', 14)}</button></div>`).join('');
-    pairRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => {
-      const idx = parseInt(row.dataset.idx || '0', 10);
-      row.querySelector('.pair-raw')?.addEventListener('input', (e) => { pairs[idx].rawValue = (e.target as HTMLInputElement).value; });
-      row.querySelector('.pair-label')?.addEventListener('input', (e) => { pairs[idx].label = (e.target as HTMLInputElement).value; });
-      row.querySelector('.remove-pair')?.addEventListener('click', () => { pairs.splice(idx, 1); renderPairs(); });
-    });
+    pairRowsEl.querySelectorAll<HTMLElement>('.mini-row').forEach((row) => { const idx = parseInt(row.dataset.idx || '0', 10); row.querySelector('.pair-raw')?.addEventListener('input', (e) => { pairs[idx].rawValue = (e.target as HTMLInputElement).value; }); row.querySelector('.pair-label')?.addEventListener('input', (e) => { pairs[idx].label = (e.target as HTMLInputElement).value; }); row.querySelector('.remove-pair')?.addEventListener('click', () => { pairs.splice(idx, 1); renderPairs(); }); });
   }
   renderPairs();
   modal.element.querySelector('#addPairBtn')?.addEventListener('click', () => { pairs.push({ rawValue: '', label: '' }); renderPairs(); });

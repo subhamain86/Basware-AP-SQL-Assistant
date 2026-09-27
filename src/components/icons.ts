@@ -1,4 +1,4 @@
-export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes' | 'eye' | 'git-branch' | 'route';
+export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes' | 'eye' | 'git-branch' | 'route' | 'checkbox-checked' | 'server' | 'history';
 const PATHS: Record<IconName, string> = {
   menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>',
@@ -63,9 +63,12 @@ const PATHS: Record<IconName, string> = {
   boxes: '<path d="M2 8l5-3 5 3v6l-5 3-5-3z"/><path d="M12 8l5-3 5 3v6l-5 3-5-3z"/><path d="M7 5l5 3 5-3"/>',
   eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
   'git-branch': '<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
-  route: '<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-4-4h-5a4 4 0 0 1-4-4v-.5"/>'
+  route: '<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-4-4h-5a4 4 0 0 1-4-4v-.5"/>',
+  'checkbox-checked': '<rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor" stroke="none"/><polyline points="8,12 11,15 16,9" stroke="white" stroke-width="2.2"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><circle cx="7" cy="7.5" r="0.8" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r="0.8" fill="currentColor" stroke="none"/>',
+  history: '<circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,14"/><path d="M3.5 9 2 7.5 M3.5 9 5 7.5"/>'
 };
 export function icon(name: IconName, size = 18, extraClass = ''): string {
-  if (name === 'logo') return PATHS.logo; // logo is a full standalone <svg>, not a path set — see logoMark()
+  if (name === 'logo') return PATHS.logo;
   return `<svg class="icon-svg ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
 }
