@@ -2,6 +2,37 @@ import type { SchemaModel, TableDef, SchemaIntegrityResult, SchemaIntegrityIssue
 import { VALID_DATA_TYPES } from '../types';
 import { safeTrim, safeUpperTrim } from '../utils/validation';
 
+// V14.7 FIX — root cause of "Remote schema file failed validation" on
+// real-world (Oracle-sourced) schemas: VALID_DATA_TYPES only lists the 5
+// generic UI-editor buckets ('VARCHAR','NUMBER','DATE','FLAG','TIMESTAMP').
+// Any schema imported/synced from an actual database (e.g. exported via
+// DESCRIBE/ALL_TAB_COLUMNS) carries native types like "NVARCHAR2(64)",
+// "NUMBER(22,5)", "TIMESTAMP(6)", "BLOB", "RAW(16)" — none of which match
+// the 5-item list, so EVERY column was flagged as an error and the whole
+// file was rejected. This new check normalizes the type (strips any
+// "(length[,precision])" suffix, upper-cases, trims) and accepts it if it
+// matches either a generic UI type OR a recognized native DB base type.
+// The manual schema-editor dropdown (schemaEditorSection.ts) still only
+// offers the 5 generic types — this only widens what remote/import data
+// is allowed to contain.
+const NATIVE_DB_BASE_TYPES = new Set<string>([
+  'VARCHAR', 'VARCHAR2', 'NVARCHAR', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CHARACTER',
+  'CLOB', 'NCLOB', 'BLOB', 'RAW', 'LONG', 'LONG RAW',
+  'NUMBER', 'INTEGER', 'INT', 'SMALLINT', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE', 'REAL', 'BINARY_FLOAT', 'BINARY_DOUBLE',
+  'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE',
+  'BOOLEAN', 'FLAG', 'BIT', 'ROWID', 'UROWID', 'XMLTYPE', 'JSON'
+]);
+
+function isRecognizedDataType(rawType: unknown): boolean {
+  const t = safeTrim(rawType);
+  if (!t) return false;
+  if (VALID_DATA_TYPES.includes(t as (typeof VALID_DATA_TYPES)[number])) return true;
+  // Strip a trailing size/precision qualifier, e.g. "NVARCHAR2(64)" -> "NVARCHAR2",
+  // "NUMBER(22,5)" -> "NUMBER", "TIMESTAMP(6)" -> "TIMESTAMP".
+  const base = safeUpperTrim(t).replace(/\s*\(.*\)\s*$/, '');
+  return NATIVE_DB_BASE_TYPES.has(base);
+}
+
 export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   const seenTableColumn = new Set<string>();
@@ -20,7 +51,7 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
       const key = `${safeUpperTrim(tName)}::${safeUpperTrim(cName)}`;
       if (seenTableColumn.has(key)) issues.push({ severity: 'error', message: `Duplicate column "${tName}.${cName}" — each table/column combination must be unique.` });
       seenTableColumn.add(key);
-      if (!VALID_DATA_TYPES.includes(c.type)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has an invalid data type "${c.type}".` });
+      if (!isRecognizedDataType(c.type)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has an invalid data type "${c.type}".` });
       if (c.isPrimaryKey) pkCount += 1;
       if (c.isForeignKey) {
         const refTable = safeTrim(c.references?.table);
@@ -47,7 +78,13 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
           // manual edit, JSON import, or a schema synced from another
           // device).
           const rawValue = safeTrim(d?.rawValue);
-          if (!rawValue) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has a decode entry with an empty raw value.` });
+          // V14.7 FIX: was `severity: 'error'` — a blank raw value is a
+          // legitimate way to decode a NULL/blank DB value (e.g. "" -> "Not
+          // set") and was blocking valid, real-world schemas (dozens of
+          // FLAG/boolean columns like IS_ACTIVE, ENABLED, GRANTED use this
+          // pattern) from ever syncing. Downgraded to a warning so it's
+          // still surfaced to the user but no longer rejects the file.
+          if (!rawValue) issues.push({ severity: 'warning', message: `Column "${tName}.${cName}" has a decode entry with an empty raw value.` });
           const rk = safeUpperTrim(d?.rawValue);
           if (rk && seenRaw.has(rk)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" has duplicate decode raw value "${rawValue}".` });
           seenRaw.add(rk);

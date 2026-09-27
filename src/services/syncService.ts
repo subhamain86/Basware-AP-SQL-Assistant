@@ -36,9 +36,26 @@ class SyncService {
   private notify(): void { this.listeners.forEach((l) => l()); }
   private persistConfig(): void { localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config)); }
   private persistPendingConflicts(): void { localStorage.setItem(PENDING_CONFLICTS_KEY, JSON.stringify(this.pendingConflicts)); this.notify(); }
+  // V14.7 FIX: a validation failure on a large real-world schema can
+  // produce a message with hundreds of concatenated issues (thousands of
+  // characters). Storing MAX_LOG_ENTRIES of these verbatim in
+  // localStorage could exceed the browser's per-origin quota, throwing
+  // "Setting the value of 'sqla.synclog.v146' exceeded the quota" — which
+  // then masked the *real* underlying error in the UI. The message is now
+  // capped, and the storage write is wrapped so a quota error can never
+  // crash the app or hide the original problem.
+  private static readonly MAX_LOG_MESSAGE_LENGTH = 600;
   private logEvent(kind: SyncLogEntry['kind'], message: string): void {
-    this.syncLog = [{ id: makeId('synclog'), timestamp: new Date().toISOString(), kind, message }, ...this.syncLog].slice(0, MAX_LOG_ENTRIES);
-    localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
+    const trimmedMessage = message.length > SyncService.MAX_LOG_MESSAGE_LENGTH
+      ? `${message.slice(0, SyncService.MAX_LOG_MESSAGE_LENGTH)}… (${message.length - SyncService.MAX_LOG_MESSAGE_LENGTH} more characters truncated)`
+      : message;
+    this.syncLog = [{ id: makeId('synclog'), timestamp: new Date().toISOString(), kind, message: trimmedMessage }, ...this.syncLog].slice(0, MAX_LOG_ENTRIES);
+    try {
+      localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
+    } catch {
+      // Storage quota exceeded or unavailable — drop older entries and retry once with just the newest one.
+      try { localStorage.setItem(SYNC_LOG_KEY, JSON.stringify(this.syncLog.slice(0, 5))); } catch { /* give up silently; in-memory log still holds the entry */ }
+    }
     this.notify();
   }
   getConfig(): SyncConfig { return this.config; }
