@@ -4,7 +4,6 @@ import { renderFilterBuilder } from '../components/filterBuilder';
 import { renderTabs } from '../components/tabs';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
-import { aiService } from '../services/aiService';
 import { orchestrateCrNlp } from '../services/nlpOrchestrator';
 import { validateCrState } from '../engines/validationEngine';
 import type { CrQueryType, Dialect } from '../types';

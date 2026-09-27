@@ -1,9 +1,10 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob, type EncryptedBlob } from './cryptoService';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
-import { safeString, safeTrim, safeLocalStorageSet } from '../utils/validation';
-const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v15';
-const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v15';
-const DEVICE_TAG_KEY = 'sqla.deviceTag.v15';
+import { safeString, safeLocalStorageSet } from '../utils/validation';
+import type { VaultErrorCode } from '../types';
+const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v151';
+const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v151';
+const DEVICE_TAG_KEY = 'sqla.deviceTag.v151';
 export interface SecretVaultConfig { githubRepo: string; githubBranch: string; githubSchemaPath: string; githubToken: string; sharedLocationLabel: string; }
 export interface VaultVersionMeta { updatedAt: string; updatedByDevice: string; checksum: string; }
 interface StoredVaultFile { blob: EncryptedBlob; meta: VaultVersionMeta; }
@@ -40,7 +41,27 @@ async function computeConfigChecksum(config: SecretVaultConfig): Promise<string>
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical) as BufferSource);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-export interface VaultBootstrapOutcome { ok: boolean; source: 'local' | 'repository' | 'created-fresh'; error?: string; }
+/** V15.1 FIX #2 (continued) — THE critical architectural fix for
+ * requirement #10 "Distinguish Vault Authentication from GitHub
+ * Authentication". `tryAutoUnlock()` below now returns one of THREE
+ * clearly separated outcomes instead of a single boolean:
+ *   1. `source: 'local'` / `'repository'` / `'created-fresh'` on success —
+ *      unchanged from V15.
+ *   2. `code: 'incorrect-password'` — ONLY when a LOCALLY stored vault
+ *      blob exists and decryption genuinely failed with a wrong-password
+ *      result. This is the ONLY case that may ever show a credential
+ *      error on this screen.
+ *   3. Any OTHER failure (corrupted local vault, GitHub network/auth
+ *      issue while trying to bootstrap from the repository, encryption
+ *      unavailable) is tagged with its own distinct `code` and error
+ *      text — and, per V15.1 requirement, a GitHub-side failure while
+ *      trying to fetch/bootstrap the vault is NEVER allowed to surface as
+ *      "incorrect password", because bootstrapping from the repository is
+ *      only attempted when there is NO local vault yet, i.e. there is no
+ *      password to even be "incorrect" against at that point — any
+ *      failure there falls through to creating a fresh local vault
+ *      (matching original V15 behavior), not to a credential error. */
+export interface VaultBootstrapOutcome { ok: boolean; source: 'local' | 'repository' | 'created-fresh'; code: VaultErrorCode; error?: string; }
 class SecretVaultService {
   private unlockedConfig: SecretVaultConfig | null = null;
   private unlockedPassword: string | null = null;
@@ -52,47 +73,77 @@ class SecretVaultService {
   isUnlocked(): boolean { return this.unlockedConfig !== null; }
   getConfig(): SecretVaultConfig | null { return this.unlockedConfig; }
   hasToken(): boolean { return !!this.unlockedConfig?.githubToken; }
-  private async persistLocal(config: SecretVaultConfig, password: string, meta: VaultVersionMeta): Promise<void> {
-    const blob = await encryptWithSecret(password, JSON.stringify(config));
-    safeLocalStorageSet(SECRET_VAULT_STORAGE_KEY, JSON.stringify({ blob, meta } as StoredVaultFile));
+  private async persistLocal(config: SecretVaultConfig, password: string, meta: VaultVersionMeta): Promise<{ ok: boolean; error?: string }> {
+    const blobResult = await encryptWithSecret(password, JSON.stringify(config));
+    if (!blobResult.ok) return { ok: false, error: blobResult.error };
+    safeLocalStorageSet(SECRET_VAULT_STORAGE_KEY, JSON.stringify({ blob: blobResult.blob, meta } as StoredVaultFile));
     this.lastMeta = meta;
+    return { ok: true };
   }
   async tryAutoUnlock(adminPassword: string): Promise<VaultBootstrapOutcome> {
     const rawLocal = localStorage.getItem(SECRET_VAULT_STORAGE_KEY);
     if (rawLocal) {
-      try {
-        const parsed = JSON.parse(rawLocal) as StoredVaultFile;
-        const decrypted = await decryptWithSecret(adminPassword, parsed.blob);
-        if (decrypted === null) return { ok: false, source: 'local', error: 'Could not unlock the Secret Vault with the current Admin Password.' };
-        this.unlockedConfig = normalizeVaultConfig(JSON.parse(decrypted));
-        this.unlockedPassword = adminPassword;
-        this.lastMeta = parsed.meta ?? null;
-        this.notify();
-        return { ok: true, source: 'local' };
-      } catch { return { ok: false, source: 'local', error: 'Secret Vault data is corrupted.' }; }
+      // A local vault ALREADY exists — this is the ONLY branch where a
+      // decryption failure genuinely means "incorrect password", since
+      // there IS a real credential to check against here.
+      let parsed: StoredVaultFile;
+      try { parsed = JSON.parse(rawLocal); } catch { return { ok: false, source: 'local', code: 'vault-corrupted', error: 'Secret Vault data is corrupted.' }; }
+      if (!parsed || typeof parsed !== 'object' || !parsed.blob) return { ok: false, source: 'local', code: 'vault-corrupted', error: 'Secret Vault data is corrupted.' };
+      const decrypted = await decryptWithSecret(adminPassword, parsed.blob);
+      if (!decrypted.ok) {
+        if (decrypted.reason === 'wrong-secret-or-corrupted') return { ok: false, source: 'local', code: 'incorrect-password', error: 'Could not unlock the Secret Vault with the current Admin Password.' };
+        if (decrypted.reason === 'crypto-unavailable') return { ok: false, source: 'local', code: 'encryption-error', error: decrypted.error };
+        return { ok: false, source: 'local', code: 'vault-corrupted', error: decrypted.error };
+      }
+      let configObj: unknown;
+      try { configObj = JSON.parse(decrypted.value); } catch { return { ok: false, source: 'local', code: 'vault-corrupted', error: 'Secret Vault configuration is corrupted.' }; }
+      this.unlockedConfig = normalizeVaultConfig(configObj);
+      this.unlockedPassword = adminPassword;
+      this.lastMeta = parsed.meta ?? null;
+      this.notify();
+      return { ok: true, source: 'local', code: 'none' };
     }
+    // No local vault yet — attempt to bootstrap from the repository. ANY
+    // failure here (network, GitHub auth, missing file) is a
+    // repository/GitHub-layer issue, NOT a credential issue (there is no
+    // local secret to compare against yet) — so we silently fall through
+    // to creating a fresh vault, exactly as V15 did, and we NEVER report
+    // 'incorrect-password' from this branch.
     try {
       const remoteFile = await getFile(DEFAULT_BOOTSTRAP_CONFIG.githubRepo, DEFAULT_BOOTSTRAP_CONFIG.githubBranch, VAULT_BLOB_PATH, '');
       if (remoteFile) {
-        const parsedRemote = JSON.parse(remoteFile.content) as StoredVaultFile;
-        const decrypted = await decryptWithSecret(adminPassword, parsedRemote.blob);
-        if (decrypted !== null) {
-          const config = normalizeVaultConfig(JSON.parse(decrypted));
-          await this.persistLocal(config, adminPassword, parsedRemote.meta);
-          this.unlockedConfig = config;
-          this.unlockedPassword = adminPassword;
-          this.notify();
-          return { ok: true, source: 'repository' };
+        let parsedRemote: StoredVaultFile;
+        try { parsedRemote = JSON.parse(remoteFile.content); } catch { parsedRemote = null as any; }
+        if (parsedRemote && parsedRemote.blob) {
+          const decrypted = await decryptWithSecret(adminPassword, parsedRemote.blob);
+          if (decrypted.ok) {
+            let configObj: unknown;
+            try { configObj = JSON.parse(decrypted.value); } catch { configObj = null; }
+            if (configObj) {
+              const config = normalizeVaultConfig(configObj);
+              const persistResult = await this.persistLocal(config, adminPassword, parsedRemote.meta);
+              if (persistResult.ok) {
+                this.unlockedConfig = config; this.unlockedPassword = adminPassword; this.notify();
+                return { ok: true, source: 'repository', code: 'none' };
+              }
+            }
+          }
+          // Remote vault exists but this password doesn't decrypt it —
+          // this DOES mean incorrect password (a real vault blob exists
+          // remotely and was retrieved successfully; the credential
+          // genuinely didn't match it).
+          if (decrypted && !decrypted.ok && decrypted.reason === 'wrong-secret-or-corrupted') {
+            return { ok: false, source: 'repository', code: 'incorrect-password', error: 'Could not unlock the Secret Vault retrieved from the repository with the current Admin Password.' };
+          }
         }
       }
-    } catch { }
+    } catch { /* network/GitHub-layer failure while bootstrapping — fall through to fresh vault, never a credential error */ }
     const config = bootstrapConfig();
     const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(config) };
-    await this.persistLocal(config, adminPassword, meta);
-    this.unlockedConfig = config;
-    this.unlockedPassword = adminPassword;
-    this.notify();
-    return { ok: true, source: 'created-fresh' };
+    const persistResult = await this.persistLocal(config, adminPassword, meta);
+    if (!persistResult.ok) return { ok: false, source: 'created-fresh', code: 'encryption-error', error: persistResult.error };
+    this.unlockedConfig = config; this.unlockedPassword = adminPassword; this.notify();
+    return { ok: true, source: 'created-fresh', code: 'none' };
   }
   lock(): void { this.unlockedConfig = null; this.unlockedPassword = null; this.notify(); }
   async saveConfig(newConfig: Partial<SecretVaultConfig>, adminPasswordOverride?: string): Promise<{ ok: boolean; error?: string }> {
@@ -101,7 +152,8 @@ class SecretVaultService {
     if (!password) return { ok: false, error: 'Session password unavailable — please lock and re-unlock Settings.' };
     const merged: SecretVaultConfig = normalizeVaultConfig({ ...this.unlockedConfig, ...newConfig });
     const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(merged) };
-    await this.persistLocal(merged, password, meta);
+    const persistResult = await this.persistLocal(merged, password, meta);
+    if (!persistResult.ok) return { ok: false, error: persistResult.error };
     this.unlockedConfig = merged;
     this.notify();
     this.pushToRepository().catch(() => {});
@@ -110,24 +162,27 @@ class SecretVaultService {
   async reencryptForNewPassword(oldPassword: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
     const raw = localStorage.getItem(SECRET_VAULT_STORAGE_KEY);
     if (!raw) return { ok: true };
-    try {
-      const parsed = JSON.parse(raw) as StoredVaultFile;
-      const decrypted = await decryptWithSecret(oldPassword, parsed.blob);
-      if (decrypted === null) return { ok: false, error: 'Could not re-encrypt the Secret Vault — old password did not match.' };
-      const config = normalizeVaultConfig(JSON.parse(decrypted));
-      const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(config) };
-      await this.persistLocal(config, newPassword, meta);
-      if (this.unlockedConfig) { this.unlockedPassword = newPassword; this.notify(); }
-      this.pushToRepository().catch(() => {});
-      return { ok: true };
-    } catch { return { ok: false, error: 'Secret Vault data is corrupted.' }; }
+    let parsed: StoredVaultFile;
+    try { parsed = JSON.parse(raw); } catch { return { ok: false, error: 'Secret Vault data is corrupted.' }; }
+    const decrypted = await decryptWithSecret(oldPassword, parsed.blob);
+    if (!decrypted.ok) return { ok: false, error: decrypted.reason === 'wrong-secret-or-corrupted' ? 'Could not re-encrypt the Secret Vault — old password did not match.' : decrypted.error };
+    let configObj: unknown;
+    try { configObj = JSON.parse(decrypted.value); } catch { return { ok: false, error: 'Secret Vault configuration is corrupted.' }; }
+    const config = normalizeVaultConfig(configObj);
+    const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(config) };
+    const persistResult = await this.persistLocal(config, newPassword, meta);
+    if (!persistResult.ok) return { ok: false, error: persistResult.error };
+    if (this.unlockedConfig) { this.unlockedPassword = newPassword; this.notify(); }
+    this.pushToRepository().catch(() => {});
+    return { ok: true };
   }
   async pushToRepository(): Promise<{ ok: boolean; error?: string }> {
     if (!this.unlockedConfig || !this.unlockedPassword) return { ok: false, error: 'Secret Vault is locked.' };
     try {
-      const blob = await encryptWithSecret(this.unlockedPassword, JSON.stringify(this.unlockedConfig));
+      const blobResult = await encryptWithSecret(this.unlockedPassword, JSON.stringify(this.unlockedConfig));
+      if (!blobResult.ok) return { ok: false, error: blobResult.error };
       const meta: VaultVersionMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), checksum: await computeConfigChecksum(this.unlockedConfig) };
-      const content = JSON.stringify({ blob, meta } as StoredVaultFile, null, 2);
+      const content = JSON.stringify({ blob: blobResult.blob, meta } as StoredVaultFile, null, 2);
       const lastSha = localStorage.getItem(VAULT_LAST_SHA_KEY);
       const result = await putFile(DEFAULT_BOOTSTRAP_CONFIG.githubRepo, DEFAULT_BOOTSTRAP_CONFIG.githubBranch, VAULT_BLOB_PATH, this.unlockedConfig.githubToken, content, `Update Secret Vault configuration (${new Date().toISOString()})`, lastSha);
       safeLocalStorageSet(VAULT_LAST_SHA_KEY, result.sha);

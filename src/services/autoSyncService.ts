@@ -34,6 +34,8 @@ export async function performDiscovery(reason: string): Promise<void> {
     if (result.newSchemasAdded.length) toastFn('success', `${result.newSchemasAdded.length} schema(s) synchronized from the repository: ${result.newSchemasAdded.join(', ')}.`);
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) updated from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
     if (result.conflicts.length) toastFn('warning', `${result.conflicts.length} schema(s) have unresolved sync conflicts — review them in Schema or Settings.`);
+  } else if (result.error) {
+    toastFn('error', result.error);
   }
 }
 export const performBackgroundPull = performDiscovery;
@@ -43,6 +45,12 @@ export async function performPublicDiscovery(reason: string): Promise<void> {
     if (result.newSchemasAdded.length) toastFn('success', `${result.newSchemasAdded.length} new schema(s) discovered and synchronized from the repository: ${result.newSchemasAdded.join(', ')}.`);
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) refreshed from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
   }
+  // Note: a failed public (unauthenticated) discovery on app load is
+  // intentionally silent in the UI — it runs automatically and
+  // continuously in the background, and surfacing a toast for every
+  // transient network hiccup on every page load would be noisy. Genuine,
+  // actionable failures are still visible via the Synchronization Activity
+  // Log and via the explicit "Sync with GitHub Now" button elsewhere.
 }
 export async function handleVaultUnlocked(): Promise<void> { await performDiscovery('vault-unlocked'); }
 export function initAutoSync(): void { if (initialized) return; initialized = true; schemaService.subscribe(() => { scheduleBackgroundPush(); }); }

@@ -5,7 +5,7 @@ import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion, sameLogicalSchema } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
 import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes } from '../utils/validation';
-const STORAGE_KEY = 'sqla.registry.v15';
+const STORAGE_KEY = 'sqla.registry.v151';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 export interface StorageHealth { bytesUsed: number; lastPersistOk: boolean; lastError: string | null; lastRecovered: boolean; }
 export class SchemaService {

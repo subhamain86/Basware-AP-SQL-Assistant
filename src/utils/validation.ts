@@ -11,13 +11,38 @@ export function safeUpperTrim(value: unknown, fallback = ''): string {
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
+/** NEW (V15.1) — safe wrappers for operations that previously could throw
+ * "Cannot read properties of undefined (reading 'trim'/'split'/...)" when
+ * called on a value that turned out not to be a string/array at runtime
+ * (e.g. malformed sync payloads, corrupted local storage). These are used
+ * throughout the sync and password/vault code paths so a single malformed
+ * value can never crash a whole operation with a raw JS exception. */
+export function safeSplit(value: unknown, separator: string, fallback: string[] = []): string[] {
+  if (typeof value !== 'string') return fallback;
+  try { return value.split(separator); } catch { return fallback; }
+}
+export function safeArray<T = unknown>(value: unknown, fallback: T[] = []): T[] {
+  return Array.isArray(value) ? (value as T[]) : fallback;
+}
+export function safeMap<T, R>(arr: unknown, fn: (item: T, index: number) => R): R[] {
+  if (!Array.isArray(arr)) return [];
+  const out: R[] = [];
+  for (let i = 0; i < arr.length; i++) { try { out.push(fn(arr[i] as T, i)); } catch { /* skip malformed entry */ } }
+  return out;
+}
+export function safeJsonParse<T = unknown>(text: unknown): { ok: true; value: T } | { ok: false; error: string } {
+  if (typeof text !== 'string') return { ok: false, error: 'Content is not a string.' };
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return { ok: false, error: 'Content is empty.' };
+  try { return { ok: true, value: JSON.parse(trimmed) as T }; } catch (e) { return { ok: false, error: (e as Error)?.message || 'Invalid JSON.' }; }
+}
 export interface NameValidationResult { valid: boolean; message?: string; }
 export function validateSchemaName(rawName: unknown, existingNames: string[], excludeName?: string | null): NameValidationResult {
   const name = safeTrim(rawName);
   if (!name) return { valid: false, message: 'Schema name is required.' };
   if (name.length > 80) return { valid: false, message: 'Schema name must be 80 characters or fewer.' };
   if (!/^[A-Za-z0-9][A-Za-z0-9 _\-.]*$/.test(name)) return { valid: false, message: 'Schema name may only contain letters, digits, spaces, underscores, hyphens, and periods, and must start with a letter or digit.' };
-  const normalizedExisting = existingNames.map((n) => safeTrim(n).toLowerCase());
+  const normalizedExisting = safeArray<string>(existingNames).map((n) => safeTrim(n).toLowerCase());
   const excludeNormalized = excludeName ? safeTrim(excludeName).toLowerCase() : null;
   const clash = normalizedExisting.some((n) => n === name.toLowerCase() && n !== excludeNormalized);
   if (clash) return { valid: false, message: `A schema named "${name}" already exists — schema names must be unique.` };
@@ -38,14 +63,14 @@ export function assertSyncConfigOrError(fields: SyncConfigCheckField[]): SyncCon
 export function sanitizeIncomingSchema(raw: unknown): any {
   if (!raw || typeof raw !== 'object') return raw;
   const schema = raw as Record<string, unknown>;
-  const tables = Array.isArray(schema.tables) ? schema.tables : [];
-  const sanitizedTables = tables.map((rawTable: unknown) => {
+  const tables = safeArray(schema.tables);
+  const sanitizedTables = safeMap(tables, (rawTable: unknown) => {
     const t = (rawTable && typeof rawTable === 'object') ? (rawTable as Record<string, unknown>) : {};
-    const columns = Array.isArray(t.columns) ? t.columns : [];
-    const sanitizedColumns = columns.map((rawCol: unknown) => {
+    const columns = safeArray(t.columns);
+    const sanitizedColumns = safeMap(columns, (rawCol: unknown) => {
       const c = (rawCol && typeof rawCol === 'object') ? (rawCol as Record<string, unknown>) : {};
       const decode = Array.isArray(c.decode) ? c.decode : undefined;
-      const sanitizedDecode = decode ? decode.map((rawD: unknown) => {
+      const sanitizedDecode = decode ? safeMap(decode, (rawD: unknown) => {
         const d = (rawD && typeof rawD === 'object') ? (rawD as Record<string, unknown>) : {};
         return { rawValue: safeString(d.rawValue, ''), label: safeString(d.label, '') };
       }) : undefined;

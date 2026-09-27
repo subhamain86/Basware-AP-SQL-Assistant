@@ -1,7 +1,7 @@
 import { icon } from '../components/icons';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
-import { changePassword, resetPasswordToDefault, verifyPassword } from '../services/passwordService';
+import { changePassword, resetPasswordToDefault, verifyPasswordDetailed } from '../services/passwordService';
 import { secretVaultService, maskToken, DEFAULT_BOOTSTRAP_CONFIG } from '../services/secretVaultService';
 import { syncService } from '../services/syncService';
 import { handleVaultUnlocked } from '../services/autoSyncService';
@@ -13,7 +13,26 @@ import { renderSyncLogPanel } from '../components/syncLogPanel';
 import { renderTabs } from '../components/tabs';
 import { downloadBlob, formatBytes } from '../utils/dom';
 import { estimateStringBytes } from '../utils/validation';
-import type { SyncTimeOption } from '../types';
+import type { SyncTimeOption, VaultErrorCode } from '../types';
+/** V15.1 FIX #2 — maps every distinct VaultErrorCode to its own clean,
+ * non-technical, user-facing message. This is what makes it possible for
+ * the unlock screen to show "Incorrect password" ONLY for a genuine
+ * credential mismatch, and something else entirely (never a raw
+ * exception, never a misleading "incorrect password") for every other
+ * failure class — satisfying requirement #6 and #12. */
+function describeVaultErrorForUser(code: VaultErrorCode, fallback?: string): string {
+  switch (code) {
+    case 'incorrect-password': return 'Incorrect password. Please try again.';
+    case 'empty-password': return 'Please enter a password.';
+    case 'vault-not-initialized': return 'The Secret Vault has not been set up yet on this device.';
+    case 'vault-corrupted': return 'Stored password/vault data appears to be corrupted. You may need to reset it from a device where it still works, or contact your administrator.';
+    case 'missing-config': return 'Required configuration is missing.';
+    case 'github-auth-failed': return 'Could not authenticate with the repository. This is separate from your Admin Password — please check the repository access token in Secret Vault.';
+    case 'network-error': return 'Could not reach the repository. Check your internet connection and try again.';
+    case 'encryption-error': return 'A browser security feature (Web Crypto) required for password verification is unavailable in this context.';
+    default: return fallback || 'An unexpected error occurred.';
+  }
+}
 export function renderSettingsPage(container: HTMLElement): void {
   function draw(): void { if (!store.settingsUnlocked) { renderLockScreen(); return; } renderUnlockedSettings(); }
   function renderLockScreen(): void {
@@ -21,18 +40,33 @@ export function renderSettingsPage(container: HTMLElement): void {
       <h2>Settings</h2>
       <p class="hint">Settings — including Schema Management, the Secret Vault, and cross-device synchronization — are protected.</p>
       <label class="block-label">Enter Admin Password<input type="password" id="settingsPwInput"/></label>
-      <div class="issue-box mini" id="settingsPwError" hidden>Incorrect password.</div>
+      <div class="issue-box mini" id="settingsPwError" hidden></div>
       <div class="modal-actions"><button type="button" class="btn btn-ghost" id="settingsCancelBtn">Cancel</button><button type="button" class="btn btn-primary" id="settingsUnlockBtn">${icon('unlock', 15)} Unlock</button></div>
     </div></div>`;
     const input = container.querySelector<HTMLInputElement>('#settingsPwInput')!; const errBox = container.querySelector<HTMLElement>('#settingsPwError')!;
+    function showError(message: string): void { errBox.hidden = false; errBox.innerHTML = `${icon('alert-triangle', 14)} ${message}`; }
     async function tryUnlock(): Promise<void> {
-      const candidate = input.value; const ok = await verifyPassword(candidate); if (!ok) { errBox.removeAttribute('hidden'); return; }
+      const candidate = input.value;
+      // V15.1 FIX #2 — verifyPasswordDetailed() returns a specific
+      // VaultErrorCode for every distinct failure. Only 'incorrect-password'
+      // is ever shown as a credential error; every other code (vault not
+      // initialized, corrupted vault, encryption unavailable) gets its own
+      // clear, distinct message — never conflated with "wrong password".
+      const verifyResult = await verifyPasswordDetailed(candidate);
+      if (!verifyResult.ok) { showError(describeVaultErrorForUser(verifyResult.code, verifyResult.error)); return; }
       store.unlockSettings();
       const bootstrapResult = await secretVaultService.tryAutoUnlock(candidate);
       if (bootstrapResult.ok) {
         const sourceMsg = bootstrapResult.source === 'repository' ? 'Secret Vault configuration retrieved securely from the repository.' : bootstrapResult.source === 'created-fresh' ? 'Secret Vault created with default configuration.' : 'Secret Vault unlocked.';
         store.pushToast('success', sourceMsg); handleVaultUnlocked().catch(() => {});
-      } else store.pushToast('warning', bootstrapResult.error || 'Could not unlock the Secret Vault automatically.');
+      } else {
+        // V15.1 FIX #2 (requirement #10) — a GitHub/repository-layer
+        // failure while bootstrapping the vault (network, GitHub auth,
+        // etc.) is reported here with ITS OWN distinct message, and
+        // critically does NOT block Settings from being unlocked (the
+        // Admin Password itself was already verified correctly above).
+        store.pushToast('warning', describeVaultErrorForUser(bootstrapResult.code, bootstrapResult.error));
+      }
       draw();
     }
     container.querySelector('#settingsUnlockBtn')?.addEventListener('click', tryUnlock);
@@ -130,7 +164,7 @@ export function renderSettingsPage(container: HTMLElement): void {
       <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a background sync finds a schema that changed both locally and remotely, it appears as a persistent conflict here and on the Schema page, with Use Local / Use Remote resolution.</p>
       <div id="conflictBannerMountSync"></div>
       <h4 class="mt">${icon('history', 15)} Synchronization Activity Log</h4>
-      <p class="hint">A live, timestamped record of every automatic discovery/push/pull event.</p>
+      <p class="hint">A live, timestamped record of every automatic discovery/push/pull event. If a schema was rejected during sync, the exact internal reason is available in the browser console (Developer Tools) for diagnostics — the log here always shows a clean, user-friendly summary.</p>
       <div id="syncLogMount"></div>
     </div>`;
     panel.querySelector('#connectLocationBtn')?.addEventListener('click', async () => { const result = await syncService.connectSharedLocation(); const mount = panel.querySelector<HTMLElement>('#locationResult'); if (mount) mount.innerHTML = result.ok ? `<div class="issue-box ok mini">${icon('check', 14)} Connected: ${result.label}</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; if (result.ok) renderSyncTab(panel); });
@@ -138,7 +172,7 @@ export function renderSettingsPage(container: HTMLElement): void {
       const btn = panel.querySelector<HTMLButtonElement>('#simpleSyncBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Syncing…';
       const result = await syncService.syncWithGitHubSimple(); btn.disabled = false; btn.innerHTML = original;
       const resultMount = panel.querySelector<HTMLElement>('#syncResult2');
-      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box ok mini">${icon('check', 14)} Synchronized — ${result.newSchemasAdded.length} new, ${result.updatedSchemas.length} updated, ${result.unchanged} unchanged, ${result.conflicts.length} conflict(s).</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+      if (resultMount) resultMount.innerHTML = result.ok ? `<div class="issue-box ok mini">${icon('check', 14)} Synchronized — ${result.newSchemasAdded.length} new, ${result.updatedSchemas.length} updated, ${result.unchanged} unchanged, ${result.conflicts.length} conflict(s)${result.skippedCount ? `, ${result.skippedCount} skipped` : ''}.</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
     });
     panel.querySelector('#saveCustomTimeBtn')?.addEventListener('click', () => { const t = panel.querySelector<HTMLInputElement>('#customTimeInput')?.value || '20:30'; syncService.setTime('custom' as SyncTimeOption, t); store.pushToast('success', `Custom sync time saved: ${t}.`); });
     const conflictMount = panel.querySelector<HTMLElement>('#conflictBannerMountSync'); if (conflictMount) renderConflictBanner(conflictMount, () => renderSyncTab(panel));
@@ -186,8 +220,8 @@ export function renderSettingsPage(container: HTMLElement): void {
       wipeResult.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} This will permanently remove ALL tables/columns from the active schema. Enter the Admin Password to confirm.<label class="block-label">Admin Password<input type="password" id="wipePwInput"/></label><div class="row-actions"><button type="button" class="btn btn-ghost btn-sm" id="wipeCancelBtn">Cancel</button><button type="button" class="btn btn-danger btn-sm" id="wipeConfirmBtn">${icon('trash', 14)} Confirm Delete</button></div></div>`;
       panel.querySelector('#wipeCancelBtn')?.addEventListener('click', () => { wipeResult.innerHTML = ''; });
       panel.querySelector('#wipeConfirmBtn')?.addEventListener('click', async () => {
-        const pw = panel.querySelector<HTMLInputElement>('#wipePwInput')?.value || ''; const ok = await verifyPassword(pw);
-        if (!ok) { wipeResult.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} Incorrect password.</div>`; return; }
+        const pw = panel.querySelector<HTMLInputElement>('#wipePwInput')?.value || ''; const verifyResult = await verifyPasswordDetailed(pw);
+        if (!verifyResult.ok) { wipeResult.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${describeVaultErrorForUser(verifyResult.code, verifyResult.error)}</div>`; return; }
         const active2 = schemaService.getActiveSchema(); const backup = schemaService.deleteAllSchemaContents(active2.id);
         downloadBlob(`schema-backup-${active2.id}-${Date.now()}.json`, backup, 'application/json');
         store.pushToast('success', 'Schema contents deleted. A backup was downloaded automatically.'); wipeResult.innerHTML = ''; renderDangerTab(panel);

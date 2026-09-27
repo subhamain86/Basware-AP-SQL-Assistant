@@ -1,22 +1,22 @@
-import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, SchemaRegistry, PendingConflict, SyncLogEntry } from '../types';
+import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, PendingConflict, SyncLogEntry, SyncErrorCode } from '../types';
 import { secretVaultService, DEFAULT_BOOTSTRAP_CONFIG } from './secretVaultService';
 import { schemaService } from './schemaService';
-import { validateIncomingRegistryFile } from '../engines/schemaIntegrityEngine';
+import { validateAndSanitizeRegistry, describeSyncErrorForUser } from '../engines/schemaIntegrityEngine';
 import { detectConflict } from '../engines/schemaVersionEngine';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
-import { assertSyncConfigOrError, safeTrim, sanitizeIncomingSchema, safeLocalStorageSet } from '../utils/validation';
+import { assertSyncConfigOrError, safeTrim, safeJsonParse, safeLocalStorageSet } from '../utils/validation';
 import { makeId } from '../utils/id';
 import { beginInternalSync, endInternalSync } from './syncCoordination';
-const CONFIG_KEY = 'sqla.syncconfig.v15';
-const STATUS_KEY = 'sqla.syncstatus.v15';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v15';
-const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v15';
-const SYNC_LOG_KEY = 'sqla.synclog.v15';
+const CONFIG_KEY = 'sqla.syncconfig.v151';
+const STATUS_KEY = 'sqla.syncstatus.v151';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v151';
+const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v151';
+const SYNC_LOG_KEY = 'sqla.synclog.v151';
 const MAX_LOG_ENTRIES = 30;
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
-export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; }
+export interface PullOutcome { ok: boolean; error?: string; code?: SyncErrorCode; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; skippedCount?: number; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 class SyncService {
   private config: SyncConfig = loadConfig();
@@ -27,6 +27,7 @@ class SyncService {
   private scheduleTimer: ReturnType<typeof setInterval> | null = null;
   private pendingConflicts: PendingConflict[] = loadPendingConflicts();
   private syncLog: SyncLogEntry[] = loadSyncLog();
+  private lastSyncErrorCode: SyncErrorCode = 'none';
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   private persistConfig(): void { safeLocalStorageSet(CONFIG_KEY, JSON.stringify(this.config)); }
@@ -36,9 +37,19 @@ class SyncService {
     safeLocalStorageSet(SYNC_LOG_KEY, JSON.stringify(this.syncLog));
     this.notify();
   }
+  /** V15.1 — internal-only diagnostic logging. Per requirement #2, raw
+   * exception text is never shown to the user; this console.debug channel
+   * (visible only to developers with devtools open) is where the precise
+   * SyncErrorCode and any per-schema skip reasons are recorded, while the
+   * UI/toast/log always shows the clean describeSyncErrorForUser() text. */
+  private logInternalDiagnostics(context: string, code: SyncErrorCode, diagnostics: string[]): void {
+    this.lastSyncErrorCode = code;
+    if (typeof console !== 'undefined' && console.debug) console.debug(`[SQLA sync:${context}] code=${code}`, diagnostics);
+  }
   getConfig(): SyncConfig { return this.config; }
   getStatus(): SyncStatus { return this.status; }
   getLastSyncedAt(): string | null { return this.lastSyncedAt; }
+  getLastSyncErrorCode(): SyncErrorCode { return this.lastSyncErrorCode; }
   getPendingConflicts(): PendingConflict[] { return this.pendingConflicts; }
   getSyncLog(): SyncLogEntry[] { return this.syncLog; }
   isFileSystemAccessSupported(): boolean { return typeof (window as any).showDirectoryPicker === 'function'; }
@@ -82,43 +93,50 @@ class SyncService {
     if (!conflict) return;
     beginInternalSync();
     try {
-      if (decision === 'remote') { try { const remoteSchema = JSON.parse(conflict.remoteSchemaJson) as SchemaModel; schemaService.replaceSchemaContent(conflict.schemaId, remoteSchema); } catch { } }
+      if (decision === 'remote') { const parsedResult = safeJsonParse<SchemaModel>(conflict.remoteSchemaJson); if (parsedResult.ok) schemaService.replaceSchemaContent(conflict.schemaId, parsedResult.value); }
     } finally { endInternalSync(); }
     this.pendingConflicts = this.pendingConflicts.filter((c) => c.id !== conflictId);
     this.persistPendingConflicts();
   }
+  /** V15.1 FIX #1 — "Remote schema file failed validation" is fixed here
+   * by delegating to `validateAndSanitizeRegistry()` (see
+   * schemaIntegrityEngine.ts), which sanitizes every schema BEFORE
+   * validating it and loads every individually well-formed schema even if
+   * one or more others in the same registry are malformed — instead of
+   * the previous all-or-nothing rejection. The clean, non-technical
+   * message shown to the user always comes from
+   * `describeSyncErrorForUser()`; the precise SyncErrorCode and any
+   * per-schema skip reasons are only ever logged internally. */
   async discoverPublicRegistry(reason: string): Promise<PullOutcome> {
     try {
       const repo = DEFAULT_BOOTSTRAP_CONFIG.githubRepo;
       const branch = DEFAULT_BOOTSTRAP_CONFIG.githubBranch;
       const path = DEFAULT_BOOTSTRAP_CONFIG.githubSchemaPath;
       const file = await getFile(repo, branch, path, '');
-      if (!file) return { ok: true, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
-      const parsedRaw = JSON.parse(file.content);
-      const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) return { ok: false, error: 'Remote schema file failed validation.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
-      const parsed = parsedRaw as Record<string, unknown>;
-      const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
+      if (!file) return { ok: true, code: 'not-found', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      const parsedRaw = safeJsonParse(file.content);
+      if (!parsedRaw.ok) { this.logInternalDiagnostics('discover', 'invalid-json', [parsedRaw.error]); return { ok: false, error: describeSyncErrorForUser('invalid-json'), code: 'invalid-json', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
+      const registryResult = validateAndSanitizeRegistry(parsedRaw.value);
+      this.logInternalDiagnostics('discover', registryResult.code, [...registryResult.internalDiagnostics, ...registryResult.skippedReasons]);
+      if (!registryResult.ok) return { ok: false, error: describeSyncErrorForUser(registryResult.code), code: registryResult.code, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0, skippedCount: registryResult.skippedCount };
       beginInternalSync();
       const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; let unchanged = 0;
       try {
-        for (const remoteSchema of sanitizedSchemas as SchemaModel[]) {
+        for (const remoteSchema of registryResult.validSchemas) {
           const local = schemaService.getSchemaById(remoteSchema.id);
-          if (!local) {
-            const outcome = schemaService.addSchemaFromRemote(remoteSchema);
-            if (outcome === 'added') newSchemasAdded.push(remoteSchema.name);
-            else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name);
-            else unchanged += 1;
-            continue;
-          }
+          if (!local) { const outcome = schemaService.addSchemaFromRemote(remoteSchema); if (outcome === 'added') newSchemasAdded.push(remoteSchema.name); else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name); else unchanged += 1; continue; }
           const conflict = detectConflict(local, remoteSchema);
           if (!conflict.hasConflict) { unchanged += 1; continue; }
+          // Silent/unauthenticated discovery never auto-resolves conflicts.
         }
       } finally { endInternalSync(); }
-      if (newSchemasAdded.length || updatedSchemas.length) this.logEvent('discovery', `Public discovery (${reason}): ${newSchemasAdded.length} new schema(s), ${updatedSchemas.length} updated: ${[...newSchemasAdded, ...updatedSchemas].join(', ')}.`);
-      return { ok: true, newSchemasAdded, updatedSchemas, conflicts: [], unchanged };
+      if (newSchemasAdded.length || updatedSchemas.length) this.logEvent('discovery', `Public discovery (${reason}): ${newSchemasAdded.length} new schema(s), ${updatedSchemas.length} updated: ${[...newSchemasAdded, ...updatedSchemas].join(', ')}.${registryResult.skippedCount ? ` (${registryResult.skippedCount} malformed schema entr${registryResult.skippedCount === 1 ? 'y was' : 'ies were'} skipped.)` : ''}`);
+      return { ok: true, code: 'none', newSchemasAdded, updatedSchemas, conflicts: [], unchanged, skippedCount: registryResult.skippedCount };
     } catch (e) {
-      return { ok: false, error: (e as Error)?.message || 'Unknown error during public discovery.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      const code: SyncErrorCode = isGitHubApiError(e) ? e.code : 'github-sync-issue';
+      const rawMessage = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during public discovery.';
+      this.logInternalDiagnostics('discover', code, [rawMessage]);
+      return { ok: false, error: describeSyncErrorForUser(code), code, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
     }
   }
   async pullRegistryFromGitHub(): Promise<PullOutcome> {
@@ -131,38 +149,34 @@ class SyncService {
       const path = safeTrim(cfg.githubSchemaPath);
       const branch = safeTrim(cfg.githubBranch) || 'main';
       const file = await getFile(cfg.githubRepo, branch, path, cfg.githubToken);
-      if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
+      if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, code: 'not-found', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
-      const parsedRaw = JSON.parse(file.content);
-      const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) { this.status = 'failed'; this.notify(); const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
-      const parsed = parsedRaw as Record<string, unknown>;
-      const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
-      const remoteRegistry = { ...parsed, schemas: sanitizedSchemas } as SchemaRegistry;
+      const parsedRaw = safeJsonParse(file.content);
+      if (!parsedRaw.ok) { this.status = 'failed'; this.notify(); this.logInternalDiagnostics('pull', 'invalid-json', [parsedRaw.error]); const msg = describeSyncErrorForUser('invalid-json'); this.logEvent('error', msg); return { ok: false, error: msg, code: 'invalid-json', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
+      const registryResult = validateAndSanitizeRegistry(parsedRaw.value);
+      this.logInternalDiagnostics('pull', registryResult.code, [...registryResult.internalDiagnostics, ...registryResult.skippedReasons]);
+      if (!registryResult.ok) { this.status = 'failed'; this.notify(); const msg = describeSyncErrorForUser(registryResult.code); this.logEvent('error', msg); return { ok: false, error: msg, code: registryResult.code, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0, skippedCount: registryResult.skippedCount }; }
       const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
-      for (const remoteSchema of remoteRegistry.schemas) {
+      for (const remoteSchema of registryResult.validSchemas) {
         const local = schemaService.getSchemaById(remoteSchema.id);
-        if (!local) {
-          const outcome = schemaService.addSchemaFromRemote(remoteSchema);
-          if (outcome === 'added') newSchemasAdded.push(remoteSchema.name);
-          else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name);
-          else unchanged += 1;
-          continue;
-        }
+        if (!local) { const outcome = schemaService.addSchemaFromRemote(remoteSchema); if (outcome === 'added') newSchemasAdded.push(remoteSchema.name); else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name); else unchanged += 1; continue; }
         const conflict = detectConflict(local, remoteSchema);
         if (!conflict.hasConflict) { unchanged += 1; continue; }
         conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
       }
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
       safeLocalStorageSet(STATUS_KEY, this.status);
-      this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${updatedSchemas.length} updated, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
+      this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${updatedSchemas.length} updated, ${unchanged} up to date, ${conflicts.length} conflict(s).${registryResult.skippedCount ? ` ${registryResult.skippedCount} malformed schema entr${registryResult.skippedCount === 1 ? 'y was' : 'ies were'} skipped.` : ''}`);
       this.notify();
-      return { ok: true, newSchemasAdded, updatedSchemas, conflicts, unchanged };
+      return { ok: true, code: 'none', newSchemasAdded, updatedSchemas, conflicts, unchanged, skippedCount: registryResult.skippedCount };
     } catch (e) {
       this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status); this.notify();
-      const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
-      this.logEvent('error', message);
-      return { ok: false, error: message, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      const code: SyncErrorCode = isGitHubApiError(e) ? e.code : 'github-sync-issue';
+      const rawMessage = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
+      this.logInternalDiagnostics('pull', code, [rawMessage]);
+      const cleanMessage = describeSyncErrorForUser(code);
+      this.logEvent('error', cleanMessage);
+      return { ok: false, error: cleanMessage, code, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
     } finally {
       endInternalSync();
     }
@@ -209,8 +223,11 @@ class SyncService {
       const fileHandle = await this.directoryHandle.getFileHandle('schema.json', { create: false });
       const file = await fileHandle.getFile();
       const text = await file.text();
-      const parsed = sanitizeIncomingSchema(JSON.parse(text));
-      const incoming = parsed as SchemaModel;
+      const parsedResult = safeJsonParse(text);
+      if (!parsedResult.ok) return { ok: false, error: 'Could not parse schema.json: ' + parsedResult.error };
+      const registryResult = validateAndSanitizeRegistry({ schemas: [parsedResult.value] });
+      if (!registryResult.ok || registryResult.validSchemas.length === 0) return { ok: false, error: describeSyncErrorForUser(registryResult.code) };
+      const incoming = registryResult.validSchemas[0];
       const conflict = detectConflict(activeSchema, incoming);
       return { ok: true, conflict, incoming };
     } catch (e) { return { ok: false, error: 'Could not read schema.json from the connected location: ' + (e as Error).message }; }
