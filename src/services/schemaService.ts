@@ -72,7 +72,10 @@ export class SchemaService {
     this.persist();
   }
   resetToDefaultSchema(): void { this.switchActiveSchema(DEFAULT_ACTIVE_SCHEMA_ID); }
-  validateNewSchemaName(name: unknown, excludeId?: string): string | null { const result = validateSchemaName(name, this.getAllSchemaNames(excludeId)); return result.valid ? null : (result.message || 'Invalid schema name.'); }
+  validateNewSchemaName(name: unknown, excludeId?: string): string | null {
+    const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
+    return result.valid ? null : (result.message || 'Invalid schema name.');
+  }
   importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string; replacedExisting?: boolean } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
     const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;
@@ -107,7 +110,8 @@ export class SchemaService {
     if (!schema) return { ok: false, error: 'Schema not found.' };
     const nameError = this.validateNewSchemaName(newName, schemaId);
     if (nameError) return { ok: false, error: nameError };
-    schema.name = newName.trim(); schema.updatedAt = new Date().toISOString();
+    schema.name = newName.trim();
+    schema.updatedAt = new Date().toISOString();
     this.persist();
     return { ok: true };
   }
@@ -119,7 +123,13 @@ export class SchemaService {
     this.persist();
     return { ok: true };
   }
-  addTable(schemaId: string, table: TableDef): void { const schema = this.registry.schemas.find((s) => s.id === schemaId); if (!schema) return; schema.tables.push(table); schema.updatedAt = new Date().toISOString(); this.persist(); }
+  addTable(schemaId: string, table: TableDef): void {
+    const schema = this.registry.schemas.find((s) => s.id === schemaId);
+    if (!schema) return;
+    schema.tables.push(table);
+    schema.updatedAt = new Date().toISOString();
+    this.persist();
+  }
   saveDecodeDefinition(schemaId: string, tableName: string, columnName: string, entries: DecodeEntry[]): string[] {
     const issues = validateDecodeEntries(entries);
     if (issues.length) return issues;
@@ -136,15 +146,21 @@ export class SchemaService {
   exportSchemaCsv(schemaId: string): string {
     const schema = this.registry.schemas.find((s) => s.id === schemaId);
     if (!schema) return '';
-    const header = 'Module,Table Name,Column Name,Data Type,Nullable';
-    const rows = schema.tables.flatMap((t) => t.columns.map((c) => [t.module, t.name, c.name, c.type, c.nullable ? 'Y' : 'N'].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')));
+    const header = 'Module,Table Name,Object Type,Table Description,Column Name,Column Description,Data Type,Length,Precision,Nullable,Alias,Primary Key,Foreign Key,Decode';
+    const rows = schema.tables.flatMap((t) => t.columns.map((c) => [t.module, t.name, t.objectType || 'TABLE', t.description, c.name, c.description, c.type, c.length ?? '', c.precision ?? '', c.nullable ? 'Y' : 'N', c.alias ?? '', c.isPrimaryKey ? 'Y' : 'N', c.references ? `${c.references.table}.${c.references.column}` : '', c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join(';') : ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')));
     return [header, ...rows].join('\n');
   }
   getFlattenedRows(schemaId: string, moduleFilter: string | null = null, tableFilter: string | null = null): SchemaEditorRow[] {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return [];
     const rows: SchemaEditorRow[] = [];
-    schema.tables.forEach((t) => { if (moduleFilter && t.module !== moduleFilter) return; if (tableFilter && t.name !== tableFilter) return; t.columns.forEach((c) => { rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableName: t.name, tableDescription: t.description, columnName: c.name, columnDescription: c.description, dataType: c.type, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' }); }); });
+    schema.tables.forEach((t) => {
+      if (moduleFilter && t.module !== moduleFilter) return;
+      if (tableFilter && t.name !== tableFilter) return;
+      t.columns.forEach((c) => {
+        rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableName: t.name, tableDescription: t.description, columnName: c.name, columnDescription: c.description, dataType: c.type, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' });
+      });
+    });
     return rows;
   }
   async upsertRow(schemaId: string, row: SchemaEditorRow, originalRowId: string | null): Promise<string[]> {
@@ -154,7 +170,10 @@ export class SchemaService {
     const [origTableName, origColumnName] = originalRowId ? originalRowId.split('::') : [null, null];
     if (origTableName && origColumnName) {
       const origTableIdx = candidateTables.findIndex((t) => t.name === origTableName);
-      if (origTableIdx !== -1) { candidateTables[origTableIdx].columns = candidateTables[origTableIdx].columns.filter((c) => c.name !== origColumnName); if (candidateTables[origTableIdx].columns.length === 0 && candidateTables[origTableIdx].name !== row.tableName) candidateTables.splice(origTableIdx, 1); }
+      if (origTableIdx !== -1) {
+        candidateTables[origTableIdx].columns = candidateTables[origTableIdx].columns.filter((c) => c.name !== origColumnName);
+        if (candidateTables[origTableIdx].columns.length === 0 && candidateTables[origTableIdx].name !== row.tableName) candidateTables.splice(origTableIdx, 1);
+      }
     }
     const decodeEntries: DecodeEntry[] = row.decodeText.split(/[\n;]+/).map((l) => l.trim()).filter((l) => l.length > 0).map((line) => { const idx = line.indexOf('='); return idx === -1 ? { rawValue: line, label: line } : { rawValue: line.slice(0, idx).trim(), label: line.slice(idx + 1).trim() }; });
     const newColumn: ColumnDef = { name: row.columnName.trim(), label: row.columnName.trim(), description: row.columnDescription, type: row.dataType, length: row.length ?? undefined, precision: row.precision ?? undefined, nullable: row.nullable, alias: row.alias || undefined, isPrimaryKey: row.isPrimaryKey, isForeignKey: row.isForeignKey, references: row.isForeignKey && row.fkTable && row.fkColumn ? { table: row.fkTable.trim(), column: row.fkColumn.trim() } : undefined, decode: decodeEntries.length ? decodeEntries : undefined };
@@ -164,7 +183,9 @@ export class SchemaService {
     const integrity = validateSchemaIntegrity(candidateTables);
     const errors = integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message);
     if (errors.length) return errors;
-    schema.tables = candidateTables; schema.updatedAt = new Date().toISOString(); schema.versionMeta = await stampNewVersion(schema, 'local');
+    schema.tables = candidateTables;
+    schema.updatedAt = new Date().toISOString();
+    schema.versionMeta = await stampNewVersion(schema, 'local');
     this.persist();
     return [];
   }
@@ -176,7 +197,8 @@ export class SchemaService {
     if (!table) return { ok: false, error: 'Table not found.' };
     table.columns = table.columns.filter((c) => c.name !== columnName);
     if (table.columns.length === 0) schema.tables = schema.tables.filter((t) => t.name !== tableName);
-    schema.updatedAt = new Date().toISOString(); schema.versionMeta = await stampNewVersion(schema, 'local');
+    schema.updatedAt = new Date().toISOString();
+    schema.versionMeta = await stampNewVersion(schema, 'local');
     this.persist();
     return { ok: true };
   }
@@ -192,7 +214,10 @@ export class SchemaService {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return;
     const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
-    schema.tables = sanitized.tables; schema.relationships = sanitized.relationships; schema.lastSyncedAt = new Date().toISOString(); schema.versionMeta = await stampNewVersion(schema, source);
+    schema.tables = sanitized.tables;
+    schema.relationships = sanitized.relationships;
+    schema.lastSyncedAt = new Date().toISOString();
+    schema.versionMeta = await stampNewVersion(schema, source);
     this.persist();
   }
   replaceSchemaContent(schemaId: string, incoming: SchemaModel): void {
@@ -207,11 +232,22 @@ export class SchemaService {
     const sanitized = sanitizeIncomingSchema(incoming) as SchemaModel;
     if (this.registry.schemas.some((s) => s.id === incoming.id)) return 'skipped';
     const existingByName = this.registry.schemas.find((s) => s.status !== 'active' && sameLogicalSchema(s, sanitized));
-    if (existingByName) { existingByName.tables = sanitized.tables; existingByName.relationships = sanitized.relationships; existingByName.lastSyncedAt = new Date().toISOString(); existingByName.versionMeta = sanitized.versionMeta || existingByName.versionMeta; this.persist(); return 'updated'; }
+    if (existingByName) {
+      existingByName.tables = sanitized.tables;
+      existingByName.relationships = sanitized.relationships;
+      existingByName.lastSyncedAt = new Date().toISOString();
+      existingByName.versionMeta = sanitized.versionMeta || existingByName.versionMeta;
+      this.persist();
+      return 'updated';
+    }
     this.registry.schemas.push({ ...sanitized, status: 'inactive' });
     this.persist();
     return 'added';
   }
-  markAllSynced(): void { const now = new Date().toISOString(); this.registry.schemas.forEach((s) => { s.lastSyncedAt = now; }); this.persist(); }
+  markAllSynced(): void {
+    const now = new Date().toISOString();
+    this.registry.schemas.forEach((s) => { s.lastSyncedAt = now; });
+    this.persist();
+  }
 }
 export const schemaService = new SchemaService();

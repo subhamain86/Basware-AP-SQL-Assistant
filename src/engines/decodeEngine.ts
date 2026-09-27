@@ -1,7 +1,8 @@
 import type { ColumnDef, DecodeEntry, Dialect } from '../types';
 import { safeTrim, safeUpperTrim } from '../utils/validation';
 export function validateDecodeEntries(entries: DecodeEntry[]): string[] {
-  const issues: string[] = []; const seen = new Set<string>();
+  const issues: string[] = [];
+  const seen = new Set<string>();
   entries.forEach((e) => {
     const raw = safeTrim(e?.rawValue);
     if (!raw) { issues.push('Every decode entry needs a raw value.'); return; }
