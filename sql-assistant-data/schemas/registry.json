@@ -6,7 +6,7 @@
       "version": "1.0",
       "status": "active",
       "updatedAt": "2026-09-27T19:51:16.392Z",
-      "lastSyncedAt": "2026-09-27T19:51:20.173Z",
+      "lastSyncedAt": "2026-09-27T19:51:49.385Z",
       "tables": [
         {
           "name": "IA_ACTION_LOG",
@@ -20848,7 +20848,7 @@
       "version": "1.0",
       "status": "inactive",
       "updatedAt": "2026-09-27T19:50:31.604Z",
-      "lastSyncedAt": "2026-09-27T19:51:20.173Z",
+      "lastSyncedAt": "2026-09-27T19:51:49.385Z",
       "tables": [
         {
           "name": "PO_HEADER",
