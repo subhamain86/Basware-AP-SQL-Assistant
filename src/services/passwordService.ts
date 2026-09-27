@@ -1,7 +1,7 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 import { safeLocalStorageSet } from '../utils/validation';
-const STORAGE_KEY = 'sqla.pwvault.v147';
-const MARKER = 'sqla-verified-marker-v147';
+const STORAGE_KEY = 'sqla.pwvault.v15';
+const MARKER = 'sqla-verified-marker-v15';
 const DEFAULT_PASSWORD = 'admin';
 let defaultBlobCache: string | null = null;
 async function getStoredBlobRaw(): Promise<string> {

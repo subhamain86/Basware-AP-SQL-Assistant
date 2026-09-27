@@ -32,7 +32,7 @@ export function computeAutoJoinPlan(schema: SchemaModel, primaryTable: string, o
       const bridges = direct.length === 0 ? bridgeTablesBetween(schema, anchor, target, inScope) : [];
       const options: JoinPathOption[] = [
         ...direct.map((rel) => ({ id: `direct:${rel.id}`, label: `Direct: ${anchor}.${rel.fromTable === anchor ? rel.fromColumn : rel.toColumn} = ${target}.${rel.fromTable === target ? rel.fromColumn : rel.toColumn}`, bridgeTable: null, relationships: [rel] })),
-        ...bridges.map((b) => ({ id: `bridge:${b.bridge}`, label: `Via ${b.bridge}: ${anchor} → ${b.bridge} → ${target}`, bridgeTable: b.bridge, relationships: [b.relA, b.relB] }))
+        ...bridges.map((b) => ({ id: `bridge:${b.bridge}`, label: `Via ${b.bridge}`, bridgeTable: b.bridge, relationships: [b.relA, b.relB] }))
       ];
       if (options.length === 0) continue;
       const isAmbiguous = options.length > 1;
@@ -46,7 +46,7 @@ export function computeAutoJoinPlan(schema: SchemaModel, primaryTable: string, o
       }
       resolved = true; break;
     }
-    if (!resolved) { unresolvedWarnings.push(`No relationship path found between "${target}" and the other selected table(s) in the active schema — no JOIN was generated for it. Add an explicit manual join if one is needed, or update the schema's relationship metadata.`); inScope.add(target); }
+    if (!resolved) { unresolvedWarnings.push(`No relationship path found for "${target}".`); inScope.add(target); }
   }
   return { joinLines, bridgeTablesUsed, resolutions, unresolvedWarnings };
 }

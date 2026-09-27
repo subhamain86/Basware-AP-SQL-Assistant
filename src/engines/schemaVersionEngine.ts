@@ -1,8 +1,8 @@
 import type { SchemaModel, SchemaVersionMeta, SchemaConflict, TableDef, RelationshipDef } from '../types';
-const DEVICE_ID_KEY = 'sqla.deviceTag.v147';
+const DEVICE_ID_KEY = 'sqla.deviceTag.v15';
 export function getDeviceTag(): string {
   let tag = localStorage.getItem(DEVICE_ID_KEY);
-  if (!tag) { tag = 'device-' + Math.random().toString(36).slice(2, 8); try { localStorage.setItem(DEVICE_ID_KEY, tag); } catch { /* non-fatal */ } }
+  if (!tag) { tag = 'device-' + Math.random().toString(36).slice(2, 8); try { localStorage.setItem(DEVICE_ID_KEY, tag); } catch { } }
   return tag;
 }
 function canonicalize(tables: TableDef[], relationships: RelationshipDef[]): string {
@@ -37,12 +37,6 @@ export function detectConflict(local: SchemaModel, remote: SchemaModel): SchemaC
   localColsByPath.forEach((_v, path) => changedPaths.push(path + ' (removed remotely)'));
   return { hasConflict: changedPaths.length > 0, localVersion: local.versionMeta?.version ?? local.version, remoteVersion: remote.versionMeta?.version ?? remote.version, changedPaths };
 }
-/** V14.7 — used by schemaService to decide whether two schemas represent
- * the "same" logical schema uploaded from different devices/sessions
- * (matched by case-insensitive name), so that repeated imports of what a
- * user considers "the same schema" update it in place instead of piling up
- * unlimited duplicate copies in the registry (a major contributor to the
- * localStorage quota-exceeded failures reported in V14.6). */
 export function sameLogicalSchema(a: Pick<SchemaModel, 'name'>, b: Pick<SchemaModel, 'name'>): boolean {
   return a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
 }

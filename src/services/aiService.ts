@@ -26,11 +26,10 @@ export class LocalRuleBasedAIService implements AIService {
     let sql = buildSelectSQL(mergedState, schema);
     const safety = validateReadOnlySql(sql);
     const warnings: string[] = [];
-    if (!safety.valid) { warnings.push('AI self-review rejected the generated statement (destructive keyword detected) — falling back to a safe placeholder.'); sql = '-- AI self-review blocked this generated statement for safety. Please refine your request or use the manual selectors.'; }
-    if (requirement.confidence < 0.5) warnings.push('Low confidence interpretation — please review the manual selectors before relying on this SQL.');
-    if (requirement.unresolvedTerms.length) warnings.push(`The following requested term(s) were not found in the active schema: ${requirement.unresolvedTerms.join(', ')}.`);
+    if (!safety.valid) { warnings.push('AI self-review rejected the generated statement.'); sql = '-- AI self-review blocked this generated statement for safety.'; }
+    if (requirement.confidence < 0.5) warnings.push('Low confidence interpretation.');
     const schemaCheck = validateSqlAgainstSchema(sql, schema);
-    if (!schemaCheck.valid) warnings.push(...schemaCheck.warnings.map((w) => `Schema validation: ${w}`));
+    if (!schemaCheck.valid) warnings.push(...schemaCheck.warnings);
     return { sql, requirement, warnings, ok: requirement.matchedTables.length > 0 && safety.valid && schemaCheck.valid };
   }
   validateSQL(sql: string): ValidationResult { return validateReadOnlySql(sql); }
@@ -40,9 +39,8 @@ export class LocalRuleBasedAIService implements AIService {
   recommendFilters(nlText: string, schema: SchemaModel): FilterCondition[] { return parseRequirement(nlText, schema).matchedFilters; }
   assistCaseDecode(column: ColumnDef): { rawValue: string; label: string }[] {
     const nameUpper = column.name.toUpperCase();
-    if (/STATUS/.test(nameUpper)) return [{ rawValue: 'A', label: 'Active' }, { rawValue: 'I', label: 'Inactive' }, { rawValue: 'P', label: 'Pending' }];
-    if (/FLAG/.test(nameUpper)) return [{ rawValue: 'Y', label: 'Yes' }, { rawValue: 'N', label: 'No' }];
-    return [{ rawValue: '1', label: 'Suggested label 1' }, { rawValue: '2', label: 'Suggested label 2' }];
+    if (/STATUS/.test(nameUpper)) return [{ rawValue: 'A', label: 'Active' }, { rawValue: 'I', label: 'Inactive' }];
+    return [{ rawValue: '1', label: 'Suggested label 1' }];
   }
 }
 export const aiService: AIService = new LocalRuleBasedAIService();

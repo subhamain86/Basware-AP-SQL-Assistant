@@ -19,19 +19,11 @@ export function mountAppShell(root: HTMLElement): void {
   const navSlot = document.createElement('div'); const mainSlot = document.createElement('main'); mainSlot.className = 'app-main';
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>SQL Assistant · Version 14.7</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>AP-SQL Assistant · Version 15</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
   mountToastContainer(root);
   setAutoSyncToastHandler((kind, text) => store.pushToast(kind, text));
   initAutoSync();
-  // V14.7 — THE fix for "other device is not getting the uploaded schema
-  // synced": perform a read-only, unauthenticated discovery pull against
-  // the public repository on EVERY app load, regardless of whether the
-  // Secret Vault is unlocked. This is what allows a schema uploaded on one
-  // device to actually reach another device automatically — previously,
-  // discovery was gated entirely behind the password-protected vault being
-  // unlocked, so a schema published on Device A would never appear on
-  // Device B until someone manually entered the Admin Password there.
   performPublicDiscovery('app-load').catch(() => {});
   function routeFromHash(): Route { const h = window.location.hash.replace('#', '') as Route; return VALID_ROUTES.includes(h) ? h : 'quickstart'; }
   function navigate(route: Route): void { window.location.hash = route; }
