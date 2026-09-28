@@ -4,9 +4,9 @@
       "id": "schema-core-ap-p2p",
       "name": "AP / P2P Core",
       "version": "1.0",
-      "status": "active",
+      "status": "inactive",
       "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": null,
+      "lastSyncedAt": "2026-09-28T19:19:02.665Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -731,7 +731,7 @@
       "version": "1.0",
       "status": "inactive",
       "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": null,
+      "lastSyncedAt": "2026-09-28T19:19:02.665Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -1532,9 +1532,9 @@
       "id": "schema_mulms6ye_5",
       "name": "AP schema 77",
       "version": "1.0",
-      "status": "inactive",
+      "status": "active",
       "updatedAt": "2026-09-28T19:18:56.822Z",
-      "lastSyncedAt": null,
+      "lastSyncedAt": "2026-09-28T19:19:02.665Z",
       "tables": [
         {
           "name": "IA_ACTION_LOG",
@@ -22371,5 +22371,5 @@
       "originalFileName": "best-working-schema1.json"
     }
   ],
-  "activeSchemaId": "schema-core-ap-p2p"
+  "activeSchemaId": "schema_mulms6ye_5"
 }
