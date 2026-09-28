@@ -5,7 +5,6 @@ import { buildSelectSQL } from '../engines/sqlEngine';
 import { validateReadOnlySql } from '../engines/validationEngine';
 import { rectify } from '../engines/errorRectifierEngine';
 import { validateSqlAgainstSchema } from '../engines/sqlSchemaValidator';
-
 export interface AIService {
   generateSQL(requirement: QueryRequirement, schema: SchemaModel, state: ReadOnlyQueryState): SQLGenerationResult;
   planQuery(nlText: string, schema: SchemaModel): QueryRequirement;
@@ -18,20 +17,9 @@ export interface AIService {
   assistCaseDecode(column: ColumnDef): { rawValue: string; label: string }[];
   readonly isAvailable: boolean; readonly providerName: string;
 }
-
-/** V15.5 — merges a resolved QueryRequirement's structured signals
- * (aggregates, GROUP BY, HAVING, related/EXISTS conditions, in addition to
- * the pre-existing tables/columns/filters/sorts/limit/distinct) onto a
- * ReadOnlyQueryState for PREVIEW/validation purposes here in aiService.
- * This mirrors — but is independent of — the additive, non-destructive
- * merge that store.mergeReadOnlyFromNlp() performs on the real, persistent
- * builder state; both must agree on priority: explicit Manual Selector
- * state is never replaced, only ADDED to, so "Manual Selectors must not be
- * overridden by natural-language intent" holds in both places. */
 function mergeRequirementIntoState(requirement: QueryRequirement, state: ReadOnlyQueryState): ReadOnlyQueryState {
   const tableSet = new Set(state.selectedTables);
   requirement.matchedTables.forEach((t) => tableSet.add(t));
-
   const colKey = (c: SelectedColumnSpec) => c.manualExpr ? `manual:${c.id}` : `${c.table}::${c.column}::${c.aggregate || ''}`;
   const existingColKeys = new Set(state.selectedColumns.map(colKey));
   const mergedColumns = [...state.selectedColumns];
@@ -41,26 +29,21 @@ function mergeRequirementIntoState(requirement: QueryRequirement, state: ReadOnl
     const k = colKey(spec);
     if (!existingColKeys.has(k)) { mergedColumns.push(spec); existingColKeys.add(k); }
   });
-
   const filterKey = (f: FilterCondition) => `${f.table}::${f.column}::${f.operator}::${f.value}`;
   const existingFilterKeys = new Set(state.filters.map(filterKey));
   const mergedFilters = [...state.filters];
   requirement.matchedFilters.forEach((f) => { const k = filterKey(f); if (!existingFilterKeys.has(k)) { mergedFilters.push(f); existingFilterKeys.add(k); } });
-
   const sortKey = (s: typeof state.sorts[number]) => `${s.table}::${s.column}`;
   const existingSortKeys = new Set(state.sorts.map(sortKey));
   const mergedSorts = [...state.sorts];
   requirement.matchedSorts.forEach((s) => { const k = sortKey(s); if (!existingSortKeys.has(k)) { mergedSorts.push(s); existingSortKeys.add(k); } });
-
   const mergedGroupBy = Array.from(new Set([...state.advanced.groupByColumns, ...requirement.matchedGroupBy]));
-
   const existingRelatedKeys = new Set(state.advanced.relatedFilters.map((r) => `${r.relatedTable}::${r.mode}`));
   const mergedRelatedFilters = [...state.advanced.relatedFilters];
   requirement.matchedRelatedConditions.forEach((rc) => {
     const k = `${rc.relatedTable}::${rc.mode}`;
     if (!existingRelatedKeys.has(k)) { mergedRelatedFilters.push({ id: `relnlp_${rc.relatedTable}_${rc.mode}`, relatedTable: rc.relatedTable, mode: rc.mode, relationshipId: null }); existingRelatedKeys.add(k); }
   });
-
   return {
     ...state,
     selectedTables: Array.from(tableSet),
@@ -77,20 +60,10 @@ function mergeRequirementIntoState(requirement: QueryRequirement, state: ReadOnl
     }
   };
 }
-
 export class LocalRuleBasedAIService implements AIService {
   readonly isAvailable = true; readonly providerName = 'Hybrid Online/Offline Engine (schema-grounded)';
   planQuery(nlText: string, schema: SchemaModel): QueryRequirement { return parseRequirement(nlText, schema); }
   planCrQuery(nlText: string, schema: SchemaModel): CrRequirement { return parseCrRequirement(nlText, schema); }
-  /** V15.5 — generateSQL now runs the FULL structured pipeline (tables →
-   * columns → aggregates → filters → GROUP BY → HAVING → related/EXISTS →
-   * sort/limit) via mergeRequirementIntoState(), instead of only handling
-   * tables/columns/filters/sorts/limit/distinct as in V15.4. This is what
-   * lets a single complex natural-language requirement (e.g. "total
-   * invoice amount by supplier... only suppliers whose total is greater
-   * than 100000... sort by total descending... top 20") come out as one
-   * coherent SELECT with SUM, GROUP BY, HAVING, ORDER BY, and LIMIT — not
-   * just a bare column list. */
   generateSQL(requirement: QueryRequirement, schema: SchemaModel, state: ReadOnlyQueryState): SQLGenerationResult {
     const mergedState = mergeRequirementIntoState(requirement, state);
     let sql = buildSelectSQL(mergedState, schema);

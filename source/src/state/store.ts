@@ -22,17 +22,17 @@ class AppStore {
   settingsUnlocked = false;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   constructor() {
-    const savedTheme = localStorage.getItem('sqla.theme.v155');
+    const savedTheme = localStorage.getItem('sqla.theme.v156');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') this.theme = savedTheme;
-    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v155') === '1';
+    this.hasSeenWalkthrough = localStorage.getItem('sqla.tourseen.v156') === '1';
     schemaService.subscribe(() => this.regenerateReadOnlySql());
     if (typeof document !== 'undefined') ['click', 'keydown', 'mousemove'].forEach((evt) => document.addEventListener(evt, () => this.bumpActivity(), { passive: true }));
   }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private notify(): void { this.listeners.forEach((l) => l()); }
   setRoute(route: Route): void { this.route = route; this.notify(); }
-  setTheme(theme: Theme): void { this.theme = theme; safeLocalStorageSet('sqla.theme.v155', theme); this.notify(); }
-  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; safeLocalStorageSet('sqla.tourseen.v155', '1'); }
+  setTheme(theme: Theme): void { this.theme = theme; safeLocalStorageSet('sqla.theme.v156', theme); this.notify(); }
+  markWalkthroughSeen(): void { this.hasSeenWalkthrough = true; safeLocalStorageSet('sqla.tourseen.v156', '1'); }
   pushToast(kind: ToastMessage['kind'], text: string): void { const toast: ToastMessage = { id: makeId('toast'), kind, text }; this.toasts.push(toast); this.notify(); setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== toast.id); this.notify(); }, 4500); }
   unlockSettings(): void { this.settingsUnlocked = true; this.bumpActivity(); this.notify(); }
   lockSettings(): void { this.settingsUnlocked = false; if (this.inactivityTimer) { clearTimeout(this.inactivityTimer); this.inactivityTimer = null; } this.notify(); }
@@ -54,14 +54,6 @@ class AppStore {
   }
   updateReadOnly(mutator: (s: ReadOnlyQueryState) => void): void { mutator(this.readOnly); this.regenerateReadOnlySql(); }
   resetReadOnly(): void { this.readOnly = emptyReadOnlyState(this.readOnly.dialect); this.regenerateReadOnlySql(); }
-  /** V15.5 — extended so the persistent, real builder state additively
-   * absorbs the enhanced pipeline's aggregate/GROUP BY/HAVING/related-
-   * condition signals, exactly the same way it already additively absorbed
-   * tables/columns/filters/sorts in V15.4: every merge only ADDS to
-   * whatever the user already has (manual selections are NEVER removed or
-   * replaced), which is what satisfies "Manual Selectors must not be
-   * overridden by natural-language intent" while still letting Describe +
-   * Manual Selectors combine into one coherent query. */
   mergeReadOnlyFromNlp(requirement: QueryRequirement): void {
     this.updateReadOnly((s) => {
       const tableSet = new Set(s.selectedTables);

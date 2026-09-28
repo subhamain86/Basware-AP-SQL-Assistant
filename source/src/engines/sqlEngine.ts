@@ -12,18 +12,12 @@ function renderColumn(spec: SelectedColumnSpec, schema: SchemaModel, dialect: Re
     const table = schema.tables.find((t) => t.name === spec.table);
     const col = table?.columns.find((c) => c.name === spec.column);
     if (col && col.decode?.length) {
-      // V15.5 — DECODE is CASE-based functionality: the default alias when
-      // the user hasn't typed a custom one is now simply the column's own
-      // name (matching the spec's own examples, e.g. "END AS status"),
-      // rather than an auto-suffixed "_DESC" — the CASE expression fully
-      // replaces the raw value under the column's own identity.
       const alias = spec.alias || spec.column;
       return buildSchemaDecodeExpression(`${spec.table}.${spec.column}`, col, alias, dialect);
     }
   }
   return spec.alias ? `${base} AS ${spec.alias}` : base;
 }
-
 function buildWhereClauseFromFilters(state: ReadOnlyQueryState): string {
   if (state.filters.length === 0) return '';
   const parts = state.filters.map((f, idx) => {
@@ -32,16 +26,9 @@ function buildWhereClauseFromFilters(state: ReadOnlyQueryState): string {
   });
   return parts.join('\n  ');
 }
-
-/** V15.5 — resolves the display expression used to reference a SELECT-list
- * entry from ORDER BY / HAVING: if the column was given an alias, ORDER BY
- * should use the alias (cleaner, and required when the entry is an
- * aggregate/CASE expression that has no bare column reference); otherwise
- * fall back to the fully-qualified table.column form exactly as before. */
 function resolveOrderByRef(sortAlias: string | undefined, table: string, column: string): string {
   return sortAlias ? sortAlias : `${table}.${column}`;
 }
-
 export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): string {
   const hierarchy = state.advanced.hierarchy;
   const hierarchyActive = !!(hierarchy && hierarchy.enabled && hierarchy.table && hierarchy.parentColumn && hierarchy.childColumn);
@@ -51,20 +38,16 @@ export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): 
   const explicitJoinTables = new Set(state.joins.map((j) => j.table));
   const autoJoinTargets = otherTables.filter((t) => !explicitJoinTables.has(t));
   const autoPlan = hierarchyActive ? { joinLines: [] as string[], unresolvedWarnings: [] as string[] } : computeAutoJoinPlan(schema, primaryTable, autoJoinTargets, state.joinPathChoices);
-
   const hierarchyBlock = hierarchyActive ? buildHierarchyBlock(hierarchy, state.dialect) : null;
-
   const selectList = state.selectedColumns.length
     ? state.selectedColumns.map((c) => renderColumn(c, schema, state.dialect)).join(',\n  ')
     : (hierarchyBlock ? hierarchyBlock.selectColumns : '*');
-
   const relatedCountParts = (hierarchyActive ? [] : (state.advanced.relatedCounts || []))
     .map((spec) => buildRelatedCountSelect(spec, primaryTable, schema))
     .filter((v): v is string => !!v);
   const fullSelectList = [selectList, ...relatedCountParts].filter((v) => v && v !== '*').length
     ? [selectList === '*' && relatedCountParts.length ? `${primaryTable}.*` : selectList, ...relatedCountParts].join(',\n  ')
     : selectList;
-
   const bodyLines: string[] = [];
   const cteParts: string[] = [];
   if (state.advanced.ctes.length) {
@@ -72,7 +55,6 @@ export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): 
   }
   if (hierarchyBlock && hierarchyBlock.cteLines.length) cteParts.push(hierarchyBlock.cteLines.join('\n'));
   const usesRecursive = state.advanced.recursive || !!(hierarchyBlock && hierarchyBlock.usesRecursiveKeyword);
-
   bodyLines.push(`SELECT ${state.advanced.distinct ? 'DISTINCT ' : ''}${state.advanced.limit && state.dialect === 'SQL Server' ? `TOP ${state.advanced.limit} ` : ''}${fullSelectList}`);
   if (hierarchyActive && hierarchyBlock) {
     bodyLines.push(`FROM ${hierarchyBlock.fromClause}`);
@@ -96,7 +78,6 @@ export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): 
     if (state.dialect === 'Oracle') bodyLines.push(`FETCH FIRST ${state.advanced.limit} ROWS ONLY`);
     else bodyLines.push(`LIMIT ${state.advanced.limit}`);
   }
-
   const friendlyName = (state.advanced.saveAsView || '').trim();
   const nameCheck = friendlyName ? validateAlias(friendlyName) : { valid: true };
   if (friendlyName && nameCheck.valid) {

@@ -1,8 +1,8 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 import { safeLocalStorageSet, safeTrim, isNonEmptyString } from '../utils/validation';
 import type { VaultErrorCode } from '../types';
-const STORAGE_KEY = 'sqla.pwvault.v155';
-const MARKER = 'sqla-verified-marker-v155';
+const STORAGE_KEY = 'sqla.pwvault.v156';
+const MARKER = 'sqla-verified-marker-v156';
 const DEFAULT_PASSWORD = 'admin';
 let defaultBlobCache: string | null = null;
 let defaultBlobCacheFailed = false;

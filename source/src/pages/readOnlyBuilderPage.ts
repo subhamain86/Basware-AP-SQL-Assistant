@@ -16,14 +16,6 @@ import { optimizeSuggestions } from '../engines/optimizeEngine';
 import { relatableTables } from '../engines/relatedEngine';
 import type { Dialect, RelatedFilterMode, ReadOnlyQueryState } from '../types';
 import { makeId } from '../utils/id';
-
-/** V15.5 requirement #27 — "Explain Generated Query When Useful": inspects
- * the CURRENT builder state (not the raw SQL text) to summarize, in plain
- * language, exactly which structural pieces the Query Generation Pipeline
- * assembled — tables, JOINs, filters, aggregations, GROUP BY, HAVING,
- * ORDER BY, and CTEs/related-subqueries — without changing the existing
- * Generated SQL panel's structure; it only adds an optional, collapsible
- * explanation the user can reveal on demand. */
 function explainQuery(state: ReadOnlyQueryState): string[] {
   const lines: string[] = [];
   if (state.selectedTables.length === 0 && !state.advanced.hierarchy.enabled) return ['Nothing to explain yet — select a table or describe a requirement first.'];
@@ -45,7 +37,6 @@ function explainQuery(state: ReadOnlyQueryState): string[] {
   if (lines.length === 0) lines.push('A straightforward SELECT with no additional filtering, grouping, or sorting.');
   return lines;
 }
-
 export function renderReadOnlyBuilderPage(container: HTMLElement): void {
   const unsubscribeSchema = schemaService.subscribe(draw);
   let activeTabId = 'tables-columns'; let isBuilding = false;

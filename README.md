@@ -1,9 +1,9 @@
-# SQL Assistant — V15.5
+# SQL Assistant — V15.6
 
-Baseline: V15.4 (working). This is a **query-generation engine enhancement
-release** — the entire V15.4 UI, theme system, navigation, Schema
-Management, Secret Vault, and cross-device sync are unchanged; only the
-Query Generation Engine got substantially smarter.
+Baseline: V15.5 (working). This is a **targeted bug-fix release only** — no
+UI, navbar, theme, layout, Query Builder, AI/NLP, CASE/DECODE, sync
+architecture, or Secret Vault changes were made. The only change is the
+Manual Schema Update Save fix described below.
 
 ## How to run
 - **Static hosting** (GitHub Pages, SharePoint, OneDrive, any web server):
@@ -11,110 +11,87 @@ Query Generation Engine got substantially smarter.
 - **Local / offline:** double-click `index.html`.
 - `source/` contains the full TypeScript source (`tsc --noEmit` clean).
 
-## What changed in V15.5
+## The bug, and the actual root cause
 
-### 1. DECODE is now CASE-based functionality (not a DB-specific function)
-Every schema-defined or manually-configured value-to-display mapping —
-regardless of SQL dialect, including Oracle — now generates a standard,
-portable `CASE WHEN ... THEN ... ELSE 'Unknown' END` expression. The
-application **never** emits a database-specific `DECODE()` function call
-anymore. Verified: selecting a CASE/DECODE-mapped column produces exactly
-```sql
-CASE
-    WHEN PO_HEADER.STATUS = 'O' THEN 'Open'
-    WHEN PO_HEADER.STATUS = 'C' THEN 'Closed'
-    WHEN PO_HEADER.STATUS = 'H' THEN 'On Hold'
-    ELSE 'Unknown'
-END AS STATUS
-```
-Manual Schema Update's DECODE guidance, live preview, and example are all
-updated to reflect this — the preview literally renders as CASE, live, as
-you type.
+**Symptom:** editing an existing row in Manual Schema Update and clicking
+Save did not reliably persist the change — or, when it did technically
+succeed, the mechanism used was structurally wrong (see below), risking
+exactly the "reset unrelated rows / rebuild the entire schema" failure
+mode the bug report describes.
 
-### 2. Query Generation Pipeline — genuinely complex SELECT queries
-The engine now runs a real, staged pipeline (not a single regex blob):
-table/column resolution → **aggregation resolution** (SUM/AVG/COUNT/MIN/
-MAX) → filter resolution → **GROUP BY resolution** (explicit "by X", or
-implied whenever an aggregate is mixed with plain columns) → **HAVING
-resolution** (a comparison applied to an aggregate) → related/EXISTS
-resolution → sort/limit resolution → SQL generation → schema validation.
+**Root cause #1 — full-schema validation instead of row-scoped validation.**
+The previous implementation validated an edited row by running
+`validateSchemaIntegrity()` over the **entire candidate table set** (every
+table, every column in the whole schema) after applying the edit, and
+rejected the Save if that full sweep produced *any* error — including
+errors on rows the user never touched. In a schema of any real size it is
+common for at least one pre-existing, unrelated column to have a
+naturally-occurring structural issue (e.g. a composite key, or metadata
+imported from elsewhere), and because the full-schema check has no way to
+distinguish "pre-existing and unrelated" from "caused by this edit," a
+perfectly valid single-row edit could be silently blocked by validation
+noise from a completely different part of the schema.
 
-Verified end-to-end with the exact complex example from the spec:
-> "Show the total invoice amount by supplier for the current year,
-> including supplier name, invoice count, average invoice amount, and
-> only suppliers whose total invoice amount is greater than 100000. Sort
-> by total amount descending and show the top 20 suppliers."
+**Root cause #2 — the update itself rebuilt the whole column collection.**
+Even when validation passed, the previous update logic performed a
+filter-then-push sequence across the *entire* `tables` array (deep-clone,
+remove the old entry, push the new one at the end) and reassigned
+`schema.tables` wholesale. This is a full-collection rebuild, not a
+targeted patch — fragile (an edited column's position silently moved to
+the end of the table) and structurally the opposite of "load the existing
+schema, modify only the targeted record, and preserve every other record
+byte-for-byte."
 
-produces one coherent statement with `SUM`, `AVG`, `COUNT`, automatic
-JOINs across 3 tables (via the Active Schema's real relationships),
-`GROUP BY`, `HAVING SUM(...) > 100000`, `ORDER BY ... DESC`, and
-`FETCH FIRST 20 ROWS ONLY`.
+## The fix (both parts)
 
-**Bugs found and fixed while building this test** (a good sign the
-testing was real, not superficial):
-- A relative-date SQL expression (`DATE_TRUNC('YEAR', CURRENT_DATE)`) was
-  being wrapped in an extra pair of string quotes, turning valid SQL into
-  a broken string literal — fixed in the filter-rendering engine to
-  recognize SQL date expressions and pass them through unquoted.
-- A short generic column name (e.g. a bare `AMOUNT` on an unrelated
-  table) could "steal" a match meant for a more specific compound column
-  (`INVOICE_AMOUNT`) due to plain substring matching — fixed by resolving
-  longer/more specific column names first and skipping a generic column
-  once its concept is already covered.
-- Both the aggregate and HAVING resolvers only checked the *first*
-  occurrence of a phrase, so a column mentioned twice for two different
-  purposes (once for SUM, later for a HAVING comparison) missed the
-  second occurrence — fixed to scan every occurrence.
-- A direction word ("descending") not immediately followed by a comma/
-  period (e.g. "...descending and show the top 20...") was being
-  swallowed into the sort-column phrase instead of recognized as the
-  direction — fixed to match on a word boundary instead of requiring an
-  immediate sentence terminator.
+1. **`schemaIntegrityEngine.validateCandidateRowFields()`** (new) —
+   validates *only* the single candidate row's own fields (data type,
+   length/precision, decode-entry integrity) plus, where relevant, whether
+   its own declared Foreign Key target actually exists elsewhere in the
+   schema. It is structurally impossible for this check to fail because of
+   an unrelated, pre-existing issue on a different row, since it never
+   inspects any column other than the one being saved.
+2. **`schemaService.upsertRow()`** now finds the exact target column **by
+   identity** (`table::column`, the same key used by `SchemaEditorRow.rowId`)
+   and mutates that one column object's fields **in place**, preserving its
+   exact array position — or, only for a genuine rename, removes the old
+   entry and inserts the new one, again without touching any other table or
+   column. Every other row keeps the same values, same order, same object
+   identity, apart from the one row actually being changed.
 
-### 3. Manual Selectors as a structured query definition
-Manual Selectors were already capable of producing every advanced SQL
-shape (JOINs, filters, GROUP BY/HAVING, CTEs, EXISTS, related counts,
-hierarchies) — this is unchanged and confirmed still fully functional.
+`schemaEditorSection.ts` was updated to match: it no longer performs its
+own separate full-schema validation before calling `upsertRow` — the single
+source of truth for "is this row valid" is now inside `upsertRow` itself,
+scoped correctly, and the post-save UI refresh (`refreshTable()`) only
+re-populates the existing data table in place, explicitly preserving the
+selected schema/module/table and never calling a full page/section
+rebuild.
 
-### 4. Describe + Manual Selectors combine, non-destructively
-`store.mergeReadOnlyFromNlp()` and `aiService.generateSQL()` were both
-extended to additively merge the new aggregate/GROUP BY/HAVING/related-
-condition signals the same way tables/columns/filters were already merged
-in V15.4: **every merge only ever adds** to what the user has manually
-selected — an explicit Manual Selector choice is never removed or
-replaced by natural-language intent. Verified: manually selecting
-`INVOICE_HEADER` and then describing a related requirement keeps
-`INVOICE_HEADER` in the final SQL.
+## Regression testing performed (Playwright, against the built app)
 
-### 5. Self-sustained (offline) engine + Online AI, both schema-grounded
-The local engine performs the entire pipeline above with zero network
-calls, and is what's actually used in this test environment (no online
-endpoint configured) — SQL is still generated correctly and the "Offline/
-local engine" badge is shown. When an online endpoint IS configured and
-reachable, it's given the full Active Schema context (including CASE/
-DECODE mappings) and any table/column it references that isn't in the
-Active Schema is discarded rather than trusted. Any online failure,
-timeout, or unavailability falls through to the local engine silently —
-the Query Builder never becomes unusable.
-
-### 6. Query explanation (new)
-The Generated SQL panel gained an "Explain Query" button (alongside the
-existing Copy/Clear/Validate/Regenerate/Optimize) that reads the current
-builder state and produces a plain-language summary — tables/joins used,
-aggregations, filters, GROUP BY, HAVING, ORDER BY, LIMIT, and CTEs —
-without altering the existing Generated SQL panel's structure.
-
-## Regression testing performed
-- `tsc --noEmit`: clean.
-- Playwright: all 7 routes, zero console/page errors.
-- Playwright: DECODE→CASE conversion confirmed (no `DECODE(` anywhere).
-- Playwright: the exact complex spec example produces SUM/AVG/COUNT/JOIN/
-  GROUP BY/HAVING/ORDER BY DESC/LIMIT 20 correctly.
-- Playwright: Manual Selectors preserved when combined with Describe.
-- Playwright: offline fallback confirmed (SQL still generated, correctly
-  labeled, with zero online endpoint configured).
-- Playwright: Explain Query button and output confirmed.
-- Playwright: Manual Schema Update DECODE help/live-preview confirmed
-  CASE-based (not DECODE()).
-- Playwright: V15.4 UI (side-by-side Describe/Generated SQL grid, aligned
-  top edges) confirmed unchanged.
+- **Test 1 — Single row update:** edited `PO_HEADER.STATUS`'s description,
+  clicked Save — modal closed (save succeeded), no validation errors, the
+  same 7 column identities remained present, and the table immediately
+  showed the updated description.
+- **Test 2 — Multiple existing rows:** captured the full text of all 7
+  `PO_HEADER` rows, edited only `VENDOR_ID`'s description, and confirmed
+  all 6 other rows were **byte-for-byte identical** before and after.
+- **Test 3 — Validation failure:** cleared the required Column Name field
+  and clicked Save — the modal correctly stayed open with "Column Name is
+  required," and the row set was confirmed unchanged (no data modified).
+- **Test 4 — Persistence after navigating away and back:** edited a
+  description, navigated to Quick Start and back to Settings → Manual
+  Schema Update — the edited value was still present.
+- **Test 5 — Persistence after a genuine page reload:** confirmed the
+  edited value was present in `localStorage` before reload, then performed
+  an actual same-tab `page.reload()` (not a fresh isolated browser
+  context) — the edited value was still present after re-unlocking
+  Settings.
+- **Test 6 — Query Builder regression:** confirmed table selection → SQL
+  generation still works, and that editing a column's *description* does
+  not affect its DECODE mapping — selecting `PO_HEADER.STATUS` with
+  "Schema CASE/DECODE" still correctly produces a `CASE WHEN...THEN...END`
+  expression with the original Open/Closed/On Hold labels (never a
+  database-specific `DECODE()` call).
+- All 7 application routes load cleanly with zero console/page errors,
+  both before and after the fix.

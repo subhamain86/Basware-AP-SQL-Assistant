@@ -159,7 +159,7 @@ export function renderSettingsPage(container: HTMLElement): void {
   function renderNlpTab(panel: HTMLElement): void {
     const current = getConfiguredEndpoint();
     panel.innerHTML = `<div class="mt"><h4>${icon('cloud', 15)} Online AI/NLP Endpoint</h4>
-      <p class="hint">The Query Builder always loads the saved Active Schema fresh, validates its availability, and sends rich schema metadata (including CASE/DECODE mappings) to this endpoint — then schema-validates whatever comes back, discarding any table/column that doesn't actually exist in the Active Schema. Falls back to the local, fully self-sustained offline engine automatically if unset, unreachable, offline, or on any error/timeout — the Query Builder never becomes unusable.</p>
+      <p class="hint">The Query Builder always loads the saved Active Schema fresh, validates its availability, and sends rich schema metadata (including CASE/DECODE mappings) to this endpoint — then schema-validates whatever comes back, discarding any table/column that doesn't actually exist in the Active Schema. Falls back to the local, fully self-sustained offline engine automatically if unset, unreachable, offline, or on any error/timeout.</p>
       <label class="block-label">Endpoint URL<input id="nlpEndpointInput" value="${current || ''}"/></label>
       <div class="row-actions"><button type="button" class="btn btn-primary btn-sm" id="saveNlpEndpointBtn">${icon('save', 14)} Save</button><button type="button" class="btn btn-outline btn-sm" id="clearNlpEndpointBtn">${icon('trash', 14)} Clear (use offline only)</button></div>
       <div id="nlpEndpointResult"></div></div>`;

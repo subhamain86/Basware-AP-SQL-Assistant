@@ -3,7 +3,6 @@ import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
 import { renderDataTable } from '../components/dataTable';
 import { openModal } from '../components/modal';
-import { validateSingleRowAgainstSchema } from '../engines/schemaIntegrityEngine';
 import { validateDecodeEntries, buildSchemaDecodeExpression } from '../engines/decodeEngine';
 import { verifyPassword } from '../services/passwordService';
 import { syncService } from '../services/syncService';
@@ -22,11 +21,6 @@ const DECODE_EXAMPLE_ENTRIES: DecodeEntry[] = [
   { rawValue: '2', label: 'Rejected' },
   { rawValue: '3', label: 'Pending' }
 ];
-/** V15.5 — this help block explains DECODE explicitly as CASE-based
- * functionality: the worked example's generated SQL preview now shows only
- * ONE standard CASE expression (not a separate Oracle-vs-ANSI split, since
- * V15.5 no longer branches DECODE output by dialect at all — see
- * decodeEngine.buildSchemaDecodeExpression). */
 function renderDecodeHelpBlock(): string {
   const exampleColumn: ColumnDef = { name: 'STATUS', label: 'Status', type: 'VARCHAR', nullable: false, description: '', decode: DECODE_EXAMPLE_ENTRIES };
   const exampleSql = buildSchemaDecodeExpression('STATUS', exampleColumn, 'STATUS', 'Generic');
@@ -114,6 +108,14 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     });
     updateActionsBar(null);
   }
+  /** V15.6 — after a successful targeted row-level save, we must refresh
+   * ONLY the data table's row list (via schemaService.getFlattenedRows,
+   * which itself only reads — it never mutates), while explicitly
+   * preserving editingSchemaId / selectedModule / selectedTable exactly as
+   * they were. This satisfies "keep the user on the current page, do not
+   * reset the selected schema/module/table" — refreshTable() never calls
+   * draw() (which would tear down and rebuild the whole section), it only
+   * re-populates the existing table component in place. */
   function refreshTable(): void { if (tableApi) tableApi.refresh(schemaService.getFlattenedRows(editingSchemaId, selectedModule, selectedTable)); updateActionsBar(null); }
   function openRowForm(schemaId: string, existing: SchemaEditorRow | null): void {
     const schema = schemaService.getSchemaById(schemaId)!; const isEdit = !!existing;
@@ -167,12 +169,17 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       e.preventDefault();
       const issuesMount = form.querySelector<HTMLElement>('#rowFormIssues')!;
       const candidate: SchemaEditorRow = { rowId: '', module: (form.querySelector<HTMLInputElement>('#f_module')!.value || 'General').trim(), tableName: form.querySelector<HTMLInputElement>('#f_tableName')!.value.trim(), tableDescription: form.querySelector<HTMLInputElement>('#f_tableDescription')!.value.trim(), columnName: form.querySelector<HTMLInputElement>('#f_columnName')!.value.trim(), columnDescription: form.querySelector<HTMLInputElement>('#f_columnDescription')!.value.trim(), dataType: form.querySelector<HTMLSelectElement>('#f_dataType')!.value as ColumnDataType, length: form.querySelector<HTMLInputElement>('#f_length')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_length')!.value, 10) : null, precision: form.querySelector<HTMLInputElement>('#f_precision')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_precision')!.value, 10) : null, nullable: form.querySelector<HTMLInputElement>('#f_nullable')!.checked, alias: form.querySelector<HTMLInputElement>('#f_alias')!.value.trim(), decodeText: form.querySelector<HTMLTextAreaElement>('#f_decode')!.value, isPrimaryKey: form.querySelector<HTMLInputElement>('#f_isPrimaryKey')!.checked, isForeignKey: form.querySelector<HTMLInputElement>('#f_isForeignKey')!.checked, fkTable: form.querySelector<HTMLInputElement>('#f_fkTable')?.value.trim() || '', fkColumn: form.querySelector<HTMLInputElement>('#f_fkColumn')?.value.trim() || '' };
-      const preIssues = validateSingleRowAgainstSchema(schema, candidate.tableName, candidate.columnName, isEdit ? existing!.tableName : null, isEdit ? existing!.columnName : null);
+      // V15.6 — the ONLY pre-flight check performed here is the identity/
+      // rename-collision check (does the new name clash with a DIFFERENT
+      // existing column?) plus the two plain required-field checks. Every
+      // other structural rule (data type validity, FK target existence,
+      // decode integrity) is now checked exactly once, inside
+      // schemaService.upsertRow() via validateCandidateRowFields() — scoped
+      // to only this row — so there is a single source of truth for "is
+      // this row valid" and it can never be blocked by something unrelated
+      // elsewhere in the schema.
       const requiredIssues: string[] = []; if (!candidate.tableName) requiredIssues.push('Table Name is required.'); if (!candidate.columnName) requiredIssues.push('Column Name is required.');
-      const decodeEntriesForSave = parseDecodeTextForPreview(candidate.decodeText);
-      const decodeIssues = decodeEntriesForSave.length ? validateDecodeEntries(decodeEntriesForSave) : [];
-      const allIssues = [...requiredIssues, ...preIssues.map((i) => i.message), ...decodeIssues];
-      if (allIssues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${allIssues.map((m) => `<li>${m}</li>`).join('')}</ul></div>`; return; }
+      if (requiredIssues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${requiredIssues.map((m) => `<li>${m}</li>`).join('')}</ul></div>`; return; }
       const engineIssues = await schemaService.upsertRow(schemaId, candidate, isEdit ? existing!.rowId : null);
       if (engineIssues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${engineIssues.map((m) => `<li>${m}</li>`).join('')}</ul></div>`; return; }
       store.pushToast('success', `${isEdit ? 'Updated' : 'Added'} ${candidate.tableName}.${candidate.columnName}. Query Builder and AI engines will use this immediately if this is the active schema.`);

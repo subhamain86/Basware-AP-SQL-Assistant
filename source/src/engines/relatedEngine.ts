@@ -1,9 +1,7 @@
 import type { SchemaModel, RelationshipDef, RelatedFilterSpec, RelatedCountSpec, HierarchySpec, Dialect } from '../types';
-
 export function relationshipsInvolving(schema: SchemaModel, table: string): RelationshipDef[] {
   return schema.relationships.filter((r) => r.fromTable === table || r.toTable === table);
 }
-
 export function relatableTables(schema: SchemaModel, selectedTables: string[]): { table: string; relationshipId: string }[] {
   const seen = new Map<string, string>();
   selectedTables.forEach((t) => {
@@ -14,7 +12,6 @@ export function relatableTables(schema: SchemaModel, selectedTables: string[]): 
   });
   return Array.from(seen.entries()).map(([table, relationshipId]) => ({ table, relationshipId }));
 }
-
 function relationshipById(schema: SchemaModel, id: string | null): RelationshipDef | undefined {
   if (!id) return undefined;
   return schema.relationships.find((r) => r.id === id);
@@ -26,14 +23,12 @@ function correlationCondition(rel: RelationshipDef, anchorTable: string, innerTa
   if (rel.toTable === innerTable) return `${anchorTable}.${rel.fromColumn} = ${innerTable}.${rel.toColumn}`;
   return `${anchorTable}.${rel.toColumn} = ${innerTable}.${rel.fromColumn}`;
 }
-
 export function buildRelatedFilterClause(spec: RelatedFilterSpec, anchorTable: string, schema: SchemaModel): string | null {
   const rel = findRelationship(schema, spec.relationshipId, anchorTable, spec.relatedTable);
   if (!rel) return null;
   const cond = correlationCondition(rel, anchorTable, spec.relatedTable);
   return `${spec.mode} (SELECT 1 FROM ${spec.relatedTable} WHERE ${cond})`;
 }
-
 export function buildRelatedCountSelect(spec: RelatedCountSpec, anchorTable: string, schema: SchemaModel): string | null {
   const rel = findRelationship(schema, spec.relationshipId, anchorTable, spec.relatedTable);
   if (!rel) return null;
@@ -41,9 +36,7 @@ export function buildRelatedCountSelect(spec: RelatedCountSpec, anchorTable: str
   const alias = spec.alias.trim() || `${spec.relatedTable.toLowerCase()}_count`;
   return `(\n    SELECT COUNT(*)\n    FROM ${spec.relatedTable}\n    WHERE ${cond}\n  ) AS ${alias}`;
 }
-
 export interface HierarchyBlock { cteLines: string[]; fromClause: string | null; usesRecursiveKeyword: boolean; selectColumns: string; }
-
 export function buildHierarchyBlock(hierarchy: HierarchySpec, dialect: Dialect): HierarchyBlock {
   if (!hierarchy.enabled || !hierarchy.table || !hierarchy.parentColumn || !hierarchy.childColumn) {
     return { cteLines: [], fromClause: null, usesRecursiveKeyword: false, selectColumns: '*' };

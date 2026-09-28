@@ -19,14 +19,6 @@ export type CrQueryType = 'INSERT' | 'UPDATE' | 'DELETE';
 export interface CrValuePair { id: string; column: string; value: string; }
 export interface CrQueryState { dialect: Dialect; naturalLanguageText: string; queryType: CrQueryType; table: string | null; values: CrValuePair[]; filters: FilterCondition[]; confirmNoWhere: boolean; generatedSql: string; lastGeneratedAt: string | null; }
 export interface ClarificationQuestion { question: string; options: string[]; }
-/** V15.5 — QueryRequirement is extended with the additional structured
- * signals the enhanced Query Generation Pipeline resolves from natural
- * language: aggregations (SUM/COUNT/AVG/MIN/MAX over a column), the GROUP
- * BY columns implied by mixing aggregates with plain columns, a HAVING
- * condition applied to an aggregate, and EXISTS/NOT EXISTS related-table
- * conditions inferred from phrases like "that have invoices". All of these
- * are additive/optional so simple requests still produce simple
- * QueryRequirement objects exactly as before. */
 export interface MatchedAggregate { table: string; column: string; func: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'; alias: string; }
 export interface MatchedHaving { aggregateExpr: string; operator: FilterOperator; value: string; }
 export interface MatchedRelatedCondition { relatedTable: string; mode: RelatedFilterMode; }

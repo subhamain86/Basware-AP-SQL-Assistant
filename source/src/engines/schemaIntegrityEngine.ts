@@ -53,6 +53,22 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
 
+/** V15.6 fix (see schemaService.upsertRow for the primary root-cause fix) —
+ * this per-row pre-check now ALSO validates the candidate row's own field
+ * values (data type, negative length/precision, decode duplicates) using
+ * the exact same rules as the full-schema validator, so a genuinely
+ * invalid edited row is still caught and rejected with a clear message —
+ * but it does this by inspecting ONLY the candidate row's own fields, and
+ * ONLY consults the rest of the schema for the narrow, single purposes of
+ * (a) detecting a rename collision against another already-existing column
+ * and (b) resolving whether an entered Foreign Key reference target
+ * actually exists. It never re-validates or rejects the save because of
+ * an unrelated, pre-existing issue somewhere else in the schema — which is
+ * what full-schema validation (validateSchemaIntegrity over the ENTIRE
+ * candidate table set) was doing before, and is the root cause described
+ * in the V15.6 bug report: a save could be silently blocked by an
+ * unrelated pre-existing warning/error elsewhere in the schema that had
+ * nothing to do with the row actually being edited. */
 export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: unknown, columnName: unknown, originalTableName: unknown, originalColumnName: unknown): SchemaIntegrityIssue[] {
   const issues: SchemaIntegrityIssue[] = [];
   const tName = safeTrim(tableName); const cName = safeTrim(columnName);
@@ -60,11 +76,51 @@ export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: u
   if (!cName) issues.push({ severity: 'error', message: 'Column Name is required.' });
   if (!tName || !cName) return issues;
   const isSameAsOriginal = safeUpperTrim(originalTableName) === safeUpperTrim(tName) && safeUpperTrim(originalColumnName) === safeUpperTrim(cName);
-  if (isSameAsOriginal) return issues;
-  const table = safeArray(schema?.tables).find((t: any) => safeUpperTrim(t?.name) === safeUpperTrim(tName));
-  const clash = safeArray((table as any)?.columns).some((c: any) => safeUpperTrim(c?.name) === safeUpperTrim(cName));
-  if (clash) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" already exists in this schema.` });
+  if (!isSameAsOriginal) {
+    const table = safeArray(schema?.tables).find((t: any) => safeUpperTrim(t?.name) === safeUpperTrim(tName));
+    const clash = safeArray((table as any)?.columns).some((c: any) => safeUpperTrim(c?.name) === safeUpperTrim(cName));
+    if (clash) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" already exists in this schema.` });
+  }
   return issues;
+}
+
+/** V15.6 (new) — validates ONLY the single candidate row's own field
+ * values (mirroring the per-column checks inside validateSchemaIntegrity,
+ * but scoped to exactly one row) plus its Foreign Key target, if any,
+ * against the rest of the schema. Used by schemaService.upsertRow() in
+ * place of running the full validateSchemaIntegrity() over every table —
+ * so a pre-existing, unrelated issue elsewhere in the schema can never
+ * block saving an otherwise-valid edited row. */
+export function validateCandidateRowFields(candidateColumn: { name: string; type: string; length?: number | null; precision?: number | null; isForeignKey?: boolean; references?: { table: string; column: string }; decode?: { rawValue: string; label: string }[] }, tableName: string, allTables: TableDef[]): string[] {
+  const errors: string[] = [];
+  const tName = safeTrim(tableName); const cName = safeTrim(candidateColumn.name);
+  if (!VALID_DATA_TYPES.includes(candidateColumn.type as any)) errors.push(`Column "${tName}.${cName}" has an invalid data type "${candidateColumn.type}".`);
+  if (candidateColumn.length !== undefined && candidateColumn.length !== null && candidateColumn.length < 0) errors.push(`Column "${tName}.${cName}" has a negative Length.`);
+  if (candidateColumn.precision !== undefined && candidateColumn.precision !== null && candidateColumn.precision < 0) errors.push(`Column "${tName}.${cName}" has a negative Precision.`);
+  if (candidateColumn.isForeignKey) {
+    const refTable = safeTrim(candidateColumn.references?.table); const refColumn = safeTrim(candidateColumn.references?.column);
+    if (!refTable || !refColumn) errors.push(`Column "${tName}.${cName}" is marked as a Foreign Key but has no reference table/column.`);
+    else {
+      const refTableUpper = safeUpperTrim(refTable);
+      const refTableObj = allTables.find((rt) => safeUpperTrim(rt?.name) === refTableUpper);
+      if (!refTableObj) errors.push(`Column "${tName}.${cName}" references table "${refTable}", which does not exist in this schema.`);
+      else {
+        const refColExists = safeArray(refTableObj.columns).some((rc: any) => safeUpperTrim(rc?.name) === safeUpperTrim(refColumn));
+        if (!refColExists) errors.push(`Column "${tName}.${cName}" references "${refTable}.${refColumn}", which does not exist.`);
+      }
+    }
+  }
+  if (candidateColumn.decode) {
+    const seenRaw = new Set<string>();
+    safeArray(candidateColumn.decode).forEach((d: any) => {
+      const rawValue = safeTrim(d?.rawValue);
+      if (!rawValue) errors.push(`Column "${tName}.${cName}" has a decode entry with an empty raw value.`);
+      const rk = safeUpperTrim(d?.rawValue);
+      if (rk && seenRaw.has(rk)) errors.push(`Column "${tName}.${cName}" has duplicate decode raw value "${rawValue}".`);
+      seenRaw.add(rk);
+    });
+  }
+  return errors;
 }
 
 export interface LenientRegistryResult { ok: boolean; code: SyncErrorCode; validSchemas: SchemaModel[]; skippedCount: number; skippedReasons: string[]; internalDiagnostics: string[]; }

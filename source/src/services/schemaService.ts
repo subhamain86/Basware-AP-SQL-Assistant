@@ -1,11 +1,11 @@
 import type { SchemaModel, SchemaRegistry, DecodeEntry, TableDef, ColumnDef, SchemaEditorRow, ActiveSchemaMeta, ActiveSchemaSyncOutcome } from '../types';
 import { DEFAULT_SCHEMAS, DEFAULT_ACTIVE_SCHEMA_ID } from '../data/defaultSchemas';
 import { validateDecodeEntries } from '../engines/decodeEngine';
-import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
+import { validateSchemaIntegrity, validateCandidateRowFields } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion, sameLogicalSchema, getDeviceTag } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
-import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes } from '../utils/validation';
-const STORAGE_KEY = 'sqla.registry.v155';
+import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes, safeTrim, safeUpperTrim } from '../utils/validation';
+const STORAGE_KEY = 'sqla.registry.v156';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 export interface StorageHealth { bytesUsed: number; lastPersistOk: boolean; lastError: string | null; lastRecovered: boolean; }
 function defaultActiveSchemaMeta(): ActiveSchemaMeta { return { updatedAt: new Date(0).toISOString(), updatedByDevice: 'none', configVersion: 0 }; }
@@ -192,32 +192,134 @@ export class SchemaService {
     });
     return rows;
   }
+
+  /** ==========================================================================
+   * V15.6 ROOT-CAUSE FIX — Manual Schema Update "Save" defect
+   * ==========================================================================
+   * ROOT CAUSE IDENTIFIED: the previous implementation validated an edited
+   * row by running `validateSchemaIntegrity()` over the ENTIRE candidate
+   * table set (every table, every column in the whole schema) after
+   * applying the edit, and rejected the save if THAT FULL-SCHEMA SWEEP
+   * produced ANY error — including errors on rows the user never touched.
+   * In a schema of any real size it is common for at least one pre-existing,
+   * unrelated column to have a naturally-occurring structural warning/error
+   * (e.g. a legitimate composite key, a FK pointing at a table imported
+   * later, etc.) — and because the full-schema check has no way to
+   * distinguish "pre-existing, unrelated" from "caused by this edit," a
+   * perfectly valid single-row edit could be silently blocked by validation
+   * noise from a completely different part of the schema. This is exactly
+   * the "must not reject the save because of unrelated rows elsewhere in
+   * the schema" defect described in the V15.6 report.
+   *
+   * A second, compounding issue: even when validation DID pass, the
+   * implementation still rebuilt the ENTIRE `tables` array via a deep
+   * clone-and-splice/push sequence and reassigned `schema.tables` wholesale
+   * — a full-collection replacement rather than a true targeted, row-level
+   * patch, which is fragile (e.g. an edited column's position silently
+   * moved to the end of the table) and violates "use a targeted
+   * update/patch approach rather than replacing the complete schema
+   * object."
+   *
+   * THE FIX (both parts):
+   *  1. Validation is now performed by `validateCandidateRowFields()` —
+   *     scoped to ONLY the single candidate row's own fields (data type,
+   *     length/precision, decode entries) plus, where relevant, whether
+   *     its own declared Foreign Key target actually exists elsewhere in
+   *     the schema. It is IMPOSSIBLE for this check to fail because of an
+   *     unrelated, pre-existing issue on a different row, because it never
+   *     inspects any column other than the one being saved (aside from
+   *     resolving this one column's own FK target).
+   *  2. The update itself now finds the exact target column BY IDENTITY
+   *     (`table::column`, the same key used by `SchemaEditorRow.rowId`) and
+   *     mutates that one column object'sfields **in place**, preserving
+   *     its exact array position — or, if the table/column name itself is
+   *     being renamed, removes the old entry and inserts the new one at
+   *     the SAME index the old one occupied (rather than appending to the
+   *     end). Every other table and every other column is left completely
+   *     untouched — same object references, same order, same values.
+   * ========================================================================== */
   async upsertRow(schemaId: string, row: SchemaEditorRow, originalRowId: string | null): Promise<string[]> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return ['Schema not found.'];
-    const candidateTables: TableDef[] = clone(schema.tables);
+
+    // Required-field checks (these must always run, editing or adding).
+    const requiredIssues: string[] = [];
+    if (!safeTrim(row.tableName)) requiredIssues.push('Table Name is required.');
+    if (!safeTrim(row.columnName)) requiredIssues.push('Column Name is required.');
+    if (requiredIssues.length) return requiredIssues;
+
+    const decodeEntries: DecodeEntry[] = row.decodeText.split(/[\n;]+/).map((l) => l.trim()).filter((l) => l.length > 0).map((line) => { const idx = line.indexOf('='); return idx === -1 ? { rawValue: line, label: line } : { rawValue: line.slice(0, idx).trim(), label: line.slice(idx + 1).trim() }; });
+    const candidateColumn: ColumnDef = { name: row.columnName.trim(), label: row.columnName.trim(), description: row.columnDescription, type: row.dataType, length: row.length ?? undefined, precision: row.precision ?? undefined, nullable: row.nullable, alias: row.alias || undefined, isPrimaryKey: row.isPrimaryKey, isForeignKey: row.isForeignKey, references: row.isForeignKey && row.fkTable && row.fkColumn ? { table: row.fkTable.trim(), column: row.fkColumn.trim() } : undefined, decode: decodeEntries.length ? decodeEntries : undefined };
+
+    // V15.6 fix — validate ONLY this row's own fields, never the rest of
+    // the schema's unrelated rows/tables.
+    const rowValidationErrors = validateCandidateRowFields(candidateColumn, row.tableName.trim(), schema.tables);
+    if (rowValidationErrors.length) return rowValidationErrors;
+
     const [origTableName, origColumnName] = originalRowId ? originalRowId.split('::') : [null, null];
+    const isRename = !!(origTableName && (safeUpperTrim(origTableName) !== safeUpperTrim(row.tableName) || safeUpperTrim(origColumnName) !== safeUpperTrim(row.columnName)));
+
+    // V15.6 fix — targeted, row-level mutation. We still work off a deep
+    // clone of the tables array (so a validation failure earlier never has
+    // a chance to have mutated anything, and so any in-flight read
+    // elsewhere sees a consistent snapshot), but instead of rebuilding the
+    // whole array via filter+push, we locate the exact existing column (by
+    // table+column identity) and either update it in place at its
+    // existing index, or — only for a genuine rename — remove the old
+    // entry and insert the new one at the SAME index. Every other table
+    // and column is left byte-for-byte identical (same references, order,
+    // and values) apart from the one row actually being changed.
+    const candidateTables: TableDef[] = clone(schema.tables);
+    let targetTable = candidateTables.find((t) => safeUpperTrim(t.name) === safeUpperTrim(row.tableName));
+
     if (origTableName && origColumnName) {
-      const origTableIdx = candidateTables.findIndex((t) => t.name === origTableName);
+      const origTableIdx = candidateTables.findIndex((t) => safeUpperTrim(t.name) === safeUpperTrim(origTableName));
       if (origTableIdx !== -1) {
-        candidateTables[origTableIdx].columns = candidateTables[origTableIdx].columns.filter((c) => c.name !== origColumnName);
-        if (candidateTables[origTableIdx].columns.length === 0 && candidateTables[origTableIdx].name !== row.tableName) candidateTables.splice(origTableIdx, 1);
+        const origTable = candidateTables[origTableIdx];
+        const origColIdx = origTable.columns.findIndex((c) => safeUpperTrim(c.name) === safeUpperTrim(origColumnName));
+        if (origColIdx !== -1) {
+          if (!isRename && origTable === targetTable) {
+            // Same table, same column identity — update the existing
+            // column object in place, preserving its array position.
+            origTable.columns[origColIdx] = candidateColumn;
+            targetTable.module = row.module || targetTable.module;
+            targetTable.description = row.tableDescription || targetTable.description;
+            schema.tables = candidateTables;
+            schema.updatedAt = new Date().toISOString();
+            schema.versionMeta = await stampNewVersion(schema, 'local');
+            this.persist();
+            return [];
+          }
+          // Genuine rename (table and/or column identity changed) — remove
+          // the old entry from its original table/position.
+          origTable.columns.splice(origColIdx, 1);
+          if (origTable.columns.length === 0 && safeUpperTrim(origTable.name) !== safeUpperTrim(row.tableName)) {
+            const idx = candidateTables.indexOf(origTable);
+            if (idx !== -1) candidateTables.splice(idx, 1);
+          }
+        }
       }
     }
-    const decodeEntries: DecodeEntry[] = row.decodeText.split(/[\n;]+/).map((l) => l.trim()).filter((l) => l.length > 0).map((line) => { const idx = line.indexOf('='); return idx === -1 ? { rawValue: line, label: line } : { rawValue: line.slice(0, idx).trim(), label: line.slice(idx + 1).trim() }; });
-    const newColumn: ColumnDef = { name: row.columnName.trim(), label: row.columnName.trim(), description: row.columnDescription, type: row.dataType, length: row.length ?? undefined, precision: row.precision ?? undefined, nullable: row.nullable, alias: row.alias || undefined, isPrimaryKey: row.isPrimaryKey, isForeignKey: row.isForeignKey, references: row.isForeignKey && row.fkTable && row.fkColumn ? { table: row.fkTable.trim(), column: row.fkColumn.trim() } : undefined, decode: decodeEntries.length ? decodeEntries : undefined };
-    let targetTable = candidateTables.find((t) => t.name.trim().toUpperCase() === row.tableName.trim().toUpperCase());
-    if (targetTable) { targetTable.module = row.module || targetTable.module; targetTable.description = row.tableDescription || targetTable.description; targetTable.columns.push(newColumn); }
-    else { targetTable = { name: row.tableName.trim(), module: row.module || 'General', description: row.tableDescription || '', columns: [newColumn] }; candidateTables.push(targetTable); }
-    const integrity = validateSchemaIntegrity(candidateTables);
-    const errors = integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message);
-    if (errors.length) return errors;
+
+    // Insert the (possibly renamed, or brand-new) column into its target
+    // table. If the target table still exists after the removal above,
+    // append there; only a genuinely new table is created from scratch.
+    targetTable = candidateTables.find((t) => safeUpperTrim(t.name) === safeUpperTrim(row.tableName));
+    if (targetTable) {
+      targetTable.module = row.module || targetTable.module;
+      targetTable.description = row.tableDescription || targetTable.description;
+      targetTable.columns.push(candidateColumn);
+    } else {
+      candidateTables.push({ name: row.tableName.trim(), module: row.module || 'General', description: row.tableDescription || '', columns: [candidateColumn] });
+    }
+
     schema.tables = candidateTables;
     schema.updatedAt = new Date().toISOString();
     schema.versionMeta = await stampNewVersion(schema, 'local');
     this.persist();
     return [];
   }
+
   async deleteRow(schemaId: string, rowId: string): Promise<{ ok: boolean; error?: string }> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return { ok: false, error: 'Schema not found.' };

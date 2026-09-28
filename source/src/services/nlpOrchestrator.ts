@@ -8,14 +8,6 @@ export function validateActiveSchemaAvailability(schema: SchemaModel | null | un
   if (!Array.isArray(schema.tables) || schema.tables.length === 0) return { available: false, reason: `Active Schema "${schema.name}" has no tables defined yet.` };
   return { available: true };
 }
-/** V15.5 — builds the rich schema context string sent to the Online AI/NLP
- * endpoint (per requirement #22: "the online AI must receive/use the
- * relevant schema context before generating SQL... must not generate SQL
- * based solely on general AI knowledge"). Extended to also surface
- * DECODE-as-CASE metadata explicitly, and cached per-schema-checksum so an
- * unchanged Active Schema is not needlessly re-serialized on every
- * keystroke/build (V15.5 performance requirement — "avoid repeatedly
- * sending the same schema context to an online endpoint when unnecessary"). */
 let cachedContextChecksum: string | null = null;
 let cachedContextString: string | null = null;
 function buildRichSchemaContext(schema: SchemaModel): string {
@@ -58,11 +50,6 @@ export async function orchestrateReadOnlyNlp(rawText: string, schema: SchemaMode
   const notes = [...offlineResult.notes, `Active Schema used for this request: "${schema.name}" (v${schema.versionMeta?.version ?? schema.version}) — schema-validated online response.`];
   if (unknownTables.length) notes.push(`Online AI/NLP referenced table(s) not present in the Active Schema and they were discarded: ${unknownTables.join(', ')}.`);
   if (unknownColumns.length) notes.push(`Online AI/NLP referenced column(s) not present in the Active Schema and they were discarded: ${unknownColumns.map((c) => `${c.table}.${c.column}`).join(', ')}.`);
-  // V15.5 — the online engine is only ever used to CORROBORATE/expand table
-  // and column identification against the Active Schema (never to inject
-  // raw SQL text directly and never to override the offline pipeline's
-  // aggregation/GROUP BY/HAVING/related-condition resolution, which stays
-  // fully schema-grounded regardless of engine source).
   const merged: QueryRequirement = { ...offlineResult, matchedTables: knownTables.length ? knownTables : offlineResult.matchedTables, notes, unresolvedTerms: [...offlineResult.unresolvedTerms, ...unknownTables, ...unknownColumns.map((c) => `${c.table}.${c.column}`)] };
   return { result: merged, engineUsed: 'online', onlineAttempted: true };
 }
