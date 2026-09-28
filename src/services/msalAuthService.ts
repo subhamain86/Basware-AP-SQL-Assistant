@@ -1,25 +1,9 @@
 /**
- * V16.0 — M365 Copilot Enterprise authentication.
- *
- * Implements the Microsoft identity platform v2.0 Authorization Code flow with
- * PKCE — the Microsoft-supported, dependency-free authentication mechanism for
- * single-page applications (this is exactly what @azure/msal-browser does
- * internally; it is implemented directly here, with no external library and
- * no CDN fetch, so the app remains a single self-contained file that works
- * fully offline via file:// when M365 Copilot Enterprise is not configured).
- *
- * Security properties:
- *  - No client secret is ever used or requested (PKCE removes the need for one
- *    in a browser-based app — this is Microsoft's documented guidance for SPAs).
- *  - No credentials are hard-coded. Tenant ID / Client ID / Scope / Endpoint are
- *    supplied by an administrator via the existing encrypted Secret Vault.
- *  - The access token is kept only in sessionStorage (cleared when the tab
- *    closes) and is never written to localStorage, never logged, and never
- *    included in the schema sync payloads.
- *  - Sign-in happens in a popup so the rest of the app (including any unsaved
- *    query) is undisturbed.
+ * M365 Copilot Enterprise authentication (unchanged from V16.0).
+ * Microsoft identity platform v2.0 Authorization Code flow with PKCE — no
+ * client secret, no hard-coded credentials. Token kept only in
+ * sessionStorage, cleared when the tab closes.
  */
-
 const TOKEN_CACHE_KEY = 'sqla.copilotToken.v16';
 const PKCE_VERIFIER_KEY = 'sqla.copilotPkceVerifier.v16';
 
@@ -46,7 +30,7 @@ function readCachedToken(scope: string): string | null {
     if (!raw) return null;
     const cached = JSON.parse(raw) as CachedToken;
     if (cached.scope !== scope) return null;
-    if (Date.now() >= cached.expiresAt - 30000) return null; // 30s safety margin
+    if (Date.now() >= cached.expiresAt - 30000) return null;
     return cached.accessToken;
   } catch { return null; }
 }
@@ -76,12 +60,6 @@ function openPopupAndAwaitCode(authorizeUrl: string, redirectUri: string): Promi
   });
 }
 
-/**
- * Acquires an access token for the configured M365 Copilot Enterprise agent,
- * using a cached token when still valid, or an interactive popup sign-in
- * otherwise. Throws with a user-readable message on any failure — callers
- * (the NLP orchestrator) must catch this and fall back to the offline engine.
- */
 export async function acquireCopilotToken(config: CopilotAuthConfig): Promise<string> {
   if (!config.tenantId || !config.clientId || !config.scope) throw new Error('M365 Copilot Enterprise is not fully configured (Tenant ID, Client ID, and Scope are all required).');
   const cached = readCachedToken(config.scope);
@@ -131,12 +109,6 @@ export async function acquireCopilotToken(config: CopilotAuthConfig): Promise<st
   return accessToken;
 }
 
-/**
- * Callback-page helper. The redirect URI used above is on the SAME page
- * (a hash fragment), so main.ts calls this on boot; if the current URL looks
- * like an auth-code redirect, it relays the result to the opener window and
- * closes itself instead of rendering the app shell twice.
- */
 export function handleCopilotAuthCallbackIfPresent(): boolean {
   if (!window.location.hash.includes('copilot-auth-callback') && !window.location.hash.includes('code=')) return false;
   if (!window.opener) return false;

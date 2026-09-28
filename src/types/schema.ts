@@ -2,7 +2,7 @@ export type ColumnDataType = 'VARCHAR' | 'NUMBER' | 'DATE' | 'FLAG' | 'TIMESTAMP
 export const VALID_DATA_TYPES: ColumnDataType[] = ['VARCHAR', 'NUMBER', 'DATE', 'FLAG', 'TIMESTAMP'];
 export interface DecodeEntry { rawValue: string; label: string; }
 export interface ColumnDef {
-  name: string; label: string; type: ColumnDataType; length?: number; precision?: number; nullable: boolean;
+  name: string; label: string; type: string; length?: number; precision?: number; nullable: boolean;
   alias?: string; isPrimaryKey?: boolean; isForeignKey?: boolean; references?: { table: string; column: string };
   decode?: DecodeEntry[]; description: string;
 }

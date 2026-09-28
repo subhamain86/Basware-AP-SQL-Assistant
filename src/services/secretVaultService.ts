@@ -4,16 +4,11 @@ import { safeString, safeTrim, safeLocalStorageSet } from '../utils/validation';
 const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v15';
 const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v15';
 const DEVICE_TAG_KEY = 'sqla.deviceTag.v15';
-/** V16.0: optional, read-only-w.r.t-schema M365 Copilot Enterprise integration config.
- *  Stored as one more field inside the SAME encrypted Secret Vault blob — no new vault,
- *  no new password, no plaintext storage. See CONFIGURATION.md. */
 export interface M365CopilotConfig {
   enabled: boolean;
   tenantId: string;
   clientId: string;
-  /** Organization's own Copilot Studio / declarative-agent endpoint that accepts { prompt, schemaContext } and returns { tables?, columns?, filters?, raw? } — same response shape as the existing generic Online AI/NLP Endpoint. */
   agentEndpoint: string;
-  /** OAuth2 scope requested from Microsoft identity platform for the agent endpoint (e.g. api://<agent-app-id>/.default). Never a client secret. */
   scope: string;
 }
 export function defaultM365CopilotConfig(): M365CopilotConfig { return { enabled: false, tenantId: '', clientId: '', agentEndpoint: '', scope: '' }; }
@@ -125,8 +120,7 @@ class SecretVaultService {
     this.pushToRepository().catch(() => {});
     return { ok: true };
   }
-  /** V16.0: update only the m365Copilot sub-object, reusing saveConfig — no new storage mechanism. */
-  async saveM365CopilotConfig(patch: Partial<import('./secretVaultService').M365CopilotConfig>): Promise<{ ok: boolean; error?: string }> {
+  async saveM365CopilotConfig(patch: Partial<M365CopilotConfig>): Promise<{ ok: boolean; error?: string }> {
     if (!this.unlockedConfig) return { ok: false, error: 'Secret Vault is locked.' };
     return this.saveConfig({ m365Copilot: { ...this.unlockedConfig.m365Copilot, ...patch } });
   }

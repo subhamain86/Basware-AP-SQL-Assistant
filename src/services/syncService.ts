@@ -22,6 +22,15 @@ class SyncService {
   private config: SyncConfig = loadConfig();
   private status: SyncStatus = (localStorage.getItem(STATUS_KEY) as SyncStatus) || 'never';
   private lastSyncedAt: string | null = null;
+  /**
+   * V16.1: tracks the message of the most recent EXPLICIT, user-initiated
+   * sync failure (Sync Now / Push / Pull / discovery-on-load), and is
+   * cleared the instant any subsequent sync attempt of the same kind
+   * succeeds. This backs the "no error box when there is no error" /
+   * "clear stale errors after a successful operation" fix — see
+   * getLastError()/clearLastError() and every call site below.
+   */
+  private lastError: string | null = null;
   private directoryHandle: FileSystemDirectoryHandle | null = null;
   private listeners = new Set<() => void>();
   private scheduleTimer: ReturnType<typeof setInterval> | null = null;
@@ -39,6 +48,8 @@ class SyncService {
   getConfig(): SyncConfig { return this.config; }
   getStatus(): SyncStatus { return this.status; }
   getLastSyncedAt(): string | null { return this.lastSyncedAt; }
+  getLastError(): string | null { return this.lastError; }
+  clearLastError(): void { if (this.lastError !== null) { this.lastError = null; this.notify(); } }
   getPendingConflicts(): PendingConflict[] { return this.pendingConflicts; }
   getSyncLog(): SyncLogEntry[] { return this.syncLog; }
   isFileSystemAccessSupported(): boolean { return typeof (window as any).showDirectoryPicker === 'function'; }
@@ -96,7 +107,16 @@ class SyncService {
       if (!file) return { ok: true, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       const parsedRaw = JSON.parse(file.content);
       const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) return { ok: false, error: 'Remote schema file failed validation.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      if (!integrity.valid) {
+        // V16.1: this is a SILENT, automatic background check (runs on every
+        // page mount) — per the "no false error state" fix, a background
+        // check must never surface a blocking error box the user didn't ask
+        // for. We still return ok:false so callers can choose not to treat
+        // the shared registry as usable, but we deliberately do NOT set
+        // this.lastError here (that is reserved for explicit user actions:
+        // Sync Now / Push / Pull / Import — see those methods below).
+        return { ok: false, error: 'Remote schema file failed validation.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      }
       const parsed = parsedRaw as Record<string, unknown>;
       const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
       beginInternalSync();
@@ -135,7 +155,7 @@ class SyncService {
       this.setLastKnownSha(file.sha);
       const parsedRaw = JSON.parse(file.content);
       const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) { this.status = 'failed'; this.notify(); const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
+      if (!integrity.valid) { this.status = 'failed'; const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.lastError = msg; this.notify(); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
       const parsed = parsedRaw as Record<string, unknown>;
       const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
       const remoteRegistry = { ...parsed, schemas: sanitizedSchemas } as SchemaRegistry;
@@ -154,13 +174,15 @@ class SyncService {
         conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
       }
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
+      this.lastError = null; // V16.1: explicitly clear any previous failure the moment this action succeeds.
       safeLocalStorageSet(STATUS_KEY, this.status);
       this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${updatedSchemas.length} updated, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
       this.notify();
       return { ok: true, newSchemasAdded, updatedSchemas, conflicts, unchanged };
     } catch (e) {
-      this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status); this.notify();
+      this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
       const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
+      this.lastError = message; this.notify();
       this.logEvent('error', message);
       return { ok: false, error: message, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
     } finally {
@@ -185,15 +207,17 @@ class SyncService {
       this.setLastKnownSha(result.sha);
       schemaService.markAllSynced();
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
+      this.lastError = null; // V16.1: clear any previous failure on success.
       safeLocalStorageSet(STATUS_KEY, this.status);
       this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s)).`);
       this.notify();
       return { ok: true };
     } catch (e) {
-      this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status); this.notify();
+      this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
       const apiErr = isGitHubApiError(e) ? e : null;
       const requiresPull = !!apiErr && (apiErr.status === 409 || apiErr.status === 422);
       const msg = apiErr?.message || (e as Error)?.message || 'Unknown error during synchronization.';
+      this.lastError = msg; this.notify();
       this.logEvent('error', msg);
       return { ok: false, error: msg, requiresPullFirst: requiresPull };
     } finally {
@@ -235,10 +259,11 @@ class SyncService {
       const result = await this.pullFromSharedLocation(activeSchema);
       this.status = result.ok ? 'synchronized' : 'failed';
       this.lastSyncedAt = new Date().toISOString();
+      if (result.ok) this.lastError = null; else this.lastError = result.error || 'Unknown error.';
       safeLocalStorageSet(STATUS_KEY, this.status);
       this.notify();
       return { ok: result.ok, error: result.error };
-    } catch (e) { this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
+    } catch (e) { this.status = 'failed'; this.lastError = (e as Error)?.message || 'Unknown error.'; safeLocalStorageSet(STATUS_KEY, this.status); this.notify(); return { ok: false, error: (e as Error)?.message || 'Unknown error.' }; }
     finally { endInternalSync(); }
   }
 }

@@ -10,13 +10,43 @@ import { decodeLegend } from '../engines/decodeEngine';
 import { downloadBlob } from '../utils/dom';
 import { safeTrim } from '../utils/validation';
 import type { SchemaModel } from '../types';
+
+/**
+ * V16.1 fix — "error box visible when there is no error" / "clear stale
+ * errors after a successful operation".
+ *
+ * This renders the ONE persistent GitHub-sync error indicator in the app,
+ * driven entirely by `syncService.getLastError()`:
+ *   - Returns null right now?  -> render nothing at all (no empty red card,
+ *     no placeholder box, no leftover markup from a previous failure).
+ *   - Returns a message?       -> render exactly that message, once.
+ * `syncService` clears this state itself the instant any explicit sync
+ * action (Sync Now / Push / Pull) succeeds (see syncService.ts), and never
+ * sets it for silent background/auto-discovery checks the user didn't
+ * initiate — so a stale "Remote schema file failed validation" from a past
+ * failed attempt can never linger after a later successful one, and a
+ * background check can never surface a box the user didn't ask for.
+ */
+function renderSyncErrorIndicator(container: HTMLElement): void {
+  function draw(): void {
+    const message = syncService.getLastError();
+    container.innerHTML = message ? `<div class="issue-box mini sync-error-indicator">${icon('alert-triangle', 14)} ${message}<button type="button" class="btn btn-link btn-sm sync-error-dismiss">Dismiss</button></div>` : '';
+    container.querySelector('.sync-error-dismiss')?.addEventListener('click', () => syncService.clearLastError());
+  }
+  const unsubscribe = syncService.subscribe(draw); draw();
+  (container as any)._cleanup = () => unsubscribe();
+}
+
 export function renderSchemaManagementSection(container: HTMLElement, opts: { allowAddImport: boolean }, onAfterAction?: () => void): void {
   function draw(): void {
     const schemas = schemaService.getAllSchemas();
-    container.innerHTML = `${opts.allowAddImport ? `<div id="conflictBannerMount"></div><div class="auto-sync-hint">${icon('cloud', 15)}<span>Automatic sync: creating, importing, updating, or renaming a schema automatically synchronizes it to the repository once the Secret Vault is unlocked (Settings → Security → Enter Admin Password) — no manual Pull Request needed.</span></div><div class="row-actions"><button id="simpleSyncBtn" class="btn btn-outline btn-sm" type="button">${icon('github', 15)} Sync with GitHub Now</button></div>` : ''}
+    container.innerHTML = `${opts.allowAddImport ? `<div id="conflictBannerMount"></div><div id="syncErrorMount"></div><div class="auto-sync-hint">${icon('cloud', 15)}<span>Automatic sync: creating, importing, updating, or renaming a schema automatically synchronizes it to the repository once the Secret Vault is unlocked (Settings → Security → Enter Admin Password) — no manual Pull Request needed.</span></div><div class="row-actions"><button id="simpleSyncBtn" class="btn btn-outline btn-sm" type="button">${icon('github', 15)} Sync with GitHub Now</button></div>` : ''}
     <div class="schema-list">${schemas.map((s) => `<div class="schema-card ${s.status === 'active' ? 'is-active' : ''}"><div class="schema-card-head"><h3>${s.name}</h3><span class="chip ${s.status === 'active' ? 'chip-active' : s.status === 'default' ? 'chip-default' : 'chip-inactive'}">${s.status === 'active' ? 'Active' : s.status === 'default' ? 'Default' : 'Inactive'}</span></div><p class="hint">v${s.versionMeta?.version ?? s.version} · ${s.tables.length} tables · updated ${new Date(s.updatedAt).toLocaleString()}</p><p class="hint">Last synced: ${s.lastSyncedAt ? new Date(s.lastSyncedAt).toLocaleString() : 'never'}${s.versionMeta ? ` · source: ${s.versionMeta.source}` : ''}${s.originalFileName ? ` · imported from: ${s.originalFileName}` : ''}</p><div class="row-actions wrap">${s.status !== 'active' ? `<button type="button" class="btn btn-outline btn-sm" data-action="activate" data-id="${s.id}">${icon('check', 14)} Set Active</button>` : `<span class="chip chip-active">${icon('check', 14)} Currently active</span>`}${opts.allowAddImport ? `<button type="button" class="btn btn-ghost btn-sm" data-action="rename" data-id="${s.id}">${icon('edit', 14)} Rename</button>` : ''}<button type="button" class="btn btn-ghost btn-sm" data-action="export-json" data-id="${s.id}">${icon('download', 14)} Export JSON</button><button type="button" class="btn btn-ghost btn-sm" data-action="export-csv" data-id="${s.id}">${icon('download', 14)} Export CSV</button>${opts.allowAddImport && schemas.length > 1 ? `<button type="button" class="btn btn-ghost btn-sm" data-action="delete-schema" data-id="${s.id}">${icon('trash', 14)} Remove</button>` : ''}</div></div>`).join('')}</div>
     ${opts.allowAddImport ? `<div class="row-actions mt"><button id="addSchemaBtn" class="btn btn-outline btn-sm" type="button">${icon('file-plus', 14)} Add Schema</button><label class="btn btn-outline btn-sm file-input-label">${icon('upload', 14)} Import Schema<input type="file" id="importSchemaFile" accept=".json" hidden/></label></div><div id="importSchemaPreview"></div><details class="advanced-sync-details mt"><summary>${icon('github', 14)} Advanced: manual push/pull</summary><div class="row-actions"><button id="pushRegistryBtn" class="btn btn-ghost btn-sm" type="button">${icon('github', 14)} Push All Schemas to GitHub</button><button id="pullRegistryBtn" class="btn btn-ghost btn-sm" type="button">${icon('folder-sync', 14)} Pull Schemas from GitHub</button></div><div id="registrySyncResult"></div></details>` : ''}<div id="simpleSyncResult"></div>`;
-    if (opts.allowAddImport) { const cbMount = container.querySelector<HTMLElement>('#conflictBannerMount'); if (cbMount) renderConflictBanner(cbMount, onAfterAction); }
+    if (opts.allowAddImport) {
+      const cbMount = container.querySelector<HTMLElement>('#conflictBannerMount'); if (cbMount) renderConflictBanner(cbMount, onAfterAction);
+      const errMount = container.querySelector<HTMLElement>('#syncErrorMount'); if (errMount) renderSyncErrorIndicator(errMount);
+    }
     container.querySelectorAll<HTMLButtonElement>('[data-action="activate"]').forEach((btn) => { btn.addEventListener('click', () => { schemaService.switchActiveSchema(btn.dataset.id!); store.regenerateReadOnlySql(); store.pushToast('success', 'Active schema switched.'); onAfterAction?.(); }); });
     container.querySelectorAll<HTMLButtonElement>('[data-action="rename"]').forEach((btn) => { btn.addEventListener('click', () => { const schema = schemaService.getSchemaById(btn.dataset.id!); if (!schema) return; openSchemaNameModal({ title: `Rename "${schema.name}"`, suggestedName: schema.name, onConfirm: (newName) => { const result = schemaService.renameSchema(schema.id, newName); if (result.ok) { store.pushToast('success', `Renamed to "${newName}".`); onAfterAction?.(); } else store.pushToast('error', result.error || 'Rename failed.'); } }); }); });
     container.querySelectorAll<HTMLButtonElement>('[data-action="export-json"]').forEach((btn) => { btn.addEventListener('click', () => downloadBlob(`schema-${btn.dataset.id}.json`, schemaService.exportSchemaJson(btn.dataset.id!), 'application/json')); });
@@ -26,13 +56,35 @@ export function renderSchemaManagementSection(container: HTMLElement, opts: { al
     container.querySelector<HTMLInputElement>('#importSchemaFile')?.addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]; const preview = container.querySelector<HTMLElement>('#importSchemaPreview'); if (!file || !preview) return;
       const originalFileName = safeTrim(file.name);
+      // V16.1: clear any stale preview content from a previous import
+      // attempt BEFORE processing this one, so a leftover success/error
+      // message from a prior file can never be confused with this file's
+      // outcome (see also the "clear stale errors" fix in this file's header).
+      preview.innerHTML = '';
       try {
         const text = await file.text(); const parsed = JSON.parse(text) as SchemaModel;
         const suggested = safeTrim(parsed?.name) || originalFileName.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9 _\-.]/g, '_');
         openSchemaNameModal({ title: 'Name the Imported Schema', suggestedName: suggested, originalFileName, onConfirm: (name) => {
+          // V16.1: importSchema() now validates the schema (via the same
+          // validateSchemaIntegrity() used for remote/pulled files) BEFORE
+          // saving or triggering auto-sync — see schemaService.ts. A schema
+          // that is accepted here is guaranteed to also pass GitHub's
+          // remote validation later, eliminating the "Remote schema file
+          // failed validation" surprise reported in V16.0.
           const result = schemaService.importSchema(parsed, name, originalFileName);
-          if (result.ok) { preview.innerHTML = `<div class="issue-box ok mini">${icon('check', 14)} ${result.replacedExisting ? `Updated existing schema "${name}" in place` : `Imported as "${name}"`} — it will sync automatically once the Secret Vault is unlocked.</div>`; store.pushToast('success', 'Schema imported.'); }
-          else preview.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
+          // V16.1 fix: a successful import calls schemaService.persist(),
+          // which synchronously notifies every subscriber — including this
+          // very section's own `draw()` (via schemaService.subscribe(draw)
+          // at the bottom of this file), which rebuilds the WHOLE section's
+          // innerHTML and therefore detaches the `preview` element captured
+          // above from the document. Writing to that stale reference was a
+          // no-op the user could never see. Re-querying the (now freshly
+          // rendered) preview element from `container` after the import
+          // guarantees the message lands on the node that is actually in
+          // the document.
+          const freshPreview = container.querySelector<HTMLElement>('#importSchemaPreview') || preview;
+          if (result.ok) { freshPreview.innerHTML = `<div class="issue-box ok mini">${icon('check', 14)} ${result.replacedExisting ? `Updated existing schema "${name}" in place` : `Imported as "${name}"`} — it will sync automatically once the Secret Vault is unlocked.</div>`; store.pushToast('success', 'Schema imported.'); }
+          else freshPreview.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
         } });
       } catch (err) { preview.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} Could not parse file: ${(err as Error).message}</div>`; }
       (e.target as HTMLInputElement).value = '';
@@ -43,6 +95,9 @@ export function renderSchemaManagementSection(container: HTMLElement, opts: { al
       const resultMount = container.querySelector<HTMLElement>('#simpleSyncResult'); if (!resultMount) return;
       if (!result.ok) { resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; return; }
       const parts: string[] = []; if (result.newSchemasAdded.length) parts.push(`Added ${result.newSchemasAdded.length} new schema(s): ${result.newSchemasAdded.join(', ')}.`); if (result.updatedSchemas.length) parts.push(`Updated ${result.updatedSchemas.length} schema(s): ${result.updatedSchemas.join(', ')}.`); if (result.unchanged) parts.push(`${result.unchanged} schema(s) already up to date.`); if (result.conflicts.length) parts.push(`${result.conflicts.length} schema(s) have conflicting changes — resolve them above.`);
+      // V16.1: on success, this box always shows the CURRENT result only —
+      // any earlier error text is fully overwritten here, never merged
+      // with or left alongside the new success message.
       resultMount.innerHTML = `<div class="issue-box ok mini">${icon('check', 14)} ${parts.length ? parts.join(' ') : 'Everything is already in sync.'}</div>`;
       store.pushToast('success', 'Synchronized with GitHub.'); onAfterAction?.();
     });

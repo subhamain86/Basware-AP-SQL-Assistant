@@ -1,10 +1,10 @@
 /**
- * Build script — mirrors V15.7's actual packaging approach exactly:
- * esbuild bundles src/main.ts into a single PLAIN (non-module, IIFE) script,
- * which is then embedded directly into index.html together with the
- * stylesheet, producing one self-contained file. This is what makes the app
- * work identically whether opened by double-click (file://) or served over
- * http/https — ES module <script> tags are blocked by browsers on file://.
+ * Build script — esbuild bundles src/main.ts into a single PLAIN
+ * (non-module, IIFE) script, embedded directly into index.html together
+ * with the stylesheet, producing one self-contained file. This makes the
+ * app work identically whether opened by double-click (file://) or served
+ * over http/https — ES module <script> tags are blocked by browsers on
+ * file://.
  */
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
@@ -39,7 +39,7 @@ async function main() {
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="${faviconDataUri}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AP-SQL Assistant · V16.0</title>
+  <title>AP-SQL Assistant · V16.1</title>
   <style>
 ${css}
   </style>

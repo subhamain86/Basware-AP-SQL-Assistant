@@ -55,6 +55,9 @@ export function sanitizeIncomingSchema(raw: unknown): any {
         name: safeString(c.name, ''),
         label: safeString(c.label, safeString(c.name, '')),
         description: safeString(c.description, ''),
+        // V16.1: preserve whatever data type string the imported/remote schema actually
+        // used (e.g. VARCHAR2, INTEGER, CLOB, BOOLEAN) — only default when truly missing.
+        // Never coerce or discard a provided type (see schemaIntegrityEngine.ts fix note).
         type: safeString(c.type, 'VARCHAR'),
         references: rawRefs ? { table: safeString(rawRefs.table, ''), column: safeString(rawRefs.column, '') } : c.references,
         decode: sanitizedDecode

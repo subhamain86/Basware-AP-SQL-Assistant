@@ -1,91 +1,65 @@
-# AP-SQL Assistant — V16.0
+# AP-SQL Assistant — V16.1
 
-**Baseline:** V15.7 (reconstructed faithfully from your SharePoint source — see `docs/PROVENANCE.md`).
-**Scope of this release:** M365 Copilot Enterprise integration for **Describe What You Need**, only.
+**Baseline:** V16.0. **Scope of this release:** three targeted regression fixes only —
+see `docs/CHANGELOG_V16.1.md` for full detail on each. No features were added or removed,
+and no unrelated behaviour was changed.
 
 ## Run it
 
-Open **`dist/index.html`** directly (double-click — it works fully offline from disk), or host the
-same file on any static web server / GitHub Pages. It is a single self-contained HTML file with
-CSS and JavaScript bundled inline (via esbuild, exactly like V15.7's own packaging approach) — no
-build step, no server, no dependencies at rest.
+Open **`dist/index.html`** directly (double-click — it works fully offline from disk), or
+host the same file on any static web server / GitHub Pages. It is a single
+self-contained HTML file with CSS and JavaScript bundled inline (via esbuild) — no build
+step, no server, no dependencies at rest.
 
 To rebuild from source:
 ```
 npm run typecheck   # tsc --noEmit — 0 errors
 npm run build       # esbuild bundle -> dist/index.html
-npm test            # 10/10 engine + V16.0 orchestration tests
-python3 scripts/smoke_test.py   # real headless-Chromium smoke test, 9/9 checks
+npm test            # 9/9 engine + regression-fix tests
+python3 scripts/smoke_test.py   # real headless-Chromium smoke test — all checks pass
 ```
 
-## What changed in V16.0 (and only this)
+## What changed in V16.1 (and only this)
 
-**"Describe What You Need"** on both the Read Only Query Builder and the Query Builder for CR can
-now optionally use your organization's **M365 Copilot Enterprise** agent to help interpret
-natural-language requests. It is **off by default**; nothing changes until an administrator
-configures it in **Settings → Secret Vault → M365 Copilot Enterprise Integration** (see
-`docs/CONFIGURATION.md`).
+1. **Card sizing restored.** The "Describe What You Need" / "Describe the Change" card
+   on the Read Only Query Builder and CR Builder pages had picked up an extra CSS
+   modifier that capped it at 480px wide inside an otherwise-equal two-column grid,
+   making it visibly smaller than the "Generated SQL" card next to it. That modifier is
+   removed; both cards now render at equal, symmetric widths again. No other card
+   dimension, spacing, padding, or control position changed.
 
-Architecture implemented exactly as specified:
-```
-Natural Language → Try M365 Copilot Enterprise (only if enabled+configured)
-                  → Offline NLP Engine (always runs, always authoritative)
-                  → Active Schema Resolution (discards anything not in your schema)
-                  → SQL Generation
-```
+2. **GitHub sync no longer rejects validly imported schemas.** A schema import
+   containing real-world data types (e.g. `VARCHAR2`, `INTEGER`, `BOOLEAN`, `CLOB`,
+   `TIMESTAMP(6)`) could previously sync successfully to GitHub and then fail on the very
+   next pull with "Remote schema file failed validation" — because the validator only
+   accepted five internal UI dropdown type names. The validator now requires only that a
+   data type be present, not that it match that narrow list, and schema import now
+   validates *before* saving/syncing (matching the required Import → Validate → Save →
+   Sync workflow) using the exact same check used for remote files — so what passes on
+   import is guaranteed to pass on the next pull, on this device or another. No imported
+   data (names, descriptions, types, relationships, aliases, CASE/DECODE) is stripped or
+   altered by this fix.
 
-New files (V16.0 only):
-- `src/services/msalAuthService.ts` — Microsoft identity platform sign-in (Authorization Code +
-  PKCE, no client secret, no hardcoded credentials).
-- `src/services/copilotNlpService.ts` — calls your configured Copilot agent endpoint with the
-  user's text and a **minimal** schema context; never the full schema.
+3. **The sync error indicator is hidden when there is no error, and clears itself after
+   a successful sync.** It now reflects one explicit, nullable error state that is set
+   only by explicit user actions (Sync Now / Push / Pull) and cleared the instant a later
+   one of those succeeds — never shown for the silent, automatic background checks that
+   already ran (and already failed silently) in V16.0.
 
-Modified files (additive only — every existing behaviour is preserved):
-- `src/services/nlpOrchestrator.ts` — Copilot is now tried first (if configured), ahead of the
-  existing generic Online AI/NLP Endpoint, ahead of the offline engine. With no Copilot
-  configuration, this file's runtime behaviour is identical to V15.7.
-- `src/services/secretVaultService.ts` — added one optional `m365Copilot` field to the existing
-  `SecretVaultConfig` type and one new `saveM365CopilotConfig()` method. Encryption mechanism,
-  storage key, unlock flow, and GitHub push/pull are all unchanged.
-- `src/pages/settingsPage.ts` — added one new subsection inside the **existing** Secret Vault tab.
-  No new tab, no new page, no new password. (Also fixes a pre-existing unlock-ordering timing
-  bug found during verification — see `docs/PROVENANCE.md`.)
-- `src/pages/readOnlyBuilderPage.ts`, `src/pages/crBuilderPage.ts` — the existing engine-badge
-  logic (`Online AI/NLP` vs `Offline/local engine`) gained one more state,
-  `M365 Copilot Enterprise + Offline Engine`. No layout change.
-- `src/components/icons.ts` — added one new icon (`bot`) for the badge above. Purely additive.
-- `src/components/tourOverlay.ts`, `src/pages/aboutPage.ts` — one sentence each, mentioning the
-  new optional capability. No structural change.
-- `src/main.ts` — added a one-line check for the OAuth popup callback before mounting the app
-  shell (required for the sign-in popup to work; does not affect normal page loads).
+**Everything else — Query Builder, Manual Selectors, CASE functionality, Advanced
+Options, the CR Query Builder's mandatory-WHERE safeguard, Manual Schema Update (beyond
+the import-validation ordering above), Schema Management, M365 Copilot integration,
+Offline NLP, the Secret Vault, GitHub sync architecture, the navbar, colours, themes, and
+every other button — is unchanged from V16.0.**
 
-**Everything else — Manual Selectors, Select Tables, Select Columns, Filters, CASE functionality,
-Advanced Options, Build Query, the CR Query Builder's mandatory-WHERE safeguard, Manual Schema
-Update, Schema Management, GitHub synchronization, the Secret Vault's existing encryption/unlock
-mechanics, the navbar, colours, themes, icons, and every other button — is unchanged from V15.7.**
-
-## Security properties of the new integration
-
-- No client secret anywhere (PKCE — Microsoft's documented mechanism for SPAs).
-- No credentials hard-coded; Tenant ID / Client ID / Scope / Endpoint are admin-supplied via the
-  existing encrypted Secret Vault.
-- The access token lives only in `sessionStorage` (cleared when the tab closes) — never
-  `localStorage`, never logged, never included in schema-sync payloads.
-- Only a small, keyword-relevant subset of the schema is ever sent externally — never the full
-  schema, never vault secrets.
-- Read-only with respect to the schema: the Copilot integration has no code path that can write
-  to, or modify, the Active Schema. Any table/column it references that isn't already in your
-  schema is discarded before SQL generation, every time, with no exception.
-- Automatic, silent fallback to the offline engine on any failure — sign-in cancelled, endpoint
-  unreachable, browser offline, or simply not configured.
-
-See `docs/CONFIGURATION.md` for the exact setup steps and `docs/PROVENANCE.md` for how the V15.7
-baseline was verified (including one pre-existing bug found and fixed along the way).
+See `docs/CHANGELOG_V16.1.md` for the full technical detail and verification results,
+`docs/CONFIGURATION.md` for M365 Copilot Enterprise setup (unchanged from V16.0), and
+`docs/PROVENANCE.md` for baseline notes.
 
 ## Verification performed
 
 | Check | Result |
 |---|---|
 | `tsc --noEmit` | 0 errors |
-| Engine + orchestration unit tests | 10/10 passed |
-| Real headless-Chromium smoke test (opened via `file://`) | 9/9 checks passed, no console errors (only expected CORS messages from background GitHub sync attempts, harmless on file://) |
+| Unit tests | 9/9 passed |
+| Real headless-Chromium smoke test | All checks passed: equal card widths on both builder pages, a schema with non-enum data types imports successfully through the real upload UI with a visible success message, the error indicator is absent with no active error, the CR builder's WHERE safeguard still works, Error Rectifier still works, Settings still unlocks with the default password |

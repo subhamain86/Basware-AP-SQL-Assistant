@@ -1,36 +1,12 @@
 /**
- * nlpOrchestrator.ts — Describe What You Need orchestration.
+ * nlpOrchestrator.ts — Describe What You Need orchestration (unchanged from
+ * V16.0, per the "Do not change M365 Copilot integration / Offline NLP
+ * functionality" constraint in the V16.1 brief).
  *
- * V16.0 change (this file only implements the upgrade's required architecture;
- * everything else in the app is untouched):
- *
- *   User's Natural Language Request
- *              |
- *      Query Intent Analysis
- *              |
- *      ┌───────────────────────┐
- *      │  M365 Copilot         │   <- NEW in V16.0: tried first, only if an
- *      │  Enterprise           │      administrator has configured AND enabled
- *      │  (if available)       │      it in Secret Vault. Silent fallback on
- *      └───────────┬───────────┘      any failure (not configured, offline,
- *                  │                  sign-in cancelled, endpoint unreachable).
- *                  ▼
- *        Existing Offline NLP     <- UNCHANGED from V15.7: always runs, and
- *              Engine                its result is the baseline that Copilot's
- *                  │                 output is merged into.
- *                  ▼
- *          Active Schema         <- Both Copilot's and the generic Online
- *                  │                 AI/NLP Endpoint's suggested tables/columns
- *                  ▼                 are passed through filterToKnownTables /
- *       Schema Validation           filterToKnownColumns (UNCHANGED) — anything
- *                  │                 not present in the Active Schema is
- *                  ▼                 discarded before it ever reaches SQL
- *          SQL Generation           generation. Copilot cannot invent objects.
- *
- * Priority order when multiple engines are available: M365 Copilot Enterprise
- * (if configured+enabled) -> generic Online AI/NLP Endpoint (if configured)
- * -> offline engine only. This is purely additive: with no Copilot
- * configuration, behaviour is byte-for-byte identical to V15.7.
+ * Priority: M365 Copilot Enterprise (if enabled+configured) -> generic
+ * Online AI/NLP Endpoint (if configured) -> offline engine only. Both online
+ * tiers' suggested tables/columns are passed through filterToKnownTables /
+ * filterToKnownColumns before ever reaching SQL generation.
  */
 import type { SchemaModel, QueryRequirement, CrRequirement, NlpOrchestrationResult } from '../types';
 import { parseRequirement, filterToKnownTables, filterToKnownColumns } from '../engines/nlpEngine';
@@ -68,7 +44,6 @@ function buildRichSchemaContext(schema: SchemaModel): string {
   return parts.join('\n');
 }
 
-/** Tries Copilot first (if configured), then the generic Online AI/NLP Endpoint. Returns null if neither is available/reachable. */
 async function tryEnterpriseNlp(rawText: string, schema: SchemaModel): Promise<{ response: NonNullable<Awaited<ReturnType<typeof tryOnlineNlp>>>; source: 'copilot' | 'online' } | null> {
   const vaultConfig = secretVaultService.isUnlocked() ? secretVaultService.getConfig() : null;
   const copilotConfig = vaultConfig?.m365Copilot ?? null;
