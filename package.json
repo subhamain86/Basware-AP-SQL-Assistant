@@ -1,0 +1,11 @@
+{
+  "name": "ap-sql-assistant",
+  "version": "16.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/"
+  }
+}
