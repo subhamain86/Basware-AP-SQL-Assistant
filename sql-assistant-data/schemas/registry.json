@@ -4,8 +4,8 @@
       "id": "schema-core-ap-p2p",
       "name": "AP / P2P Core",
       "version": "1.0",
-      "status": "inactive",
-      "updatedAt": "2026-09-28T14:43:16.971Z",
+      "status": "active",
+      "updatedAt": "2026-09-28T19:16:08.324Z",
       "lastSyncedAt": null,
       "tables": [
         {
@@ -730,7 +730,7 @@
       "name": "AP / P2P Extended (with Contracts)",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-28T14:43:16.971Z",
+      "updatedAt": "2026-09-28T19:16:08.324Z",
       "lastSyncedAt": null,
       "tables": [
         {
@@ -1529,12 +1529,12 @@
       ]
     },
     {
-      "id": "schema_muk8hwvc_b",
-      "name": "best-working-schema",
+      "id": "schema_mulms6ye_5",
+      "name": "AP schema 77",
       "version": "1.0",
-      "status": "active",
-      "updatedAt": "2026-09-28T16:57:23.851Z",
-      "lastSyncedAt": "2026-09-27T19:51:49.385Z",
+      "status": "inactive",
+      "updatedAt": "2026-09-28T19:18:56.822Z",
+      "lastSyncedAt": null,
       "tables": [
         {
           "name": "IA_ACTION_LOG",
@@ -19024,22 +19024,14 @@
             },
             {
               "name": "LOGIN_ALLOWED",
-              "label": "LOGIN_ALLOWED",
-              "description": "Can the user login to P2P. Account also needs VALID_FROM <= current date <= VALID_TO.",
-              "type": "VARCHAR",
+              "type": "NUMBER(22,5)",
+              "primary_key": false,
+              "foreign_key": null,
               "nullable": true,
-              "isPrimaryKey": false,
-              "isForeignKey": false,
-              "decode": [
-                {
-                  "rawValue": "0",
-                  "label": "Inactive"
-                },
-                {
-                  "rawValue": "1",
-                  "label": "Active"
-                }
-              ]
+              "included_in_extract": true,
+              "description": "Can the user login to P2P. Account also needs VALID_FROM <= current date <= VALID_TO.",
+              "alias": null,
+              "label": "LOGIN_ALLOWED"
             },
             {
               "name": "MESSAGE_SEND_TYPE",
@@ -22376,21 +22368,8 @@
         }
       ],
       "relationships": [],
-      "originalFileName": "best-working-schema1.json",
-      "versionMeta": {
-        "version": "1.0.0",
-        "schemaId": "schema_muk8hwvc_b",
-        "lastUpdated": "2026-09-28T16:57:23.855Z",
-        "updatedByDevice": "device-0hxnrk",
-        "source": "local",
-        "checksum": "9e5887f3d0e73d418c9588bf25c742c633c15dfaac795f71a06427033be0b212"
-      }
+      "originalFileName": "best-working-schema1.json"
     }
   ],
-  "activeSchemaId": "schema_muk8hwvc_b",
-  "activeSchemaMeta": {
-    "updatedAt": "2026-09-28T10:32:29.663Z",
-    "updatedByDevice": "device-3bmeph",
-    "configVersion": 1
-  }
+  "activeSchemaId": "schema-core-ap-p2p"
 }
