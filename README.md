@@ -1,63 +1,97 @@
-# SQL Assistant — V16.0 (Complete Package)
+# SQL Assistant — V15.7
 
-## ⚠️ Baseline note — please read first
-Your upgrade brief specified "the latest stable V15.7 build" as the baseline. I searched your OneDrive/SharePoint/Teams enterprise store thoroughly and **no V15.6 or V15.7 build exists anywhere** — the newest confirmed build I could find and open was **V15.5**. To avoid silently guessing at a build that doesn't exist, this complete package was built fresh, functionally re-implementing the documented V15.x feature set (Read Only Query Builder, Query Builder for CR, Schema Explorer, Manual Schema Update, Error Rectifier, Settings/Secret Vault, theming) **plus** the full V16.0 "Describe What You Need + M365 Copilot Enterprise" enhancement — as a single, genuinely tested, working deliverable, rather than a set of patch files you'd have to merge into a codebase I don't have complete access to.
-
-If a real V15.7 exists somewhere outside enterprise search's reach (e.g. a local machine, a private repo), send me that `.zip` directly and I will re-base this exact V16.0 enhancement onto it precisely instead.
-
-## What this package is
-A **single self-contained `index.html`** (~104 KB, CSS + JS fully inlined) — no build step, no server, no dependencies at rest. Verified with an automated headless-browser test suite (18/18 checks passed) both:
-- opened directly via `file://` (double-click), and
-- served over plain HTTP.
-
-`source/` contains the unminified, commented JS/CSS source that was concatenated to produce `index.html`, organized to mirror your existing project's `services/ engines/ state/` structure, for your own further development.
+Baseline: V15.6 (working). This is a **targeted synchronization bug-fix
+release only** — no UI, layout, theme, colors, icons, navbar, Query
+Builder, AI/NLP, SQL generation, CASE/DECODE, Manual Schema Update UI,
+schema structure, Secret Vault, or GitHub architecture changes were made.
+The only change is the Manual Schema Update → GitHub central-sync fix
+described below.
 
 ## How to run
-- **Local / offline:** double-click `index.html`. No internet connection is required unless you configure the optional M365 Copilot Enterprise integration.
-- **Static hosting** (SharePoint, OneDrive, GitHub Pages, any web server): upload `index.html` as-is.
+- **Static hosting** (GitHub Pages, SharePoint, OneDrive, any web server):
+  upload `index.html` as-is — CSS and JS are fully inlined, no build step.
+- **Local / offline:** double-click `index.html`.
+- `source/` contains the full TypeScript source (`tsc --noEmit` clean).
 
-## Feature set included
-- **Quick Start** landing page with worked examples.
-- **Read Only Query Builder**: Describe What You Need (NL → SQL) + full manual selectors (Tables & Columns, Filters with 13 operator types, Advanced Options: DISTINCT / GROUP BY / HAVING / ORDER BY / LIMIT-TOP-FETCH per dialect), auto-join across relationship graphs (including through unmentioned linking tables), schema-defined CASE/DECODE rendering, CTEs.
-- **Query Builder for CR**: INSERT/UPDATE/DELETE drafting with mandatory-WHERE safety guard.
-- **Schema Explorer** (Used Schema) and **Manual Schema Update** (JSON import/export, multi-schema switching).
-- **Error Rectifier**: rule-based correction + plain-language explanation for common Oracle error codes (ORA-00904, ORA-00942, ORA-00979, ambiguous column).
-- **Settings**: password-protected (default `admin`), AES-256-GCM/PBKDF2-encrypted Secret Vault.
-- **Light/Dark/System theme**, toast notifications, responsive layout.
-- **V16.0: M365 Copilot Enterprise integration** for Describe What You Need (see below).
+## The bug, and the actual root cause
 
-## V16.0 — M365 Copilot Enterprise Integration
-Implements the exact required architecture:
+**Symptom:** Manual Schema Update successfully saved an edited row
+locally, but the change never reached the central schema stored in the
+GitHub repository — so the local copy and the GitHub copy could silently
+drift apart, and other devices pulling from GitHub would keep seeing the
+old value.
 
-```
-User's Natural Language Request
-        |
-Query Intent Analysis
-        |
-Try M365 Copilot Enterprise (if configured + available)
-        |
-Existing Offline NLP Engine  <-- ALWAYS runs; Active Schema is the
-        |                        single source of truth for final structure
-Active Schema Resolution
-        |
-Schema Validation
-        |
-SQL Generation
-        |
-Generated SQL
-```
+**Root cause:** the Save button's own submit handler only ever called
+`schemaService.upsertRow()` — a purely **local** in-memory + `localStorage`
+write — and then immediately reported success and closed the modal. The
+**only** thing that ever pushed the updated schema registry to GitHub was
+`autoSyncService`'s `scheduleBackgroundPush()`: a fully **decoupled**,
+1.2-second-debounced background timer that fires independently of the Save
+action, reporting its own outcome via a *separate* toast that appears well
+after the Save modal has already closed — with no connection back to that
+specific save. This is exactly "Manual Save → Local State Updated → GitHub
+Sync Not Triggered [as part of the same operation]" from the bug report:
+the save workflow itself never attempted, awaited, or confirmed a central
+GitHub write; it just hoped a best-effort background timer would pick it
+up. If that timer never fired for any reason (tab closed within 1.2s,
+Secret Vault happened to be locked at that instant, etc.), the save would
+still report as fully successful even though nothing had reached GitHub.
 
-- **Off by default.** Nothing changes until an admin configures it in Settings → Enterprise Integration.
-- **Active Schema always wins.** Copilot's output is used only as advisory search hints fed into the same offline `parseRequirement()` engine — it cannot inject a table/column that isn't in the Active Schema, because the offline engine simply won't match anything not present there.
-- **Automatic silent fallback.** No config / no network / auth failure / Copilot error → falls straight back to the offline engine, no broken UI, no thrown errors (verified in testing).
-- **Read-only.** Nothing in this integration can write to, or modify, the Active Schema.
-- **Minimal data exposure.** Only the ~12 most relevant tables/columns (keyword-filtered) plus the user's text are ever sent externally — never the full schema, never vault secrets.
-- **No hard-coded credentials.** Authentication uses MSAL.js (Microsoft's supported browser auth library) against your organization's own Entra ID app registration, loaded lazily only if/when configured. Tokens live only in `sessionStorage` via MSAL's own managed cache — never written to disk in plain text.
-- **No new configuration UI or Secret Vault behavior change** — the Copilot config is just one more encrypted field (`m365CopilotEnterpriseConfig`) in the same vault mechanism already used for other settings.
+## The fix
 
-See `CONFIGURATION.md` for exactly what your Entra ID admin needs to provide, and `TEST-REPORT.md` for the full verification log.
+The Save handler in `schemaEditorSection.ts` now **explicitly calls and
+awaits** `syncService.pushRegistryToGitHub()` as an integral, sequential
+step of the save workflow itself — immediately after the local, targeted,
+single-row update succeeds (V15.6's row-level upsert logic is completely
+unchanged: still only one row is ever touched) — and reports one of three
+honest, save-specific outcomes:
 
-## What did NOT change conceptually
-Manual Selectors, Filters, CASE/DECODE, Advanced Options, CR Query Builder, Manual Schema Update, and Secret Vault mechanics all behave exactly as documented in your V15.x lineage — this release only adds the Copilot-assisted path in front of the same offline engine.
+1. **Local + central both succeeded** → "Saved locally and synchronized to
+   the central GitHub schema."
+2. **Local succeeded, Secret Vault locked** → "Saved locally, but NOT yet
+   synchronized to the central GitHub schema... Unlock Settings to publish
+   this change."
+3. **Local succeeded, GitHub push itself failed** (network, auth, missing
+   token, conflict, etc.) → "Saved locally, but central GitHub
+   synchronization FAILED: `<real error>`... The background sync will
+   retry automatically, or use 'Sync Now'."
 
-Created by Subham Ain (package assembled by Copilot on request).
+In every case the modal briefly shows this real outcome (not just a
+generic "Saved!") before closing, and the corresponding toast is tied
+directly to that save action. The pre-existing debounced
+`autoSyncService` background push is left completely intact as a
+secondary safety net/retry path — it is simply no longer the *only* thing
+responsible for actually reaching GitHub. The same explicit-then-await
+pattern was also applied to the Delete flow's third confirmation step, for
+consistency.
+
+## Regression testing performed (Playwright, against the built app)
+
+- **All 7 routes** load cleanly with zero console/page errors.
+- **Save explicitly attempts + awaits central sync:** edited
+  `PO_HEADER.STATUS`'s description and saved. This sandboxed test
+  environment has no real GitHub token configured, which is actually a
+  perfect real-world test of the failure path — the Save modal's live
+  status box read *"Saved locally, but central GitHub synchronization
+  FAILED: Repository synchronization configuration is incomplete...
+  Missing: Access Token."* — proving the sync attempt runs synchronously,
+  as part of Save itself, and is never silently reported as a successful
+  central save when it wasn't.
+- **Persistent sync log** confirms the same honest failure reason is
+  recorded for later diagnosis/retry, exactly matching what the modal
+  showed.
+- **Local row-level update still succeeds** even when central sync fails
+  — the edited description was correctly visible in the table immediately
+  after save, and all 6 other rows in `PO_HEADER` remained completely
+  untouched (only the intended row was modified — V15.6's targeted-update
+  guarantee is fully preserved).
+- **Persistence after a genuine same-context reload:** saved an edit,
+  performed an actual `page.reload()` (same browser tab/context, not a
+  fresh Playwright context), re-unlocked Settings, and confirmed the
+  edited value was still present.
+- **Query Builder / CASE-DECODE regression:** confirmed table selection →
+  SQL generation still works, and selecting `PO_HEADER.STATUS` with
+  "Schema CASE/DECODE" still correctly produces a `CASE WHEN...THEN...END`
+  expression with the original Open/Closed/On Hold labels — never a
+  database-specific `DECODE()` call, and completely unaffected by the sync
+  fix.
