@@ -5,7 +5,7 @@
       "name": "AP / P2P Core",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-27T19:52:15.188Z",
+      "updatedAt": "2026-09-28T10:28:11.298Z",
       "lastSyncedAt": null,
       "tables": [
         {
@@ -730,7 +730,7 @@
       "name": "AP / P2P Extended (with Contracts)",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-27T19:52:15.188Z",
+      "updatedAt": "2026-09-28T10:28:11.298Z",
       "lastSyncedAt": null,
       "tables": [
         {
@@ -22371,5 +22371,10 @@
       "originalFileName": "best-working-schema1.json"
     }
   ],
-  "activeSchemaId": "schema_muk8hwvc_b"
+  "activeSchemaId": "schema_muk8hwvc_b",
+  "activeSchemaMeta": {
+    "updatedAt": "2026-09-28T10:32:29.663Z",
+    "updatedByDevice": "device-3bmeph",
+    "configVersion": 1
+  }
 }
