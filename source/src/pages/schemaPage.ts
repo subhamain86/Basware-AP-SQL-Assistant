@@ -13,7 +13,7 @@ import type { SchemaModel } from '../types';
 export function renderSchemaManagementSection(container: HTMLElement, opts: { allowAddImport: boolean }, onAfterAction?: () => void): void {
   function draw(): void {
     const schemas = schemaService.getAllSchemas();
-    container.innerHTML = `${opts.allowAddImport ? `<div class="advanced-sync-details"><p class="hint">${icon('cloud', 15)} Automatic sync: creating, importing, updating, or renaming a schema — and changing the Active Schema — automatically synchronizes it to the repository once the Secret Vault is unlocked (Settings → Security → Enter Admin Password) — no manual Pull Request needed. Even if the vault is locked here, other devices will still automatically discover new schemas and the shared Active Schema selection the next time they load the app.</p><div id="conflictBannerMount"></div><button type="button" class="btn btn-outline btn-sm" id="simpleSyncBtn">${icon('github', 15)} Sync with GitHub Now</button><div id="simpleSyncResult"></div></div>` : ''}
+    container.innerHTML = `${opts.allowAddImport ? `<div class="advanced-sync-details"><p class="hint">${icon('cloud', 15)} Automatic sync: creating, importing, updating, or renaming a schema — and changing the Active Schema — automatically synchronizes it to the repository once the Secret Vault is unlocked (Settings → Security → Enter Admin Password) — no manual Pull Request needed.</p><div id="conflictBannerMount"></div><button type="button" class="btn btn-outline btn-sm" id="simpleSyncBtn">${icon('github', 15)} Sync with GitHub Now</button><div id="simpleSyncResult"></div></div>` : ''}
       ${schemaService.isActiveSchemaMissing() ? `<div class="issue-box warn"><div>${icon('alert-triangle', 16)}</div><div><strong>The configured Active Schema is no longer available.</strong> Please select another schema below.</div></div>` : ''}
       <div class="schema-list">
       ${schemas.map((s) => `<div class="schema-card ${s.status === 'active' ? 'is-active' : ''}">
@@ -109,7 +109,7 @@ export function renderSchemaPage(container: HTMLElement): void {
     const isView = t.objectType === 'VIEW';
     return `<div class="schema-table-card">
       <div class="schema-table-head">${icon(isView ? 'eye' : 'table', 16)}<div><h3>${t.name}${isView ? ' <span class="chip chip-view">VIEW</span>' : ''}</h3><p class="hint">${t.module} · ${t.description}</p></div></div>
-      <table class="schema-col-table"><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Keys</th><th>Decode</th></tr>
+      <table class="schema-col-table"><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Keys</th><th>CASE/DECODE</th></tr>
       ${t.columns.map((c) => `<tr><td>${c.name}</td><td>${c.type}${c.length ? `(${c.length})` : ''}</td><td>${c.nullable ? 'Yes' : 'No'}</td><td>${c.isPrimaryKey ? 'PK' : ''}${c.isForeignKey ? `FK→${c.references?.table}.${c.references?.column}` : ''}</td><td>${c.decode?.length ? decodeLegend(c) : ''}</td></tr>`).join('')}
       </table>
     </div>`;

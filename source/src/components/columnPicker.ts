@@ -25,7 +25,7 @@ export function renderColumnPicker(container: HTMLElement, schema: SchemaModel, 
           <label class="column-row-checkbox-label"><input type="checkbox" class="column-checkbox" ${selected ? 'checked' : ''}/><span><strong>${c.name}</strong> <span class="hint">${c.type}${c.length ? `(${c.length})` : ''}${c.isPrimaryKey ? ' · PK' : ''}${c.isForeignKey ? ' · FK' : ''}</span></span></label>
           ${selected ? `<div class="column-row-controls">
             <label class="column-inline-label">Alias<input class="column-alias-input" value="${spec?.alias || ''}"/></label>
-            <label class="column-inline-label">Display as<select class="column-mode-select"><option value="raw" ${mode === 'raw' ? 'selected' : ''}>Raw Column</option>${hasSchemaDecode ? `<option value="schema-decode" ${mode === 'schema-decode' ? 'selected' : ''}>Schema DECODE</option>` : ''}<option value="manual-decode">Manual DECODE…</option></select></label>
+            <label class="column-inline-label">Display as<select class="column-mode-select"><option value="raw" ${mode === 'raw' ? 'selected' : ''}>Raw Column</option>${hasSchemaDecode ? `<option value="schema-decode" ${mode === 'schema-decode' ? 'selected' : ''}>Schema CASE/DECODE</option>` : ''}<option value="manual-decode">Manual CASE/DECODE…</option></select></label>
           </div>` : ''}
         </div>`;
       }).join('')}`;

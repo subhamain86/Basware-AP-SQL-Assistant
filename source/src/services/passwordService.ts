@@ -1,13 +1,8 @@
 import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob } from './cryptoService';
 import { safeLocalStorageSet, safeTrim, isNonEmptyString } from '../utils/validation';
 import type { VaultErrorCode } from '../types';
-const STORAGE_KEY = 'sqla.pwvault.v153';
-const MARKER = 'sqla-verified-marker-v153';
-/** The internal/default administrative password remains "admin". It is
- * NEVER stored, displayed, or transmitted in plaintext anywhere except as
- * the in-memory constant used once to derive the default encrypted marker
- * blob below; the actual comparison always happens via AES-GCM decryption
- * (see cryptoService), never via a plaintext string comparison. */
+const STORAGE_KEY = 'sqla.pwvault.v155';
+const MARKER = 'sqla-verified-marker-v155';
 const DEFAULT_PASSWORD = 'admin';
 let defaultBlobCache: string | null = null;
 let defaultBlobCacheFailed = false;
@@ -22,12 +17,6 @@ async function getStoredBlobRaw(): Promise<{ ok: true; raw: string } | { ok: fal
   }
   return { ok: true, raw: defaultBlobCache };
 }
-/** Fixes the "Password / Secret Vault always displaying an incorrect
- * credential error" class of bugs: returns a structured result with an
- * explicit VaultErrorCode for every distinct failure mode, so a correct
- * password reliably resolves to { ok: true } regardless of transient
- * state, and every non-credential failure is reported under its own code
- * — never bucketed into "incorrect-password". */
 export interface PasswordVerifyResult { ok: boolean; code: VaultErrorCode; error?: string; }
 export async function verifyPasswordDetailed(candidateRaw: unknown): Promise<PasswordVerifyResult> {
   if (candidateRaw === undefined || candidateRaw === null) return { ok: false, code: 'empty-password', error: 'Please enter the administrator password.' };

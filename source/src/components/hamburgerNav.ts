@@ -41,7 +41,7 @@ export function renderNavbar(container: HTMLElement, onNavigate: (r: Route) => v
             <button class="navbar-toggler" id="navToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="${menuOpen}" data-tour="hamburger-btn">${icon('menu', 22)}</button>
             <button class="hero-brand-row" id="logoHomeBtn" type="button" aria-label="Go to Quick Start" data-tour="brand">
               <span class="app-logo-badge">${logoMarkSvg(26)}</span>
-              <span class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V15.3</span></span>
+              <span class="brand-text"><span class="builder-heading">SQL Assistant</span><span class="small">V15.5</span></span>
             </button>
           </div>
           <div class="navbar-sync-cluster" data-tour="navbar-sync">

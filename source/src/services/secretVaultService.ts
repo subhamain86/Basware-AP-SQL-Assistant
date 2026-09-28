@@ -2,9 +2,9 @@ import { encryptWithSecret, decryptWithSecret, serializeBlob, deserializeBlob, t
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { safeString, safeLocalStorageSet } from '../utils/validation';
 import type { VaultErrorCode } from '../types';
-const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v153';
-const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v153';
-const DEVICE_TAG_KEY = 'sqla.deviceTag.v153';
+const SECRET_VAULT_STORAGE_KEY = 'sqla.secretvault.v155';
+const VAULT_LAST_SHA_KEY = 'sqla.vaultlastsha.v155';
+const DEVICE_TAG_KEY = 'sqla.deviceTag.v155';
 export interface SecretVaultConfig { githubRepo: string; githubBranch: string; githubSchemaPath: string; githubToken: string; sharedLocationLabel: string; }
 export interface VaultVersionMeta { updatedAt: string; updatedByDevice: string; checksum: string; }
 interface StoredVaultFile { blob: EncryptedBlob; meta: VaultVersionMeta; }
@@ -15,17 +15,6 @@ export const DEFAULT_BOOTSTRAP_CONFIG: Omit<SecretVaultConfig, 'githubToken' | '
 };
 const VAULT_BLOB_PATH = 'sql-assistant-data/vault/secret-vault.enc.json';
 function bootstrapConfig(): SecretVaultConfig { return { ...DEFAULT_BOOTSTRAP_CONFIG, githubToken: '', sharedLocationLabel: '' }; }
-/** Races a promise against a timeout so a network call that never settles
- * (common when a sandboxed/offline environment silently black-holes a
- * request rather than actively refusing it) can never hang the caller
- * forever. Rejects with a plain Error on timeout, which the surrounding
- * try/catch already treats as "fall through to a fresh vault". */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timed out waiting for a response.')), ms);
-    promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
-  });
-}
 function normalizeVaultConfig(raw: unknown): SecretVaultConfig {
   const r = (raw && typeof raw === 'object') ? (raw as Partial<SecretVaultConfig>) : {};
   return {
@@ -52,20 +41,12 @@ async function computeConfigChecksum(config: SecretVaultConfig): Promise<string>
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical) as BufferSource);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-/** tryAutoUnlock() returns one of THREE clearly separated outcomes instead
- * of a single boolean:
- *   1. source: 'local' / 'repository' / 'created-fresh' on success.
- *   2. code: 'incorrect-password' — ONLY when a LOCALLY stored vault blob
- *      exists and decryption genuinely failed with a wrong-password result.
- *      This is the ONLY case that may ever show a credential error.
- *   3. Any OTHER failure (corrupted local vault, GitHub network/auth issue
- *      while trying to bootstrap from the repository, encryption
- *      unavailable) is tagged with its own distinct code — a GitHub-side
- *      failure while trying to fetch/bootstrap the vault is NEVER allowed
- *      to surface as "incorrect password", because bootstrapping from the
- *      repository is only attempted when there is NO local vault yet, i.e.
- *      there is no password to even be "incorrect" against at that point —
- *      any failure there falls through to creating a fresh local vault. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for a response.')), ms);
+    promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
 export interface VaultBootstrapOutcome { ok: boolean; source: 'local' | 'repository' | 'created-fresh'; code: VaultErrorCode; error?: string; }
 class SecretVaultService {
   private unlockedConfig: SecretVaultConfig | null = null;
@@ -105,15 +86,6 @@ class SecretVaultService {
       this.notify();
       return { ok: true, source: 'local', code: 'none' };
     }
-    // No local vault yet — attempt to bootstrap from the repository. ANY
-    // failure here (network, GitHub auth, missing file, or simply no
-    // response at all in an offline/sandboxed environment) is a
-    // repository/GitHub-layer issue, NOT a credential issue — so we
-    // silently fall through to creating a fresh vault and NEVER report
-    // 'incorrect-password' from this branch. A bounded timeout ensures a
-    // network call that never resolves (no explicit failure event, just
-    // silence) can never leave the unlock button stuck on "Unlocking…"
-    // forever — a real, previously-reported stability issue.
     try {
       const remoteFile = await withTimeout(getFile(DEFAULT_BOOTSTRAP_CONFIG.githubRepo, DEFAULT_BOOTSTRAP_CONFIG.githubBranch, VAULT_BLOB_PATH, ''), 4000);
       if (remoteFile) {

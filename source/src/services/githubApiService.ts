@@ -16,14 +16,6 @@ function splitRepo(repoFullNameRaw: unknown): { owner: string; repo: string } | 
   return { owner: parts[0], repo: parts[1] };
 }
 function isRepoError(x: { owner: string; repo: string } | GitHubApiError): x is GitHubApiError { return 'message' in x; }
-/** A sandboxed/offline environment can silently black-hole an outbound
- * request (no DNS failure, no connection-refused event, just permanent
- * silence) rather than actively rejecting it — this previously left
- * callers such as the Secret Vault bootstrap unlock flow stuck forever on
- * "Unlocking…"/"Syncing…". Every GitHub network call is now bounded by
- * this timeout and reported as the existing 'network-error' code, which
- * every caller already treats as non-fatal (falls through to offline/
- * fresh-vault/no-op behavior, never as a credential or validation error). */
 const FETCH_TIMEOUT_MS = 6000;
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -32,12 +24,6 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
     return await fetch(url, { ...init, signal: controller.signal });
   } finally { clearTimeout(timer); }
 }
-/** Performs several defensive checks so the caller can never accidentally
- * treat a folder listing, a GitHub API metadata object, an empty file, or a
- * base64-decode failure as valid schema content — each failure mode is
- * tagged with its own SyncErrorCode so it can never be confused with a
- * schema validation failure OR a vault credential failure later in the
- * chain. */
 export async function getFile(repoFullNameRaw: unknown, branchRaw: unknown, pathRaw: unknown, tokenRaw: unknown): Promise<GitHubFileResult | null> {
   const parsed = splitRepo(repoFullNameRaw);
   if (isRepoError(parsed)) throw parsed;

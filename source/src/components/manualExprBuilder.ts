@@ -45,16 +45,16 @@ export function openManualCaseBuilder(dialect: Dialect, onAdd: (spec: SelectedCo
 }
 export function openManualDecodeBuilder(dialect: Dialect, onAdd: (spec: SelectedColumnSpec) => void, prefill?: ManualDecodePrefill, replaceSpecId?: string, seedAliasOverride?: string): void {
   const seedSource = prefill ? `${prefill.table}.${prefill.column}` : '';
-  const seedAlias = seedAliasOverride || (prefill ? `${prefill.column}_DESC` : '');
-  const bodyHtml = `<p class="hint">Build a DECODE (Oracle) / CASE (other dialects) expression manually.</p>
+  const seedAlias = seedAliasOverride || (prefill ? prefill.column : '');
+  const bodyHtml = `<p class="hint">Build a value-to-display CASE mapping manually. This is always generated as a standard <code>CASE WHEN ... THEN ... END</code> expression — never a database-specific DECODE() function.</p>
     <label class="block-label">Source column/expression *<input id="decodeSource" value="${seedSource}"/></label>
     <div id="pairRows"></div>
     <button type="button" class="btn btn-outline btn-sm" id="addPairBtn">${icon('plus', 14)} Add raw=label pair</button>
-    <label class="block-label">ELSE value<input id="decodeElse"/></label>
+    <label class="block-label">ELSE value<input id="decodeElse" placeholder="Unknown"/></label>
     <label class="block-label">Alias *<input id="decodeAlias" value="${seedAlias}"/></label>
     <div id="decodeIssues"></div>
     <div class="modal-actions"><button type="button" class="btn btn-ghost" id="decodeCancel">Cancel</button><button type="button" class="btn btn-primary" id="decodeSave">${icon('save', 14)} ${replaceSpecId ? 'Apply' : 'Add Column'}</button></div>`;
-  const modal = openModal(`${icon('sparkles', 18)} Manual DECODE Expression${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
+  const modal = openModal(`${icon('sparkles', 18)} Manual CASE/DECODE Mapping${prefill ? ` — ${prefill.table}.${prefill.column}` : ''}`, bodyHtml, { wide: true });
   const pairRowsEl = modal.element.querySelector<HTMLElement>('#pairRows')!;
   let pairs: { rawValue: string; label: string }[] = [{ rawValue: '', label: '' }];
   function renderPairs(): void {

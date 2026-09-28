@@ -12,10 +12,6 @@ export interface RelationshipDef { id: string; fromTable: string; fromColumn: st
 export type SchemaStatus = 'active' | 'default' | 'inactive';
 export interface SchemaVersionMeta { version: string; schemaId: string; lastUpdated: string; updatedByDevice: string; source: 'local' | 'location' | 'github' | 'vault' | 'import'; checksum: string; }
 export interface SchemaModel { id: string; name: string; version: string; status: SchemaStatus; updatedAt: string; lastSyncedAt: string | null; tables: TableDef[]; relationships: RelationshipDef[]; versionMeta?: SchemaVersionMeta; originalFileName?: string; }
-/** Shared/synchronized Active Schema pointer metadata. configVersion is a
- * monotonically-increasing counter used for deterministic last-write-wins
- * conflict resolution when two devices change the Active Schema at nearly
- * the same time. */
 export interface ActiveSchemaMeta { updatedAt: string; updatedByDevice: string; configVersion: number; }
 export type ActiveSchemaSyncOutcome = 'applied' | 'skipped-same' | 'skipped-stale' | 'not-found' | 'none';
 export interface SchemaRegistry { schemas: SchemaModel[]; activeSchemaId: string; activeSchemaMeta?: ActiveSchemaMeta; }

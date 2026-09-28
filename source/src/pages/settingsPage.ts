@@ -4,7 +4,6 @@ import { schemaService } from '../services/schemaService';
 import { changePassword, resetPasswordToDefault, verifyPasswordDetailed } from '../services/passwordService';
 import { secretVaultService, maskToken, DEFAULT_BOOTSTRAP_CONFIG } from '../services/secretVaultService';
 import { syncService } from '../services/syncService';
-import { setAutoSyncToastHandler } from '../services/autoSyncService';
 import { getConfiguredEndpoint, setConfiguredEndpoint } from '../services/onlineNlpService';
 import { renderSchemaManagementSection } from './schemaPage';
 import { renderSchemaEditorSection } from './schemaEditorSection';
@@ -15,13 +14,6 @@ import { downloadBlob, formatBytes } from '../utils/dom';
 import { estimateStringBytes } from '../utils/validation';
 import type { SyncTimeOption, VaultErrorCode } from '../types';
 
-/** Maps every distinct VaultErrorCode to its own clean, non-technical,
- * user-facing message. This is what makes it possible for the unlock
- * screen to show "Incorrect administrator password." ONLY for a genuine
- * credential mismatch, and something else entirely (never a raw
- * exception, never a misleading "incorrect password") for every other
- * failure class — satisfying the requirement that GitHub/network/vault
- * errors are never confused with a wrong password. */
 function describeVaultErrorForUser(code: VaultErrorCode, fallback?: string): string {
   switch (code) {
     case 'incorrect-password': return 'Incorrect administrator password. Please try again.';
@@ -37,26 +29,12 @@ function describeVaultErrorForUser(code: VaultErrorCode, fallback?: string): str
 }
 
 export function renderSettingsPage(container: HTMLElement): void {
-  // FIX: the Admin Password / lock screen must open with NO error visible.
-  // This is tracked as an explicit, page-level piece of state that starts
-  // at `null` (no error) and is ONLY ever set as the direct result of a
-  // real, just-completed unlock ATTEMPT in this session — never inferred
-  // from any other state, never left over from a previous mount, and
-  // never defaulted to an error message. Navigating away and back, or a
-  // fresh app load, always starts this at null again (see draw() below,
-  // which is only ever entered through a brand-new call to
-  // renderSettingsPage with a fresh closure — lockError is re-declared
-  // fresh here every time).
   let lockError: { code: VaultErrorCode; message: string } | null = null;
   let unlockInProgress = false;
 
   function draw(): void { if (!store.settingsUnlocked) { renderLockScreen(); return; } renderUnlockedSettings(); }
 
   function renderLockScreen(): void {
-    // The error box below is rendered ONLY when lockError is non-null —
-    // i.e. only after a real failed unlock attempt in this session. On
-    // first render (lockError === null) no error box exists in the DOM at
-    // all, so there is nothing to "flash" red by default.
     container.innerHTML = `<div class="page-settings-lock" data-tour="settings-lock-screen">
       <div class="settings-lock-card">
         <div class="settings-lock-icon">${icon('lock', 32)}</div>
@@ -75,26 +53,14 @@ export function renderSettingsPage(container: HTMLElement): void {
       const freshPwInput = container.querySelector<HTMLInputElement>('#lockPwInput'); if (freshPwInput) freshPwInput.focus();
       const verify = await verifyPasswordDetailed(pw);
       if (!verify.ok) {
-        // Only ever set lockError here, as the direct, immediate result of
-        // this specific attempt — a vault-corrupted / network / github
-        // error is shown with ITS OWN distinct message, never relabeled as
-        // "incorrect password".
         lockError = { code: verify.code, message: describeVaultErrorForUser(verify.code, verify.error) };
         unlockInProgress = false; draw();
         return;
       }
-      // Correct password: clear any previous error immediately, then
-      // proceed to unlock the vault / settings. If vault bootstrap itself
-      // hits a repository/network issue, that is reported as a toast (via
-      // autoSyncService), never as a false "incorrect password" on this
-      // screen, since the password itself was already verified correct.
       lockError = null;
       const bootstrap = await secretVaultService.tryAutoUnlock(pw);
       unlockInProgress = false;
       if (!bootstrap.ok) {
-        // A local vault existing with a DIFFERENT password than Settings'
-        // own record is an edge case (out-of-band vault reset) — surface
-        // it distinctly rather than silently unlocking Settings only.
         lockError = { code: bootstrap.code, message: describeVaultErrorForUser(bootstrap.code, bootstrap.error) };
         draw();
         return;
@@ -104,8 +70,6 @@ export function renderSettingsPage(container: HTMLElement): void {
     }
     unlockBtn.addEventListener('click', () => { attemptUnlock(); });
     pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') attemptUnlock(); });
-    // Clear a stale error the moment the user starts correcting their input
-    // — the error must not linger once they're actively retrying.
     pwInput.addEventListener('input', () => { if (lockError) { lockError = null; const box = container.querySelector('#lockErrorBox'); box?.remove(); } });
   }
 
@@ -179,7 +143,7 @@ export function renderSettingsPage(container: HTMLElement): void {
 
   function renderSyncTab(panel: HTMLElement): void {
     const cfg = syncService.getConfig();
-    panel.innerHTML = `<div class="mt"> <h4>${icon('folder', 15)} Shared Location</h4> <p class="hint">Status: ${syncService.hasConnectedLocation() ? 'Connected' : 'Not connected'}${syncService.isFileSystemAccessSupported() ? '' : ' — this browser does not support the File System Access API; use Import/Export instead.'}</p> <button type="button" class="btn btn-outline btn-sm" id="connectLocationBtn">${icon('folder', 14)} Connect Folder</button><div id="locationResult"></div> <h4 class="mt">${icon('github', 15)} GitHub Sync</h4> <p class="hint">Repository configuration and access token now live in Settings → Secret Vault. Schema changes — including the shared Active Schema selection — synchronize automatically in the background. New schemas and Active Schema changes from other devices are also discovered automatically on app load, even before the vault is unlocked here.</p> <button type="button" class="btn btn-outline btn-sm simple-sync-cta" id="simpleSyncBtn2">${icon('github', 14)} Sync with GitHub Now</button><div id="syncResult2"></div> <h4 class="mt">${icon('clock', 15)} Sync Time (controls the periodic background PULL interval only)</h4> <p class="hint">The navbar "Sync Time" dropdown is the ONLY thing that starts a recurring background check — it defaults to Manual (no periodic timer at all). Every other synchronization event is one-shot.</p> ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}"/></label><button type="button" class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time (navbar) is not "Custom".</p>'} <h4 class="mt">${icon('shield-alert', 15)} Conflict Management</h4> <p class="hint">Reuses the existing schema versioning/checksum mechanism — if a background sync finds a schema that changed both locally and remotely, it appears as a persistent conflict here and on the Schema page, with Use Local / Use Remote resolution.</p> <div id="conflictBannerMountSync"></div> <h4 class="mt">${icon('history', 15)} Synchronization Activity Log</h4> <p class="hint">A live, timestamped record of every automatic discovery/push/pull event, including cross-device Active Schema changes. If a schema was rejected during sync, the exact internal reason is available in the browser console (Developer Tools) for diagnostics — the log here always shows a clean, user-friendly summary.</p> <div id="syncLogMount"></div> </div>`;
+    panel.innerHTML = `<div class="mt"> <h4>${icon('folder', 15)} Shared Location</h4> <p class="hint">Status: ${syncService.hasConnectedLocation() ? 'Connected' : 'Not connected'}${syncService.isFileSystemAccessSupported() ? '' : ' — this browser does not support the File System Access API; use Import/Export instead.'}</p> <button type="button" class="btn btn-outline btn-sm" id="connectLocationBtn">${icon('folder', 14)} Connect Folder</button><div id="locationResult"></div> <h4 class="mt">${icon('github', 15)} GitHub Sync</h4> <p class="hint">Repository configuration and access token now live in Settings → Secret Vault. Schema changes — including the shared Active Schema selection — synchronize automatically in the background.</p> <button type="button" class="btn btn-outline btn-sm simple-sync-cta" id="simpleSyncBtn2">${icon('github', 14)} Sync with GitHub Now</button><div id="syncResult2"></div> <h4 class="mt">${icon('clock', 15)} Sync Time</h4> ${cfg.time === 'custom' ? `<label class="block-label">Time of day<input type="time" id="customTimeInput" value="${cfg.customTime || '20:30'}"/></label><button type="button" class="btn btn-outline btn-sm" id="saveCustomTimeBtn">${icon('save', 14)} Save</button>` : '<p class="hint">Not applicable — current Sync Time (navbar) is not "Custom".</p>'} <h4 class="mt">${icon('shield-alert', 15)} Conflict Management</h4> <div id="conflictBannerMountSync"></div> <h4 class="mt">${icon('history', 15)} Synchronization Activity Log</h4> <div id="syncLogMount"></div> </div>`;
     panel.querySelector('#connectLocationBtn')?.addEventListener('click', async () => { const result = await syncService.connectSharedLocation(); const mount = panel.querySelector<HTMLElement>('#locationResult'); if (mount) mount.innerHTML = result.ok ? `<div class="issue-box ok mini">${icon('check', 14)} Connected: ${result.label}</div>` : `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; if (result.ok) renderSyncTab(panel); });
     panel.querySelector('#simpleSyncBtn2')?.addEventListener('click', async () => {
       const btn = panel.querySelector<HTMLButtonElement>('#simpleSyncBtn2')!; const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Syncing…';
@@ -195,7 +159,7 @@ export function renderSettingsPage(container: HTMLElement): void {
   function renderNlpTab(panel: HTMLElement): void {
     const current = getConfiguredEndpoint();
     panel.innerHTML = `<div class="mt"><h4>${icon('cloud', 15)} Online AI/NLP Endpoint</h4>
-      <p class="hint">The Query Builder always loads the saved Active Schema fresh, validates its availability, and sends rich metadata to this endpoint — then schema-validates whatever comes back. Falls back to the local offline engine automatically if unset, unreachable, or offline.</p>
+      <p class="hint">The Query Builder always loads the saved Active Schema fresh, validates its availability, and sends rich schema metadata (including CASE/DECODE mappings) to this endpoint — then schema-validates whatever comes back, discarding any table/column that doesn't actually exist in the Active Schema. Falls back to the local, fully self-sustained offline engine automatically if unset, unreachable, offline, or on any error/timeout — the Query Builder never becomes unusable.</p>
       <label class="block-label">Endpoint URL<input id="nlpEndpointInput" value="${current || ''}"/></label>
       <div class="row-actions"><button type="button" class="btn btn-primary btn-sm" id="saveNlpEndpointBtn">${icon('save', 14)} Save</button><button type="button" class="btn btn-outline btn-sm" id="clearNlpEndpointBtn">${icon('trash', 14)} Clear (use offline only)</button></div>
       <div id="nlpEndpointResult"></div></div>`;
@@ -206,7 +170,6 @@ export function renderSettingsPage(container: HTMLElement): void {
   function renderDangerTab(panel: HTMLElement): void {
     const active = schemaService.getActiveSchema(); const health = schemaService.getStorageHealth(); const registrySize = estimateStringBytes(JSON.stringify(schemaService.getRegistry()));
     panel.innerHTML = `<div class="mt"><h4>${icon('hard-drive', 15)} Local Storage Health</h4>
-      <p class="hint">Schemas are cached in this browser's local storage for offline use and fast loading. If this browser reports a storage quota error, the schema catalogue has grown too large for this browser to store locally — use the cleanup action below to free up space, or rely on GitHub sync as the source of truth.</p>
       <p class="hint">${icon(health.lastPersistOk ? 'check' : 'alert-triangle', 14)} Last save: ${health.lastPersistOk ? 'OK' : 'Failed'}${health.lastRecovered ? ' (recovered after cleanup)' : ''} · Schema catalogue size: ${formatBytes(registrySize)} · ${schemaService.getAllSchemas().length} schema(s) stored</p>
       ${health.lastError ? `<div class="issue-box mini">${icon('alert-triangle', 14)} ${health.lastError}</div>` : ''}
       <div id="quotaEstimateMount" class="hint mt">Checking available browser storage…</div>

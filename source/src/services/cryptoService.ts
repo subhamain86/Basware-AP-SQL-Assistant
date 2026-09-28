@@ -6,10 +6,6 @@ async function deriveKey(secret: string, salt: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 }
 export interface EncryptedBlob { salt: string; iv: string; ciphertext: string; }
-/** Never throws synchronously; any Web Crypto failure (e.g. a non-secure
- * context where crypto.subtle is unavailable) is caught and reported as a
- * structured result instead of an uncaught exception that could otherwise
- * propagate up through password/vault code as a raw, confusing JS error. */
 export async function encryptWithSecret(secret: string, plaintext: string): Promise<{ ok: true; blob: EncryptedBlob } | { ok: false; error: string }> {
   try {
     if (typeof crypto === 'undefined' || !crypto.subtle) return { ok: false, error: 'Web Crypto API is not available in this browser context.' };
@@ -19,11 +15,6 @@ export async function encryptWithSecret(secret: string, plaintext: string): Prom
     return { ok: true, blob: { salt: toBase64(salt), iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertextBuf)) } };
   } catch (e) { return { ok: false, error: (e as Error)?.message || 'Encryption failed.' }; }
 }
-/** Distinguishes "wrong password" (AES-GCM auth tag mismatch — the ONLY
- * case that should ever be reported to the user as an incorrect
- * credential) from every other kind of failure (malformed blob, missing Web
- * Crypto, corrupted stored data), which get their own distinct reason and
- * must NEVER be shown as "incorrect password". */
 export type DecryptFailureReason = 'wrong-secret-or-corrupted' | 'crypto-unavailable' | 'malformed-blob';
 export async function decryptWithSecret(secret: string, blob: unknown): Promise<{ ok: true; value: string } | { ok: false; reason: DecryptFailureReason; error: string }> {
   if (typeof crypto === 'undefined' || !crypto.subtle) return { ok: false, reason: 'crypto-unavailable', error: 'Web Crypto API is not available in this browser context.' };

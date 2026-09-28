@@ -12,7 +12,12 @@ function renderColumn(spec: SelectedColumnSpec, schema: SchemaModel, dialect: Re
     const table = schema.tables.find((t) => t.name === spec.table);
     const col = table?.columns.find((c) => c.name === spec.column);
     if (col && col.decode?.length) {
-      const alias = spec.alias || `${spec.column}_DESC`;
+      // V15.5 — DECODE is CASE-based functionality: the default alias when
+      // the user hasn't typed a custom one is now simply the column's own
+      // name (matching the spec's own examples, e.g. "END AS status"),
+      // rather than an auto-suffixed "_DESC" — the CASE expression fully
+      // replaces the raw value under the column's own identity.
+      const alias = spec.alias || spec.column;
       return buildSchemaDecodeExpression(`${spec.table}.${spec.column}`, col, alias, dialect);
     }
   }
@@ -26,6 +31,15 @@ function buildWhereClauseFromFilters(state: ReadOnlyQueryState): string {
     return idx === 0 ? clause : `${f.combinator} ${clause}`;
   });
   return parts.join('\n  ');
+}
+
+/** V15.5 — resolves the display expression used to reference a SELECT-list
+ * entry from ORDER BY / HAVING: if the column was given an alias, ORDER BY
+ * should use the alias (cleaner, and required when the entry is an
+ * aggregate/CASE expression that has no bare column reference); otherwise
+ * fall back to the fully-qualified table.column form exactly as before. */
+function resolveOrderByRef(sortAlias: string | undefined, table: string, column: string): string {
+  return sortAlias ? sortAlias : `${table}.${column}`;
 }
 
 export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): string {
@@ -77,7 +91,7 @@ export function buildSelectSQL(state: ReadOnlyQueryState, schema: SchemaModel): 
   if (whereParts.length) bodyLines.push(`WHERE ${whereParts.join('\n  AND ')}`);
   if (state.advanced.groupByColumns.length) bodyLines.push(`GROUP BY ${state.advanced.groupByColumns.join(', ')}`);
   if (state.advanced.havingClause.trim()) bodyLines.push(`HAVING ${state.advanced.havingClause.trim()}`);
-  if (state.sorts.length) bodyLines.push(`ORDER BY ${state.sorts.map((s) => `${s.alias ? s.alias : `${s.table}.${s.column}`} ${s.direction}`).join(', ')}`);
+  if (state.sorts.length) bodyLines.push(`ORDER BY ${state.sorts.map((s) => `${resolveOrderByRef(s.alias, s.table, s.column)} ${s.direction}`).join(', ')}`);
   if (state.advanced.limit && state.dialect !== 'SQL Server') {
     if (state.dialect === 'Oracle') bodyLines.push(`FETCH FIRST ${state.advanced.limit} ROWS ONLY`);
     else bodyLines.push(`LIMIT ${state.advanced.limit}`);

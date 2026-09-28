@@ -7,24 +7,16 @@ import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { assertSyncConfigOrError, safeTrim, safeJsonParse, safeLocalStorageSet } from '../utils/validation';
 import { makeId } from '../utils/id';
 import { beginInternalSync, endInternalSync } from './syncCoordination';
-const CONFIG_KEY = 'sqla.syncconfig.v153';
-const STATUS_KEY = 'sqla.syncstatus.v153';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v153';
-const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v153';
-const SYNC_LOG_KEY = 'sqla.synclog.v153';
+const CONFIG_KEY = 'sqla.syncconfig.v155';
+const STATUS_KEY = 'sqla.syncstatus.v155';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v155';
+const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v155';
+const SYNC_LOG_KEY = 'sqla.synclog.v155';
 const MAX_LOG_ENTRIES = 30;
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
-export interface PullOutcome {
-  ok: boolean; error?: string; code?: SyncErrorCode; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; skippedCount?: number;
-  /** Result of attempting to apply the shared/synchronized Active Schema
-   * pointer found in the same registry payload. Consumed by autoSyncService
-   * to decide on a single, non-intrusive toast (no page refresh, no modal
-   * interruption). */
-  activeSchemaOutcome?: ActiveSchemaSyncOutcome;
-  appliedActiveSchemaName?: string;
-}
+export interface PullOutcome { ok: boolean; error?: string; code?: SyncErrorCode; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; skippedCount?: number; activeSchemaOutcome?: ActiveSchemaSyncOutcome; appliedActiveSchemaName?: string; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 class SyncService {
   private config: SyncConfig = loadConfig();
@@ -49,13 +41,6 @@ class SyncService {
     this.lastSyncErrorCode = code;
     if (typeof console !== 'undefined' && console.debug) console.debug(`[SQLA sync:${context}] code=${code}`, diagnostics);
   }
-  /** Applies the shared Active Schema pointer (if present and valid)
-   * extracted from a just-merged remote registry. Always wrapped in
-   * beginInternalSync/endInternalSync so applying it does not itself
-   * trigger another outbound push (which would otherwise create an
-   * unnecessary push/pull ping-pong between devices). Logs a concise line
-   * to the Synchronization Activity Log for every outcome except
-   * 'skipped-same' (the common, unremarkable steady-state). */
   private applyRemoteActiveSchemaIfPresent(remoteActiveSchemaId: string | undefined, remoteActiveSchemaMeta: any): { outcome: ActiveSchemaSyncOutcome; appliedName?: string } {
     if (!remoteActiveSchemaId) return { outcome: 'none' };
     beginInternalSync();

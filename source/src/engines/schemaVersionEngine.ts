@@ -1,5 +1,5 @@
 import type { SchemaModel, SchemaVersionMeta, SchemaConflict, TableDef, RelationshipDef } from '../types';
-const DEVICE_ID_KEY = 'sqla.deviceTag.v153';
+const DEVICE_ID_KEY = 'sqla.deviceTag.v155';
 export function getDeviceTag(): string {
   let tag = localStorage.getItem(DEVICE_ID_KEY);
   if (!tag) { tag = 'device-' + Math.random().toString(36).slice(2, 8); try { localStorage.setItem(DEVICE_ID_KEY, tag); } catch { } }

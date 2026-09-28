@@ -1,111 +1,120 @@
-# SQL Assistant — V15.4
+# SQL Assistant — V15.5
 
-Baseline: V15.3 (working). This is a **UI organization, theme consistency,
-form usability, and documentation release** — every V15.3 feature and
-workflow is preserved; nothing was removed, simplified, or restructured
-beyond what's described below.
+Baseline: V15.4 (working). This is a **query-generation engine enhancement
+release** — the entire V15.4 UI, theme system, navigation, Schema
+Management, Secret Vault, and cross-device sync are unchanged; only the
+Query Generation Engine got substantially smarter.
 
 ## How to run
 - **Static hosting** (GitHub Pages, SharePoint, OneDrive, any web server):
   upload `index.html` as-is — CSS and JS are fully inlined, no build step.
-- **Local / offline:** double-click `index.html`. Verified both served
-  over HTTP and opened directly via `file://`.
-- `source/` contains the full TypeScript source (`tsc --noEmit` clean) for
-  further development — `index.html` is the only file you need to *deploy*.
+- **Local / offline:** double-click `index.html`.
+- `source/` contains the full TypeScript source (`tsc --noEmit` clean).
 
-## What changed in V15.4
+## What changed in V15.5
 
-### 1. Consistent "SQL Assistant" branding
-Carried forward from V15.3 and re-verified across every route — no stale
-"AP-SQL Assistant" text anywhere in the visible UI, browser tab title reads
-"SQL Assistant · V15.4".
+### 1. DECODE is now CASE-based functionality (not a DB-specific function)
+Every schema-defined or manually-configured value-to-display mapping —
+regardless of SQL dialect, including Oracle — now generates a standard,
+portable `CASE WHEN ... THEN ... ELSE 'Unknown' END` expression. The
+application **never** emits a database-specific `DECODE()` function call
+anymore. Verified: selecting a CASE/DECODE-mapped column produces exactly
+```sql
+CASE
+    WHEN PO_HEADER.STATUS = 'O' THEN 'Open'
+    WHEN PO_HEADER.STATUS = 'C' THEN 'Closed'
+    WHEN PO_HEADER.STATUS = 'H' THEN 'On Hold'
+    ELSE 'Unknown'
+END AS STATUS
+```
+Manual Schema Update's DECODE guidance, live preview, and example are all
+updated to reflect this — the preview literally renders as CASE, live, as
+you type.
 
-### 2 & 3. Describe What You Need + Generated SQL — now side by side
-Both the **Read Only Query Builder** and **Query Builder for CR** place
-"Describe What You Need (Optional)" (left) and "Generated SQL" (right)
-inside a new responsive `.builder-top-grid` on screens ≥1100px wide:
-- Equal column widths, `align-items: stretch` for equal card heights.
-- **Pixel-exact aligned top edges** — caught and fixed a real CSS
-  specificity tie (`.builder-section:first-of-type` vs
-  `.builder-top-grid .builder-section`) that was silently adding an extra
-  6.4px of top margin to only the left card; added a higher-specificity
-  override so both cards' top edges are now guaranteed flush regardless
-  of any other stylesheet ordering.
-- A clear, deliberate 28px gap between the cards (no touching, no
-  excessive whitespace).
-- Below 1100px, the grid collapses to a single stacked column
-  automatically — verified via Playwright at a 900px viewport.
-- Manual Selectors (with Advanced Options in its tabs) and Build Query
-  remain as their own full-width section directly below, preserving the
-  intended workflow: **Describe → Manual Selectors/Advanced Options →
-  Build Query → Generated SQL**.
-- The CR Query Builder uses the exact same grid/card/heading styles, so
-  the two builders "feel like two modes of the same application."
+### 2. Query Generation Pipeline — genuinely complex SELECT queries
+The engine now runs a real, staged pipeline (not a single regex blob):
+table/column resolution → **aggregation resolution** (SUM/AVG/COUNT/MIN/
+MAX) → filter resolution → **GROUP BY resolution** (explicit "by X", or
+implied whenever an aggregate is mixed with plain columns) → **HAVING
+resolution** (a comparison applied to an aggregate) → related/EXISTS
+resolution → sort/limit resolution → SQL generation → schema validation.
 
-### 4. Global theme-compatibility pass
-- Added dedicated theme variables for disabled text, error text, success
-  text, and secondary-button colors, wired into the existing `--input-*`
-  variables introduced in V15.3.
-- **Added `color-scheme: light` / `color-scheme: dark`** per theme — this
-  was a real, previously-uncovered gap: without it, native browser UI that
-  CSS can't reach directly (select-dropdown panels/arrows, date/time
-  pickers, autofill highlighting) could keep following the OS-level theme
-  even while every custom-styled control correctly followed the app's
-  theme. Confirmed via Playwright that `color-scheme` now flips with the
-  theme toggle exactly like every other themed property.
-- Disabled inputs/textareas/selects now use full opacity with a dedicated
-  `--disabled-text` color instead of a washed-out `opacity: .55` (which
-  could become unreadable in dark mode) — still clearly "disabled," but
-  legible in both themes.
-- Re-verified (Playwright): switching Light ⇄ Dark changes both the
-  background **and** the text color of live form controls immediately,
-  with zero page navigation/refresh.
+Verified end-to-end with the exact complex example from the spec:
+> "Show the total invoice amount by supplier for the current year,
+> including supplier name, invoice count, average invoice amount, and
+> only suppliers whose total invoice amount is greater than 100000. Sort
+> by total amount descending and show the top 20 suppliers."
 
-### 5. Manual Schema Update — DECODE guidance (new)
-The DECODE field in "Add/Edit Row" now includes, directly above the input:
-- A plain-language explanation of what DECODE does (display label instead
-  of raw stored value) and the exact `RAW=Label` per-line format the
-  application actually parses (matches `schemaService.upsertRow()`
-  byte-for-byte — no invented syntax).
-- A worked example table showing **database value → display value**
-  (`1 → Approved`, `2 → Rejected`, `3 → Pending`) next to the exact text
-  to type, in a two-column, theme-aware layout.
-- A collapsible "Show the SQL this example would generate" section that
-  calls the app's real `buildSchemaDecodeExpression()` to render the
-  actual Oracle `DECODE(...)` and actual ANSI `CASE...END` output for that
-  example — so the guidance can never drift from what the app really
-  generates.
-- A **live preview**: as the user types their own mappings, a preview box
-  updates immediately showing how many mappings were detected and the
-  real SQL expression that would be produced from them — again using the
-  same parser/validator/SQL-builder as the actual save path.
-- **Save-time validation**: malformed DECODE input (e.g. a duplicate raw
-  value) is now caught by `validateDecodeEntries()` both live and again at
-  Save, and is never silently accepted — confirmed via Playwright by
-  entering a duplicate raw value and seeing the exact validation message.
-- The example is purely illustrative — it is never written into schema
-  data automatically; only clicking Save (with valid input) persists
-  anything, exactly as before.
-- The whole block (help text, example table, code samples, live preview,
-  validation messages) uses only shared theme variables, confirmed
-  readable in both Light and Dark.
+produces one coherent statement with `SUM`, `AVG`, `COUNT`, automatic
+JOINs across 3 tables (via the Active Schema's real relationships),
+`GROUP BY`, `HAVING SUM(...) > 100000`, `ORDER BY ... DESC`, and
+`FETCH FIRST 20 ROWS ONLY`.
+
+**Bugs found and fixed while building this test** (a good sign the
+testing was real, not superficial):
+- A relative-date SQL expression (`DATE_TRUNC('YEAR', CURRENT_DATE)`) was
+  being wrapped in an extra pair of string quotes, turning valid SQL into
+  a broken string literal — fixed in the filter-rendering engine to
+  recognize SQL date expressions and pass them through unquoted.
+- A short generic column name (e.g. a bare `AMOUNT` on an unrelated
+  table) could "steal" a match meant for a more specific compound column
+  (`INVOICE_AMOUNT`) due to plain substring matching — fixed by resolving
+  longer/more specific column names first and skipping a generic column
+  once its concept is already covered.
+- Both the aggregate and HAVING resolvers only checked the *first*
+  occurrence of a phrase, so a column mentioned twice for two different
+  purposes (once for SUM, later for a HAVING comparison) missed the
+  second occurrence — fixed to scan every occurrence.
+- A direction word ("descending") not immediately followed by a comma/
+  period (e.g. "...descending and show the top 20...") was being
+  swallowed into the sort-column phrase instead of recognized as the
+  direction — fixed to match on a word boundary instead of requiring an
+  immediate sentence terminator.
+
+### 3. Manual Selectors as a structured query definition
+Manual Selectors were already capable of producing every advanced SQL
+shape (JOINs, filters, GROUP BY/HAVING, CTEs, EXISTS, related counts,
+hierarchies) — this is unchanged and confirmed still fully functional.
+
+### 4. Describe + Manual Selectors combine, non-destructively
+`store.mergeReadOnlyFromNlp()` and `aiService.generateSQL()` were both
+extended to additively merge the new aggregate/GROUP BY/HAVING/related-
+condition signals the same way tables/columns/filters were already merged
+in V15.4: **every merge only ever adds** to what the user has manually
+selected — an explicit Manual Selector choice is never removed or
+replaced by natural-language intent. Verified: manually selecting
+`INVOICE_HEADER` and then describing a related requirement keeps
+`INVOICE_HEADER` in the final SQL.
+
+### 5. Self-sustained (offline) engine + Online AI, both schema-grounded
+The local engine performs the entire pipeline above with zero network
+calls, and is what's actually used in this test environment (no online
+endpoint configured) — SQL is still generated correctly and the "Offline/
+local engine" badge is shown. When an online endpoint IS configured and
+reachable, it's given the full Active Schema context (including CASE/
+DECODE mappings) and any table/column it references that isn't in the
+Active Schema is discarded rather than trusted. Any online failure,
+timeout, or unavailability falls through to the local engine silently —
+the Query Builder never becomes unusable.
+
+### 6. Query explanation (new)
+The Generated SQL panel gained an "Explain Query" button (alongside the
+existing Copy/Clear/Validate/Regenerate/Optimize) that reads the current
+builder state and produces a plain-language summary — tables/joins used,
+aggregations, filters, GROUP BY, HAVING, ORDER BY, LIMIT, and CTEs —
+without altering the existing Generated SQL panel's structure.
 
 ## Regression testing performed
-- `tsc --noEmit` (strict): clean, 0 errors.
-- Playwright: all 7 routes render with zero console/page errors over both
-  HTTP and `file://`.
-- Playwright: branding sweep — zero old-name occurrences.
-- Playwright: Read Only Query Builder side-by-side grid at 1440px width —
-  confirmed identical top edge (y), identical height, identical width,
-  28px gap; confirmed the grid collapses to a single stacked column at
-  900px width.
-- Playwright: CR Query Builder side-by-side grid confirmed present and
-  correctly positioned.
-- Playwright: table selection → SQL generation still works with no page
-  refresh (functional regression check).
-- Playwright: theme switch confirmed to update textarea background,
-  text color, and `color-scheme` simultaneously, with zero navigation.
-- Playwright: Manual Schema Update DECODE — help block, example table,
-  example code, live preview (after typing valid mappings), and live
-  validation error (after typing a duplicate raw value) all confirmed
-  present and correct after unlocking Settings with the admin password.
+- `tsc --noEmit`: clean.
+- Playwright: all 7 routes, zero console/page errors.
+- Playwright: DECODE→CASE conversion confirmed (no `DECODE(` anywhere).
+- Playwright: the exact complex spec example produces SUM/AVG/COUNT/JOIN/
+  GROUP BY/HAVING/ORDER BY DESC/LIMIT 20 correctly.
+- Playwright: Manual Selectors preserved when combined with Describe.
+- Playwright: offline fallback confirmed (SQL still generated, correctly
+  labeled, with zero online endpoint configured).
+- Playwright: Explain Query button and output confirmed.
+- Playwright: Manual Schema Update DECODE help/live-preview confirmed
+  CASE-based (not DECODE()).
+- Playwright: V15.4 UI (side-by-side Describe/Generated SQL grid, aligned
+  top edges) confirmed unchanged.

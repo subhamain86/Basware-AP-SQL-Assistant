@@ -7,7 +7,7 @@ export function renderQuickstartPage(container: HTMLElement, onNavigate: (r: Rou
   container.innerHTML = `<div class="page">
     <div class="hero-card">
       <h1>Welcome — what does this tool do?</h1>
-      <p class="lead">SQL Assistant helps you describe what you need in plain language — or make manual selections, or combine both. Every request, online or offline, always uses your currently saved Active Schema as the single source of truth, which is kept identical across every authorized device automatically. When you create, import, or update a schema, it is automatically synchronized to the shared repository once the Secret Vault is unlocked.</p>
+      <p class="lead">SQL Assistant helps you describe what you need in plain language — including complex requirements with totals, averages, grouping, filtering, and sorting — or make manual selections, or combine both. Every request, online or offline, always uses your currently saved Active Schema as the single source of truth, kept identical across every authorized device automatically.</p>
       <h3 class="mt">${icon('database')} Active schema: ${schema.name}</h3>
       <div class="chip-row">${modules.map((m) => `<span class="chip">${m}</span>`).join('')}</div>
     </div>
@@ -16,7 +16,7 @@ export function renderQuickstartPage(container: HTMLElement, onNavigate: (r: Rou
       <div class="feature-card" data-nav="readonly">
         <div class="feature-icon">${icon('table', 22)}</div>
         <h3>Read Only Query Builder</h3>
-        <p>Try "Show invoices with their organization" — joins are generated for you.</p>
+        <p>Try "Show total invoice amount by supplier, only over 100000, sorted descending, top 20" — the full pipeline resolves aggregation, GROUP BY, HAVING, ORDER BY, and LIMIT automatically.</p>
         <span class="card-link">Open ${icon('arrow-right', 16)}</span>
       </div>
       <div class="feature-card" data-nav="cr">

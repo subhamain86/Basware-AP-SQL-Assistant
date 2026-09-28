@@ -1,4 +1,4 @@
-export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes' | 'eye' | 'git-branch' | 'route' | 'checkbox-checked' | 'server' | 'history' | 'hard-drive' | 'broom' | 'columns-2';
+export type IconName = 'menu' | 'database' | 'table' | 'filter' | 'code' | 'bug' | 'sun' | 'moon' | 'monitor' | 'info' | 'download' | 'upload' | 'lock' | 'unlock' | 'shield' | 'plus' | 'trash' | 'copy' | 'play' | 'wand' | 'compass' | 'check' | 'x' | 'chevron-right' | 'chevron-left' | 'chevron-down' | 'search' | 'link' | 'save' | 'alert-triangle' | 'logo' | 'refresh' | 'sparkles' | 'list' | 'columns' | 'sort-asc' | 'layers' | 'sliders' | 'edit' | 'clipboard-check' | 'arrow-right' | 'zap' | 'settings' | 'grid' | 'key' | 'shield-alert' | 'folder-sync' | 'file-plus' | 'file-minus' | 'home' | 'layout-grid' | 'safe' | 'clock' | 'github' | 'folder' | 'clipboard-list' | 'wifi' | 'wifi-off' | 'cloud' | 'user' | 'boxes' | 'eye' | 'git-branch' | 'route' | 'checkbox-checked' | 'server' | 'history' | 'hard-drive' | 'broom' | 'columns-2' | 'brain';
 const PATHS: Record<IconName, string> = {
   menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>',
@@ -69,7 +69,8 @@ const PATHS: Record<IconName, string> = {
   server: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><circle cx="7" cy="7.5" r="0.8" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r="0.8" fill="currentColor" stroke="none"/>',
   history: '<circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,14"/><path d="M3.5 9 2 7.5 M3.5 9 5 7.5"/>',
   'hard-drive': '<line x1="3" y1="12" x2="21" y2="12"/><path d="M3 12v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/><path d="M3 12 6 4h12l3 8"/><circle cx="7" cy="16" r="0.7" fill="currentColor" stroke="none"/>',
-  broom: '<path d="M4 20 14 10"/><path d="M12 4l2 2-6 6-4-2z"/><path d="M6 14l-2 6 6-2"/>'
+  broom: '<path d="M4 20 14 10"/><path d="M12 4l2 2-6 6-4-2z"/><path d="M6 14l-2 6 6-2"/>',
+  brain: '<path d="M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 2.8V13a3 3 0 0 0 2 2.8V16a3 3 0 0 0 3 3"/><path d="M15 4a3 3 0 0 1 3 3v1a3 3 0 0 1 2 2.8V13a3 3 0 0 1-2 2.8V16a3 3 0 0 1-3 3"/><path d="M9 4v15"/><path d="M15 4v15"/>'
 };
 export function icon(name: IconName, size = 18, extraClass = ''): string {
   if (name === 'logo') return PATHS.logo;

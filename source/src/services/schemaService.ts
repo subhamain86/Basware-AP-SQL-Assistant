@@ -5,7 +5,7 @@ import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
 import { stampNewVersion, sameLogicalSchema, getDeviceTag } from '../engines/schemaVersionEngine';
 import { makeId } from '../utils/id';
 import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes } from '../utils/validation';
-const STORAGE_KEY = 'sqla.registry.v153';
+const STORAGE_KEY = 'sqla.registry.v155';
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 export interface StorageHealth { bytesUsed: number; lastPersistOk: boolean; lastError: string | null; lastRecovered: boolean; }
 function defaultActiveSchemaMeta(): ActiveSchemaMeta { return { updatedAt: new Date(0).toISOString(), updatedByDevice: 'none', configVersion: 0 }; }
@@ -67,10 +67,6 @@ export class SchemaService {
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   getRegistry(): SchemaRegistry { return this.registry; }
   getActiveSchema(): SchemaModel { const found = this.registry.schemas.find((s) => s.id === this.registry.activeSchemaId); return found || this.registry.schemas[0]; }
-  /** true only if the currently-set activeSchemaId does NOT correspond to
-   * any schema in the registry — callers (e.g. the Schema page) surface the
-   * required message when this is true, rather than silently falling back
-   * to schemas[0] as getActiveSchema() must for backward-compatible safety. */
   isActiveSchemaMissing(): boolean { return !this.registry.schemas.some((s) => s.id === this.registry.activeSchemaId); }
   getActiveSchemaMeta(): ActiveSchemaMeta { return this.registry.activeSchemaMeta || defaultActiveSchemaMeta(); }
   getAllSchemas(): SchemaModel[] { return this.registry.schemas; }
@@ -78,11 +74,6 @@ export class SchemaService {
   getModulesForSchema(schemaId: string): string[] { const s = this.getSchemaById(schemaId); if (!s) return []; return Array.from(new Set(s.tables.map((t) => t.module))).sort(); }
   getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
   getAllSchemaNames(excludeId?: string): string[] { return this.registry.schemas.filter((s) => s.id !== excludeId).map((s) => s.name); }
-  /** The LOCAL/admin-driven path (user clicks "Set Active" in the UI).
-   * Bumps activeSchemaMeta (configVersion++, updatedAt=now,
-   * updatedByDevice=this device) so that when this registry is next pushed
-   * to the repository, other devices can correctly recognize this as the
-   * newest Active Schema selection via last-write-wins comparison. */
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
     this.registry.schemas.forEach((s) => { s.status = s.id === schemaId ? 'active' : (s.status === 'active' ? 'inactive' : s.status); });
@@ -91,15 +82,6 @@ export class SchemaService {
     this.registry.activeSchemaMeta = { updatedAt: new Date().toISOString(), updatedByDevice: getDeviceTag(), configVersion: prevVersion + 1 };
     this.persist();
   }
-  /** The REMOTE/sync-driven path. Called by syncService after a successful
-   * pull/discovery when the remote registry.json carries a different
-   * activeSchemaId than this device currently has. Implements "no manual
-   * selection required on Machine B" via deterministic last-write-wins: the
-   * remote pointer is only applied if its configVersion (or, as a
-   * tie-breaker, its updatedAt) is strictly newer than the local one. Also
-   * satisfies "Active Schema Must Be Validated" — a remote id that doesn't
-   * correspond to any already-merged local schema is safely rejected as
-   * 'not-found' rather than silently switching to an unrelated schema. */
   applyRemoteActiveSchema(remoteId: string | undefined, remoteMeta: ActiveSchemaMeta | undefined): ActiveSchemaSyncOutcome {
     if (!remoteId) return 'none';
     if (remoteId === this.registry.activeSchemaId) return 'skipped-same';

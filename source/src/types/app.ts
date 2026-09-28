@@ -15,11 +15,5 @@ export interface PendingConflict { id: string; schemaId: string; schemaName: str
 export type SyncLogEntryKind = 'discovery' | 'push' | 'pull' | 'error' | 'suppressed';
 export interface SyncLogEntry { id: string; timestamp: string; kind: SyncLogEntryKind; message: string; }
 export interface StorageUsageEstimate { bytesUsed: number; approxQuotaBytes: number | null; percentUsed: number | null; }
-/** Distinct internal error taxonomies so different failure classes are
- * never confused with one another in the UI (e.g. a GitHub auth failure
- * must never be displayed as "incorrect password", and a schema validation
- * failure must never be displayed as a credential error). These are
- * INTERNAL states; user-facing text is always a clean, separate message
- * derived from the code, never a raw exception. */
 export type VaultErrorCode = 'incorrect-password' | 'empty-password' | 'vault-not-initialized' | 'vault-corrupted' | 'missing-config' | 'github-auth-failed' | 'network-error' | 'encryption-error' | 'none';
 export type SyncErrorCode = 'invalid-json' | 'empty-file' | 'invalid-root-structure' | 'missing-schema-name' | 'invalid-module-structure' | 'invalid-table-structure' | 'invalid-column-structure' | 'invalid-data-type' | 'invalid-relationship-structure' | 'invalid-pk-fk-definition' | 'unexpected-property-type' | 'unsupported-schema-version' | 'corrupted-file' | 'incorrect-file-path' | 'incorrect-file-selection' | 'encoding-issue' | 'github-sync-issue' | 'network-error' | 'not-found' | 'none';

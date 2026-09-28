@@ -11,11 +11,6 @@ export function safeUpperTrim(value: unknown, fallback = ''): string {
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
-/** Safe wrappers for operations that previously could throw "Cannot read
- * properties of undefined (reading 'trim'/'split'/...)" when called on a
- * value that turned out not to be a string/array at runtime (e.g. malformed
- * sync payloads, corrupted local storage). Used throughout sync/vault code
- * so a single malformed value can never crash a whole operation. */
 export function safeArray<T = unknown>(value: unknown, fallback: T[] = []): T[] {
   return Array.isArray(value) ? (value as T[]) : fallback;
 }

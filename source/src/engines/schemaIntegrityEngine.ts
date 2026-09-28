@@ -2,12 +2,6 @@ import type { SchemaModel, TableDef, SchemaIntegrityResult, SchemaIntegrityIssue
 import { VALID_DATA_TYPES } from '../types';
 import { safeTrim, safeUpperTrim, safeArray, sanitizeIncomingSchema } from '../utils/validation';
 
-/** Structural checks retained for the interactive Manual Schema Editor (add/
- * edit a single row) where a strict, immediate error is genuinely useful
- * feedback to a human actively typing. This is intentionally NOT used for
- * remote/incoming file validation (see validateAndSanitizeRegistry below) —
- * a strict per-field error there would reject an entire multi-device
- * registry over one legitimate structural variation. */
 export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
   const seenTableColumn = new Set<string>();
@@ -89,12 +83,6 @@ function sanitizeAndValidateSingleSchema(rawSchema: unknown): { schema: SchemaMo
   structural.issues.forEach((i) => diagnostics.push(`[${i.severity}] ${name}: ${i.message}`));
   return { schema: sanitized, diagnostics };
 }
-/** Replaces an all-or-nothing registry validator for every remote/sync code
- * path (GitHub pull, public discovery). Loads every schema that is
- * individually well-formed, skips (and reports internally) only the ones
- * that are not, and never rejects the whole registry over a single bad
- * entry — this is what lets multiple schemas remain available across every
- * device even if one entry has a legitimate structural quirk. */
 export function validateAndSanitizeRegistry(raw: unknown): LenientRegistryResult {
   const diagnostics: string[] = [];
   if (raw === null || raw === undefined) return { ok: false, code: 'empty-file', validSchemas: [], skippedCount: 0, skippedReasons: [], internalDiagnostics: ['remote content was null/undefined'] };
@@ -115,9 +103,6 @@ export function validateAndSanitizeRegistry(raw: unknown): LenientRegistryResult
   }
   return { ok: true, code: 'none', validSchemas, skippedCount: skipped, skippedReasons, internalDiagnostics: diagnostics };
 }
-/** Maps an internal SyncErrorCode to a clean, non-technical, user-facing
- * message. Never includes raw JS exception text — that is only ever logged
- * via console.debug for developers. */
 export function describeSyncErrorForUser(code: SyncErrorCode): string {
   switch (code) {
     case 'none': return '';

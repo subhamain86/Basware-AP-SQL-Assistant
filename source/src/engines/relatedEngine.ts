@@ -4,11 +4,6 @@ export function relationshipsInvolving(schema: SchemaModel, table: string): Rela
   return schema.relationships.filter((r) => r.fromTable === table || r.toTable === table);
 }
 
-/** Tables reachable via a direct PK/FK relationship from any of the currently
- * selected tables, but not already selected themselves — used to populate
- * the "related table" pickers for EXISTS / related-count so the user is
- * never asked to hand-write a JOIN condition when the Active Schema already
- * knows the relationship. */
 export function relatableTables(schema: SchemaModel, selectedTables: string[]): { table: string; relationshipId: string }[] {
   const seen = new Map<string, string>();
   selectedTables.forEach((t) => {
@@ -32,9 +27,6 @@ function correlationCondition(rel: RelationshipDef, anchorTable: string, innerTa
   return `${anchorTable}.${rel.toColumn} = ${innerTable}.${rel.fromColumn}`;
 }
 
-/** Correlated EXISTS/NOT EXISTS predicate for "only show records connected
- * to another table". Silently skipped by the caller if the relationship no
- * longer resolves (e.g. after an Active Schema switch). */
 export function buildRelatedFilterClause(spec: RelatedFilterSpec, anchorTable: string, schema: SchemaModel): string | null {
   const rel = findRelationship(schema, spec.relationshipId, anchorTable, spec.relatedTable);
   if (!rel) return null;
@@ -42,8 +34,6 @@ export function buildRelatedFilterClause(spec: RelatedFilterSpec, anchorTable: s
   return `${spec.mode} (SELECT 1 FROM ${spec.relatedTable} WHERE ${cond})`;
 }
 
-/** Correlated `(SELECT COUNT(*) ...) AS alias` scalar subquery for "show a
- * related count". */
 export function buildRelatedCountSelect(spec: RelatedCountSpec, anchorTable: string, schema: SchemaModel): string | null {
   const rel = findRelationship(schema, spec.relationshipId, anchorTable, spec.relatedTable);
   if (!rel) return null;
@@ -54,10 +44,6 @@ export function buildRelatedCountSelect(spec: RelatedCountSpec, anchorTable: str
 
 export interface HierarchyBlock { cteLines: string[]; fromClause: string | null; usesRecursiveKeyword: boolean; selectColumns: string; }
 
-/** Recursive hierarchy / "org chart" block. Standard dialects get a proper
- * `WITH RECURSIVE` CTE (with a `depth` tracking column so an optional max
- * depth can be enforced); Oracle gets `CONNECT BY PRIOR` instead, the
- * dialect-idiomatic form for hierarchical queries. */
 export function buildHierarchyBlock(hierarchy: HierarchySpec, dialect: Dialect): HierarchyBlock {
   if (!hierarchy.enabled || !hierarchy.table || !hierarchy.parentColumn || !hierarchy.childColumn) {
     return { cteLines: [], fromClause: null, usesRecursiveKeyword: false, selectColumns: '*' };

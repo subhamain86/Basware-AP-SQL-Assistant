@@ -27,11 +27,6 @@ function scheduleBackgroundPush(): void {
     else toastFn('error', `Automatic sync failed: ${result.error || 'unknown error'}.`);
   }, PUSH_DEBOUNCE_MS);
 }
-/** Surfaces the outcome of a cross-device Active Schema sync as a single,
- * subtle, non-blocking toast (no modal interruption, no page refresh).
- * 'skipped-same' and 'skipped-stale' are the common, unremarkable
- * steady-state and are intentionally silent — only a genuine change
- * ('applied') or a real problem ('not-found') is surfaced. */
 function announceActiveSchemaOutcome(result: { activeSchemaOutcome?: string; appliedActiveSchemaName?: string }): void {
   if (result.activeSchemaOutcome === 'applied' && result.appliedActiveSchemaName) {
     toastFn('info', `Active Schema updated to match another device's selection: "${result.appliedActiveSchemaName}".`);
@@ -59,11 +54,6 @@ export async function performPublicDiscovery(reason: string): Promise<void> {
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) refreshed from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
     announceActiveSchemaOutcome(result);
   }
-  // A failed public (unauthenticated) discovery on app load is intentionally
-  // silent in the UI — it runs automatically and continuously in the
-  // background. Genuine, actionable failures are still visible via the
-  // Synchronization Activity Log and the explicit "Sync with GitHub Now"
-  // button elsewhere.
 }
 export async function handleVaultUnlocked(): Promise<void> { await performDiscovery('vault-unlocked'); }
 export function initAutoSync(): void { if (initialized) return; initialized = true; schemaService.subscribe(() => { scheduleBackgroundPush(); }); }

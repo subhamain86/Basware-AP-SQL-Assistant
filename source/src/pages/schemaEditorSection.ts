@@ -11,34 +11,28 @@ import { secretVaultService } from '../services/secretVaultService';
 import type { SchemaEditorRow, ColumnDataType, ColumnDef, DecodeEntry } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
-/** V15.4 — parses the exact same "RAW=Label" per-line/semicolon-separated
- * text format that schemaService.upsertRow() uses when it actually saves a
- * column's decode mapping (see schemaService.ts), so the live preview and
- * validation shown here can never drift out of sync with what really gets
- * stored and later turned into SQL by decodeEngine.ts. */
 function parseDecodeTextForPreview(decodeText: string): DecodeEntry[] {
   return decodeText.split(/[\n;]+/).map((l) => l.trim()).filter((l) => l.length > 0).map((line) => {
     const idx = line.indexOf('=');
     return idx === -1 ? { rawValue: line, label: line } : { rawValue: line.slice(0, idx).trim(), label: line.slice(idx + 1).trim() };
   });
 }
-
-/** A fixed, clearly-labeled illustrative example — never written into the
- * user's actual schema, only ever rendered as static help text so users
- * understand the "database value → display value" mapping and the exact
- * "RAW=Label" format before they type their own. */
 const DECODE_EXAMPLE_ENTRIES: DecodeEntry[] = [
   { rawValue: '1', label: 'Approved' },
   { rawValue: '2', label: 'Rejected' },
   { rawValue: '3', label: 'Pending' }
 ];
+/** V15.5 — this help block explains DECODE explicitly as CASE-based
+ * functionality: the worked example's generated SQL preview now shows only
+ * ONE standard CASE expression (not a separate Oracle-vs-ANSI split, since
+ * V15.5 no longer branches DECODE output by dialect at all — see
+ * decodeEngine.buildSchemaDecodeExpression). */
 function renderDecodeHelpBlock(): string {
   const exampleColumn: ColumnDef = { name: 'STATUS', label: 'Status', type: 'VARCHAR', nullable: false, description: '', decode: DECODE_EXAMPLE_ENTRIES };
-  const exampleOracle = buildSchemaDecodeExpression('STATUS', exampleColumn, 'STATUS_DESC', 'Oracle');
-  const exampleAnsi = buildSchemaDecodeExpression('STATUS', exampleColumn, 'STATUS_DESC', 'PostgreSQL');
+  const exampleSql = buildSchemaDecodeExpression('STATUS', exampleColumn, 'STATUS', 'Generic');
   return `<div class="decode-help">
-    <div class="decode-help-head">${icon('sparkles', 14)} <strong>What is DECODE for?</strong></div>
-    <p class="hint">DECODE lets SQL Assistant show a readable label (e.g. "Approved") instead of a raw stored code (e.g. "1") whenever this column is selected with "Schema DECODE" in the Query Builder — the raw value is never changed, only how it is displayed in the generated SQL.</p>
+    <div class="decode-help-head">${icon('sparkles', 14)} <strong>What is DECODE/CASE for?</strong></div>
+    <p class="hint">SQL Assistant treats DECODE as CASE-based functionality: it lets the Query Builder show a readable label (e.g. "Approved") instead of a raw stored code (e.g. "1") whenever this column is selected with "Schema CASE/DECODE" — the raw value is never changed in the database, only how it is displayed in the generated SQL, and it is ALWAYS rendered as a standard, portable <code>CASE WHEN ... THEN ... END</code> expression — never a database-specific <code>DECODE()</code> function call.</p>
     <p class="hint"><strong>Enter one mapping per line</strong>, as <code>RAW=Label</code> — the part before <code>=</code> is the exact database value; the part after <code>=</code> is what should be displayed instead. Quotes are added automatically — do not type quotes yourself. A semicolon can also separate mappings instead of a new line.</p>
     <div class="decode-example">
       <div class="decode-example-col">
@@ -54,8 +48,7 @@ function renderDecodeHelpBlock(): string {
     </div>
     <details class="decode-sql-preview-details">
       <summary>${icon('code', 13)} Show the SQL this example would generate</summary>
-      <p class="hint">Oracle dialect:</p><pre class="sql-output decode-sql-mini">${exampleOracle}</pre>
-      <p class="hint">Other dialects (SQL Server / PostgreSQL / MySQL / Generic):</p><pre class="sql-output decode-sql-mini">${exampleAnsi}</pre>
+      <pre class="sql-output decode-sql-mini">${exampleSql}</pre>
     </details>
   </div>`;
 }
@@ -138,7 +131,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       <h4 class="mt">Metadata</h4>
       <label class="block-label">Alias<input id="f_alias" value="${r.alias}"/></label>
       ${renderDecodeHelpBlock()}
-      <label class="block-label">Decode mappings<textarea id="f_decode" rows="4" placeholder="1=Approved&#10;2=Rejected&#10;3=Pending">${r.decodeText}</textarea></label>
+      <label class="block-label">Decode / CASE mappings<textarea id="f_decode" rows="4" placeholder="1=Approved&#10;2=Rejected&#10;3=Pending">${r.decodeText}</textarea></label>
       <div id="decodePreviewMount" class="decode-preview"></div>
       <div id="decodeIssuesLive"></div>
       <label class="inline-check"><input type="checkbox" id="f_isPrimaryKey" ${r.isPrimaryKey ? 'checked' : ''}/> Primary Key</label>
@@ -150,11 +143,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     const modal = openModal(`${icon(isEdit ? 'edit' : 'plus', 18)} ${isEdit ? 'Edit Row' : 'Add New Row'}`, bodyHtml, { wide: true });
     const form = modal.element.querySelector<HTMLFormElement>('#rowForm')!;
     form.querySelector('#f_isForeignKey')?.addEventListener('change', (e) => { const fkFields = form.querySelector<HTMLElement>('#fkFields'); if (fkFields) fkFields.hidden = !(e.target as HTMLInputElement).checked; });
-    // V15.4 — live DECODE preview + validation as the user types, using the
-    // exact same parser/validator/SQL-builder the app uses when actually
-    // saving and later generating SQL, so what's previewed here can never
-    // drift from what really happens. Purely additive: it never mutates
-    // schema data — only Save does that, unchanged from before.
+    form.querySelector('#rowFormCancel')?.addEventListener('click', () => modal.close());
     function renderDecodePreview(): void {
       const decodeInput = form.querySelector<HTMLTextAreaElement>('#f_decode'); if (!decodeInput) return;
       const previewMount = form.querySelector<HTMLElement>('#decodePreviewMount');
@@ -168,24 +157,18 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
         if (issues.length || entries.length === 0) { previewMount.innerHTML = ''; return; }
         const colName = (form.querySelector<HTMLInputElement>('#f_columnName')?.value || 'COLUMN').trim() || 'COLUMN';
         const previewCol: ColumnDef = { name: colName, label: colName, type: 'VARCHAR', nullable: true, description: '', decode: entries };
-        const sql = buildSchemaDecodeExpression(colName, previewCol, `${colName}_DESC`, 'Oracle');
-        previewMount.innerHTML = `<div class="decode-live-preview"><div class="decode-help-head">${icon('eye', 13)} <strong>Preview</strong> <span class="hint-inline">(${entries.length} mapping${entries.length === 1 ? '' : 's'} detected)</span></div><pre class="sql-output decode-sql-mini">${sql}</pre></div>`;
+        const sql = buildSchemaDecodeExpression(colName, previewCol, colName, 'Generic');
+        previewMount.innerHTML = `<div class="decode-live-preview"><div class="decode-help-head">${icon('eye', 13)} <strong>Preview</strong> <span class="hint-inline">(${entries.length} mapping${entries.length === 1 ? '' : 's'} detected — rendered as CASE)</span></div><pre class="sql-output decode-sql-mini">${sql}</pre></div>`;
       }
     }
     form.querySelector('#f_decode')?.addEventListener('input', renderDecodePreview);
     renderDecodePreview();
-    form.querySelector('#rowFormCancel')?.addEventListener('click', () => modal.close());
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const issuesMount = form.querySelector<HTMLElement>('#rowFormIssues')!;
       const candidate: SchemaEditorRow = { rowId: '', module: (form.querySelector<HTMLInputElement>('#f_module')!.value || 'General').trim(), tableName: form.querySelector<HTMLInputElement>('#f_tableName')!.value.trim(), tableDescription: form.querySelector<HTMLInputElement>('#f_tableDescription')!.value.trim(), columnName: form.querySelector<HTMLInputElement>('#f_columnName')!.value.trim(), columnDescription: form.querySelector<HTMLInputElement>('#f_columnDescription')!.value.trim(), dataType: form.querySelector<HTMLSelectElement>('#f_dataType')!.value as ColumnDataType, length: form.querySelector<HTMLInputElement>('#f_length')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_length')!.value, 10) : null, precision: form.querySelector<HTMLInputElement>('#f_precision')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_precision')!.value, 10) : null, nullable: form.querySelector<HTMLInputElement>('#f_nullable')!.checked, alias: form.querySelector<HTMLInputElement>('#f_alias')!.value.trim(), decodeText: form.querySelector<HTMLTextAreaElement>('#f_decode')!.value, isPrimaryKey: form.querySelector<HTMLInputElement>('#f_isPrimaryKey')!.checked, isForeignKey: form.querySelector<HTMLInputElement>('#f_isForeignKey')!.checked, fkTable: form.querySelector<HTMLInputElement>('#f_fkTable')?.value.trim() || '', fkColumn: form.querySelector<HTMLInputElement>('#f_fkColumn')?.value.trim() || '' };
       const preIssues = validateSingleRowAgainstSchema(schema, candidate.tableName, candidate.columnName, isEdit ? existing!.tableName : null, isEdit ? existing!.columnName : null);
       const requiredIssues: string[] = []; if (!candidate.tableName) requiredIssues.push('Table Name is required.'); if (!candidate.columnName) requiredIssues.push('Column Name is required.');
-      // V15.4 — DECODE is validated at Save time too (not just live-as-you-
-      // type), using the identical parser/validator as the live preview
-      // above, so malformed DECODE input (e.g. a mapping with no raw value,
-      // or a duplicate raw value) is never silently accepted into the
-      // schema — matching the existing, unchanged storage format exactly.
       const decodeEntriesForSave = parseDecodeTextForPreview(candidate.decodeText);
       const decodeIssues = decodeEntriesForSave.length ? validateDecodeEntries(decodeEntriesForSave) : [];
       const allIssues = [...requiredIssues, ...preIssues.map((i) => i.message), ...decodeIssues];

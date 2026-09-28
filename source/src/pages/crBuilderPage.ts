@@ -15,11 +15,6 @@ export function renderCrBuilderPage(container: HTMLElement): void {
     const state = store.cr; const schema = schemaService.getActiveSchema();
     const issues = validateCrState(state);
     const errorIssues = issues.filter((i) => i.severity === 'error');
-    // V15.4: same side-by-side Input → Output layout as the Read Only
-    // Query Builder, so the two Query Builders feel like two modes of the
-    // same application — "Describe the Change" (left) and "Generated SQL"
-    // (right) sit in the same responsive top-grid, with Manual Selectors
-    // (Query Details / Summary tabs) as its own full-width section below.
     container.innerHTML = `<div class="page">
       <h2 class="page-title">${icon('code')} Query Builder for CR <span class="hint-inline">(Change Request)</span></h2>
       <p class="page-subtitle">Generated SQL only — this application does not execute database changes. Use Natural Language and Manual Selectors independently, or combine both.</p>
