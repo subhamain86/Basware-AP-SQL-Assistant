@@ -1,8 +1,5 @@
 /**
- * nlpOrchestrator.ts — Describe What You Need orchestration (unchanged from
- * V16.0, per the "Do not change M365 Copilot integration / Offline NLP
- * functionality" constraint in the V16.1 brief).
- *
+ * nlpOrchestrator.ts — Describe What You Need orchestration.
  * Priority: M365 Copilot Enterprise (if enabled+configured) -> generic
  * Online AI/NLP Endpoint (if configured) -> offline engine only. Both online
  * tiers' suggested tables/columns are passed through filterToKnownTables /

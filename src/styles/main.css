@@ -126,16 +126,14 @@ code { background: var(--hover); padding: .1rem .4rem; border-radius: 4px; }
 .issue-box.ok { border-color: rgba(70,180,120,.4); color: #2f9e5b; }
 .explanation-box { display: block; color: var(--text); }
 .plan-list { padding-left: 1.2rem; }
-/* V16.1 fix: BOTH cards inside .builder-grid-top share the plain
-   .builder-panel class with NO width-restricting modifier. In V16.0, the
-   left ("Describe What You Need" / "Describe the Change") card additionally
-   carried a ".narrow" class capping it at max-width:480px while sitting in
-   an equal 1fr/1fr grid — the right ("Generated SQL") card had no such cap
-   and stretched to fill its column, so the two cards rendered at visibly
-   different, uneven widths. That modifier and its rule have been removed;
-   both cards now stretch equally to their 1fr grid column, restoring the
-   symmetric, previously-approved card proportions. Padding, radius, shadow,
-   and every other card property below are unchanged from V16.0. */
+/* Card-sizing fix: BOTH cards inside .builder-grid-top share the plain
+   .builder-panel class with NO width-restricting modifier. A previous
+   ".narrow" modifier capping the left card at max-width:480px while sitting
+   in an equal 1fr/1fr grid — causing it to render visibly smaller/uneven
+   next to the right card — has been permanently removed. Both cards now
+   stretch equally to their 1fr grid column, restoring symmetric card
+   proportions. Padding, radius, shadow, and every other card property below
+   are otherwise unchanged. */
 .builder-grid-top { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; align-items: start; margin-top: .5rem; }
 .builder-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; }
 .builder-panel h2 { font-size: 14px; margin-top: 1.1rem; display: flex; align-items: center; gap: .4rem; }

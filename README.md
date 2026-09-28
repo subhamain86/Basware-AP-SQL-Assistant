@@ -1,8 +1,8 @@
-# AP-SQL Assistant — V16.1
+# AP-SQL Assistant — V16.1.1
 
-**Baseline:** V16.0. **Scope of this release:** three targeted regression fixes only —
-see `docs/CHANGELOG_V16.1.md` for full detail on each. No features were added or removed,
-and no unrelated behaviour was changed.
+**This is a rebuild/re-delivery of V16.1** — no functional changes beyond V16.1's three
+regression fixes. See `docs/CHANGELOG_V16.1.1.md` for why this rebuild was necessary, and
+`docs/CHANGELOG_V16.1.md` for the full technical detail of the three fixes themselves.
 
 ## Run it
 
@@ -19,14 +19,13 @@ npm test            # 9/9 engine + regression-fix tests
 python3 scripts/smoke_test.py   # real headless-Chromium smoke test — all checks pass
 ```
 
-## What changed in V16.1 (and only this)
+## What's included (V16.1 fixes, carried forward unchanged)
 
 1. **Card sizing restored.** The "Describe What You Need" / "Describe the Change" card
    on the Read Only Query Builder and CR Builder pages had picked up an extra CSS
    modifier that capped it at 480px wide inside an otherwise-equal two-column grid,
    making it visibly smaller than the "Generated SQL" card next to it. That modifier is
-   removed; both cards now render at equal, symmetric widths again. No other card
-   dimension, spacing, padding, or control position changed.
+   removed; both cards now render at equal, symmetric widths again.
 
 2. **GitHub sync no longer rejects validly imported schemas.** A schema import
    containing real-world data types (e.g. `VARCHAR2`, `INTEGER`, `BOOLEAN`, `CLOB`,
@@ -34,29 +33,23 @@ python3 scripts/smoke_test.py   # real headless-Chromium smoke test — all chec
    next pull with "Remote schema file failed validation" — because the validator only
    accepted five internal UI dropdown type names. The validator now requires only that a
    data type be present, not that it match that narrow list, and schema import now
-   validates *before* saving/syncing (matching the required Import → Validate → Save →
-   Sync workflow) using the exact same check used for remote files — so what passes on
-   import is guaranteed to pass on the next pull, on this device or another. No imported
-   data (names, descriptions, types, relationships, aliases, CASE/DECODE) is stripped or
-   altered by this fix.
+   validates *before* saving/syncing using the exact same check used for remote files.
 
 3. **The sync error indicator is hidden when there is no error, and clears itself after
    a successful sync.** It now reflects one explicit, nullable error state that is set
    only by explicit user actions (Sync Now / Push / Pull) and cleared the instant a later
-   one of those succeeds — never shown for the silent, automatic background checks that
-   already ran (and already failed silently) in V16.0.
+   one of those succeeds — never shown for silent, automatic background checks.
 
 **Everything else — Query Builder, Manual Selectors, CASE functionality, Advanced
 Options, the CR Query Builder's mandatory-WHERE safeguard, Manual Schema Update (beyond
 the import-validation ordering above), Schema Management, M365 Copilot integration,
 Offline NLP, the Secret Vault, GitHub sync architecture, the navbar, colours, themes, and
-every other button — is unchanged from V16.0.**
+every other button — is unchanged.**
 
-See `docs/CHANGELOG_V16.1.md` for the full technical detail and verification results,
-`docs/CONFIGURATION.md` for M365 Copilot Enterprise setup (unchanged from V16.0), and
-`docs/PROVENANCE.md` for baseline notes.
+See `docs/CONFIGURATION.md` for M365 Copilot Enterprise setup and `docs/PROVENANCE.md` for
+the full history of this package across rebuilds.
 
-## Verification performed
+## Verification performed on this build
 
 | Check | Result |
 |---|---|

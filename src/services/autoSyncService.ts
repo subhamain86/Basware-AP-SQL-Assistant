@@ -35,10 +35,6 @@ export async function performDiscovery(reason: string): Promise<void> {
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) updated from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
     if (result.conflicts.length) toastFn('warning', `${result.conflicts.length} schema(s) have unresolved sync conflicts — review them in Schema or Settings.`);
   }
-  // V16.1: no `else` branch here — a background pull failure must never
-  // surface as a visible error to the user (see syncService.discoverPublicRegistry
-  // and pullRegistryFromGitHub's lastError comments). The sync log still
-  // records it for diagnostics (Settings -> Synchronization -> Activity Log).
 }
 export const performBackgroundPull = performDiscovery;
 export async function performPublicDiscovery(reason: string): Promise<void> {
@@ -47,8 +43,6 @@ export async function performPublicDiscovery(reason: string): Promise<void> {
     if (result.newSchemasAdded.length) toastFn('success', `${result.newSchemasAdded.length} new schema(s) discovered and synchronized from the repository: ${result.newSchemasAdded.join(', ')}.`);
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) refreshed from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
   }
-  // V16.1: same rule as above — this is an automatic, unattended background
-  // check that runs on every page mount; its failure must stay silent.
 }
 export async function handleVaultUnlocked(): Promise<void> { await performDiscovery('vault-unlocked'); }
 export function initAutoSync(): void { if (initialized) return; initialized = true; schemaService.subscribe(() => { scheduleBackgroundPush(); }); }

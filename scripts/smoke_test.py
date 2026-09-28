@@ -1,4 +1,4 @@
-"""Real-browser smoke test for dist/index.html (V16.1) — covers the three
+"""Real-browser smoke test for dist/index.html (V16.1.1) — covers the three
 targeted regression fixes plus a general regression pass."""
 import sys, os, json, tempfile
 from playwright.sync_api import sync_playwright
@@ -40,7 +40,7 @@ def main():
                 failures.append('Could not measure card bounding boxes.')
             else:
                 diff = abs(box0['width'] - box1['width'])
-                if diff > 4:  # small rounding tolerance
+                if diff > 4:
                     failures.append(f'FIX #1 REGRESSION: card widths are uneven — left={box0["width"]:.1f}px right={box1["width"]:.1f}px (diff={diff:.1f}px).')
                 if panels.nth(0).evaluate("el => el.classList.contains('narrow')"):
                     failures.append('FIX #1 REGRESSION: the removed .narrow class is still present on a card.')
@@ -58,7 +58,6 @@ def main():
         else:
             failures.append('No tables found in Table Picker — schema may not have loaded.')
 
-        # Same card-sizing check on CR Builder page
         page.evaluate("window.location.hash = 'cr'")
         page.wait_for_timeout(300)
         cr_panels = page.locator('.builder-grid-top .builder-panel')
@@ -114,8 +113,6 @@ def main():
                 err_html = err_mount.inner_html().strip()
                 if err_html != '':
                     failures.append(f'FIX #3 REGRESSION: error box is visible with no active error. Content: {err_html[:200]}')
-
-            vault_html = page.locator('#settingsTabsMount').inner_html()
 
             # --- FIX #2: import a schema with real-world (non-enum) data types
             # via the ACTUAL file-upload UI (Schema Management -> Import

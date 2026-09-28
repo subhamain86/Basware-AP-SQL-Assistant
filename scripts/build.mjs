@@ -39,7 +39,7 @@ async function main() {
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="${faviconDataUri}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AP-SQL Assistant · V16.1</title>
+  <title>AP-SQL Assistant · V16.1.1</title>
   <style>
 ${css}
   </style>

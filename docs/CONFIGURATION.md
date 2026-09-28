@@ -1,9 +1,8 @@
-# V16.0 — M365 Copilot Enterprise Configuration
+# M365 Copilot Enterprise Configuration
 
 This is **optional**. Nothing changes for any user until an administrator completes every field
-below and ticks "Enable". Until then, Describe What You Need works exactly as it did in V15.7,
-using only the offline engine (and the generic Online AI/NLP Endpoint, if that was already
-configured).
+below and ticks "Enable". Until then, Describe What You Need works using only the offline engine
+(and the generic Online AI/NLP Endpoint, if that was already configured).
 
 ## What you need from your Microsoft 365 / Entra ID administrator
 
@@ -50,20 +49,19 @@ repository the same way the rest of the vault already does.
   suggests that isn't an actual table/column in your Active Schema is silently discarded before
   SQL is generated. Copilot cannot modify the schema — it has no write path to it at all.
 - If sign-in fails, is cancelled, the endpoint is unreachable, or the browser is offline, the app
-  automatically falls back to the offline engine — exactly as it already does today when the
-  generic Online AI/NLP Endpoint is unavailable. No error is shown to the end user; the SQL
+  automatically falls back to the offline engine. No error is shown to the end user; the SQL
   Builder pages simply show the "Offline/local engine" badge instead of the Copilot badge.
 
 ## Priority order when multiple engines are configured
 
 1. **M365 Copilot Enterprise** (if enabled and reachable)
-2. **Generic Online AI/NLP Endpoint** (Settings → AI / NLP Engine tab, unchanged from V15.7)
+2. **Generic Online AI/NLP Endpoint** (Settings → AI / NLP Engine tab)
 3. **Offline engine only**
 
 ## Turning it off
 
 Untick "Enable" and save, or clear the fields entirely. Describe What You Need immediately
-reverts to the pre-V16.0 behaviour.
+reverts to the offline-only behaviour.
 
 ## A note on the redirect URI for `file://` deployments
 

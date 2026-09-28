@@ -1,8 +1,8 @@
 /**
- * M365 Copilot Enterprise adapter for "Describe What You Need" (unchanged
- * from V16.0). Read-only with respect to the schema; only ever returns a
- * plain data object that is later filtered through filterToKnownTables /
- * filterToKnownColumns before touching SQL generation.
+ * M365 Copilot Enterprise adapter for "Describe What You Need". Read-only
+ * with respect to the schema; only ever returns a plain data object that is
+ * later filtered through filterToKnownTables / filterToKnownColumns before
+ * touching SQL generation.
  */
 import type { M365CopilotConfig } from './secretVaultService';
 import { acquireCopilotToken } from './msalAuthService';

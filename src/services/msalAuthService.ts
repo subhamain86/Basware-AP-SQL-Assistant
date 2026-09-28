@@ -1,5 +1,5 @@
 /**
- * M365 Copilot Enterprise authentication (unchanged from V16.0).
+ * M365 Copilot Enterprise authentication.
  * Microsoft identity platform v2.0 Authorization Code flow with PKCE — no
  * client secret, no hard-coded credentials. Token kept only in
  * sessionStorage, cleared when the tab closes.
