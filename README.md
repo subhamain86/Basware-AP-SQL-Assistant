@@ -1,9 +1,11 @@
-# SQL Assistant — V15.6
+# SQL Assistant — V15.7
 
-Baseline: V15.5 (working). This is a **targeted bug-fix release only** — no
-UI, navbar, theme, layout, Query Builder, AI/NLP, CASE/DECODE, sync
-architecture, or Secret Vault changes were made. The only change is the
-Manual Schema Update Save fix described below.
+Baseline: V15.6 (working). This is a **targeted synchronization bug-fix
+release only** — no UI, layout, theme, colors, icons, navbar, Query
+Builder, AI/NLP, SQL generation, CASE/DECODE, Manual Schema Update UI,
+schema structure, Secret Vault, or GitHub architecture changes were made.
+The only change is the Manual Schema Update → GitHub central-sync fix
+described below.
 
 ## How to run
 - **Static hosting** (GitHub Pages, SharePoint, OneDrive, any web server):
@@ -13,85 +15,83 @@ Manual Schema Update Save fix described below.
 
 ## The bug, and the actual root cause
 
-**Symptom:** editing an existing row in Manual Schema Update and clicking
-Save did not reliably persist the change — or, when it did technically
-succeed, the mechanism used was structurally wrong (see below), risking
-exactly the "reset unrelated rows / rebuild the entire schema" failure
-mode the bug report describes.
+**Symptom:** Manual Schema Update successfully saved an edited row
+locally, but the change never reached the central schema stored in the
+GitHub repository — so the local copy and the GitHub copy could silently
+drift apart, and other devices pulling from GitHub would keep seeing the
+old value.
 
-**Root cause #1 — full-schema validation instead of row-scoped validation.**
-The previous implementation validated an edited row by running
-`validateSchemaIntegrity()` over the **entire candidate table set** (every
-table, every column in the whole schema) after applying the edit, and
-rejected the Save if that full sweep produced *any* error — including
-errors on rows the user never touched. In a schema of any real size it is
-common for at least one pre-existing, unrelated column to have a
-naturally-occurring structural issue (e.g. a composite key, or metadata
-imported from elsewhere), and because the full-schema check has no way to
-distinguish "pre-existing and unrelated" from "caused by this edit," a
-perfectly valid single-row edit could be silently blocked by validation
-noise from a completely different part of the schema.
+**Root cause:** the Save button's own submit handler only ever called
+`schemaService.upsertRow()` — a purely **local** in-memory + `localStorage`
+write — and then immediately reported success and closed the modal. The
+**only** thing that ever pushed the updated schema registry to GitHub was
+`autoSyncService`'s `scheduleBackgroundPush()`: a fully **decoupled**,
+1.2-second-debounced background timer that fires independently of the Save
+action, reporting its own outcome via a *separate* toast that appears well
+after the Save modal has already closed — with no connection back to that
+specific save. This is exactly "Manual Save → Local State Updated → GitHub
+Sync Not Triggered [as part of the same operation]" from the bug report:
+the save workflow itself never attempted, awaited, or confirmed a central
+GitHub write; it just hoped a best-effort background timer would pick it
+up. If that timer never fired for any reason (tab closed within 1.2s,
+Secret Vault happened to be locked at that instant, etc.), the save would
+still report as fully successful even though nothing had reached GitHub.
 
-**Root cause #2 — the update itself rebuilt the whole column collection.**
-Even when validation passed, the previous update logic performed a
-filter-then-push sequence across the *entire* `tables` array (deep-clone,
-remove the old entry, push the new one at the end) and reassigned
-`schema.tables` wholesale. This is a full-collection rebuild, not a
-targeted patch — fragile (an edited column's position silently moved to
-the end of the table) and structurally the opposite of "load the existing
-schema, modify only the targeted record, and preserve every other record
-byte-for-byte."
+## The fix
 
-## The fix (both parts)
+The Save handler in `schemaEditorSection.ts` now **explicitly calls and
+awaits** `syncService.pushRegistryToGitHub()` as an integral, sequential
+step of the save workflow itself — immediately after the local, targeted,
+single-row update succeeds (V15.6's row-level upsert logic is completely
+unchanged: still only one row is ever touched) — and reports one of three
+honest, save-specific outcomes:
 
-1. **`schemaIntegrityEngine.validateCandidateRowFields()`** (new) —
-   validates *only* the single candidate row's own fields (data type,
-   length/precision, decode-entry integrity) plus, where relevant, whether
-   its own declared Foreign Key target actually exists elsewhere in the
-   schema. It is structurally impossible for this check to fail because of
-   an unrelated, pre-existing issue on a different row, since it never
-   inspects any column other than the one being saved.
-2. **`schemaService.upsertRow()`** now finds the exact target column **by
-   identity** (`table::column`, the same key used by `SchemaEditorRow.rowId`)
-   and mutates that one column object's fields **in place**, preserving its
-   exact array position — or, only for a genuine rename, removes the old
-   entry and inserts the new one, again without touching any other table or
-   column. Every other row keeps the same values, same order, same object
-   identity, apart from the one row actually being changed.
+1. **Local + central both succeeded** → "Saved locally and synchronized to
+   the central GitHub schema."
+2. **Local succeeded, Secret Vault locked** → "Saved locally, but NOT yet
+   synchronized to the central GitHub schema... Unlock Settings to publish
+   this change."
+3. **Local succeeded, GitHub push itself failed** (network, auth, missing
+   token, conflict, etc.) → "Saved locally, but central GitHub
+   synchronization FAILED: `<real error>`... The background sync will
+   retry automatically, or use 'Sync Now'."
 
-`schemaEditorSection.ts` was updated to match: it no longer performs its
-own separate full-schema validation before calling `upsertRow` — the single
-source of truth for "is this row valid" is now inside `upsertRow` itself,
-scoped correctly, and the post-save UI refresh (`refreshTable()`) only
-re-populates the existing data table in place, explicitly preserving the
-selected schema/module/table and never calling a full page/section
-rebuild.
+In every case the modal briefly shows this real outcome (not just a
+generic "Saved!") before closing, and the corresponding toast is tied
+directly to that save action. The pre-existing debounced
+`autoSyncService` background push is left completely intact as a
+secondary safety net/retry path — it is simply no longer the *only* thing
+responsible for actually reaching GitHub. The same explicit-then-await
+pattern was also applied to the Delete flow's third confirmation step, for
+consistency.
 
 ## Regression testing performed (Playwright, against the built app)
 
-- **Test 1 — Single row update:** edited `PO_HEADER.STATUS`'s description,
-  clicked Save — modal closed (save succeeded), no validation errors, the
-  same 7 column identities remained present, and the table immediately
-  showed the updated description.
-- **Test 2 — Multiple existing rows:** captured the full text of all 7
-  `PO_HEADER` rows, edited only `VENDOR_ID`'s description, and confirmed
-  all 6 other rows were **byte-for-byte identical** before and after.
-- **Test 3 — Validation failure:** cleared the required Column Name field
-  and clicked Save — the modal correctly stayed open with "Column Name is
-  required," and the row set was confirmed unchanged (no data modified).
-- **Test 4 — Persistence after navigating away and back:** edited a
-  description, navigated to Quick Start and back to Settings → Manual
-  Schema Update — the edited value was still present.
-- **Test 5 — Persistence after a genuine page reload:** confirmed the
-  edited value was present in `localStorage` before reload, then performed
-  an actual same-tab `page.reload()` (not a fresh isolated browser
-  context) — the edited value was still present after re-unlocking
-  Settings.
-- **Test 6 — Query Builder regression:** confirmed table selection → SQL
-  generation still works, and that editing a column's *description* does
-  not affect its DECODE mapping — selecting `PO_HEADER.STATUS` with
+- **All 7 routes** load cleanly with zero console/page errors.
+- **Save explicitly attempts + awaits central sync:** edited
+  `PO_HEADER.STATUS`'s description and saved. This sandboxed test
+  environment has no real GitHub token configured, which is actually a
+  perfect real-world test of the failure path — the Save modal's live
+  status box read *"Saved locally, but central GitHub synchronization
+  FAILED: Repository synchronization configuration is incomplete...
+  Missing: Access Token."* — proving the sync attempt runs synchronously,
+  as part of Save itself, and is never silently reported as a successful
+  central save when it wasn't.
+- **Persistent sync log** confirms the same honest failure reason is
+  recorded for later diagnosis/retry, exactly matching what the modal
+  showed.
+- **Local row-level update still succeeds** even when central sync fails
+  — the edited description was correctly visible in the table immediately
+  after save, and all 6 other rows in `PO_HEADER` remained completely
+  untouched (only the intended row was modified — V15.6's targeted-update
+  guarantee is fully preserved).
+- **Persistence after a genuine same-context reload:** saved an edit,
+  performed an actual `page.reload()` (same browser tab/context, not a
+  fresh Playwright context), re-unlocked Settings, and confirmed the
+  edited value was still present.
+- **Query Builder / CASE-DECODE regression:** confirmed table selection →
+  SQL generation still works, and selecting `PO_HEADER.STATUS` with
   "Schema CASE/DECODE" still correctly produces a `CASE WHEN...THEN...END`
-  expression with the original Open/Closed/On Hold labels (never a
-  database-specific `DECODE()` call).
-- All 7 application routes load cleanly with zero console/page errors,
-  both before and after the fix.
+  expression with the original Open/Closed/On Hold labels — never a
+  database-specific `DECODE()` call, and completely unaffected by the sync
+  fix.

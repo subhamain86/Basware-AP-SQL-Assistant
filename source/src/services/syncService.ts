@@ -7,11 +7,11 @@ import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { assertSyncConfigOrError, safeTrim, safeJsonParse, safeLocalStorageSet } from '../utils/validation';
 import { makeId } from '../utils/id';
 import { beginInternalSync, endInternalSync } from './syncCoordination';
-const CONFIG_KEY = 'sqla.syncconfig.v156';
-const STATUS_KEY = 'sqla.syncstatus.v156';
-const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v156';
-const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v156';
-const SYNC_LOG_KEY = 'sqla.synclog.v156';
+const CONFIG_KEY = 'sqla.syncconfig.v157';
+const STATUS_KEY = 'sqla.syncstatus.v157';
+const LAST_KNOWN_SHA_KEY = 'sqla.lastsha.v157';
+const PENDING_CONFLICTS_KEY = 'sqla.pendingconflicts.v157';
+const SYNC_LOG_KEY = 'sqla.synclog.v157';
 const MAX_LOG_ENTRIES = 30;
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }

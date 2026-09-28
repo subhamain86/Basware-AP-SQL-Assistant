@@ -9,6 +9,18 @@ let lastLockedWarningAt = 0;
 type ToastFn = (kind: 'success' | 'error' | 'info' | 'warning', text: string) => void;
 let toastFn: ToastFn = () => {};
 export function setAutoSyncToastHandler(fn: ToastFn): void { toastFn = fn; }
+/** V15.7 — this debounced BACKGROUND push remains as a general-purpose
+ * safety-net/catch-all for any schema mutation (import, rename, activate,
+ * etc.), exactly as in V15.6. It is intentionally NOT the primary
+ * mechanism Manual Schema Update relies on anymore for its own
+ * success/failure reporting — see schemaEditorSection.ts, which now
+ * explicitly awaits its own dedicated `syncService.pushRegistryToGitHub()`
+ * call as an integral part of the Save action itself. Keeping this
+ * background debounce also active means that even if a future direct-push
+ * attempt from another screen were skipped, the existing auto-sync
+ * mechanism still retries/covers it — satisfying "allow the existing
+ * synchronization mechanism to retry/recover according to the current
+ * project design." */
 function scheduleBackgroundPush(): void {
   if (isInternalSyncInProgress()) return;
   if (!secretVaultService.isUnlocked()) {

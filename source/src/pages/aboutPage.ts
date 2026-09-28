@@ -5,7 +5,9 @@ export function renderAboutPage(container: HTMLElement): void {
     <h2 class="page-title">${icon('info')} About SQL Assistant</h2>
     <p class="page-subtitle">SQL Assistant is a self-contained tool that helps support teams construct accurate SQL without needing deep, memorized knowledge of the underlying database schema.</p>
     <div class="explanation-box">
-      <p>Version 15.6 is a targeted bug-fix release: Manual Schema Update's Save action now correctly persists an edited row using a precise, row-level update — validating and updating only the row that was changed, leaving every other table and column completely untouched.</p>
+      <p>Version 15.7 is a targeted synchronization bug-fix release: Manual Schema Update's Save action now explicitly synchronizes the updated schema to the central GitHub repository as an integral, awaited part of the save workflow — not a decoupled background process — with clear success/failure feedback tied directly to that save.</p>
+      <h4 class="mt">Manual Schema Update save is now centrally synchronized</h4>
+      <p>Editing and saving a schema row updates only that row locally (unchanged from V15.6), then immediately and explicitly pushes the updated schema registry to the configured GitHub repository. If the Secret Vault is locked or the push fails, the save is clearly reported as "saved locally but not yet synchronized centrally" — it is never silently reported as a full central save when it wasn't.</p>
       <h4 class="mt">DECODE is CASE-based functionality</h4>
       <p>Schema-defined and manually-configured value-to-display mappings always generate a standard, portable <code>CASE WHEN ... THEN ... ELSE ... END</code> expression, never a database-specific <code>DECODE()</code> call.</p>
       <h4 class="mt">Query Generation Pipeline</h4>

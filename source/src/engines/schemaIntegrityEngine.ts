@@ -53,22 +53,6 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
   return { valid: issues.filter((i) => i.severity === 'error').length === 0, issues };
 }
 
-/** V15.6 fix (see schemaService.upsertRow for the primary root-cause fix) —
- * this per-row pre-check now ALSO validates the candidate row's own field
- * values (data type, negative length/precision, decode duplicates) using
- * the exact same rules as the full-schema validator, so a genuinely
- * invalid edited row is still caught and rejected with a clear message —
- * but it does this by inspecting ONLY the candidate row's own fields, and
- * ONLY consults the rest of the schema for the narrow, single purposes of
- * (a) detecting a rename collision against another already-existing column
- * and (b) resolving whether an entered Foreign Key reference target
- * actually exists. It never re-validates or rejects the save because of
- * an unrelated, pre-existing issue somewhere else in the schema — which is
- * what full-schema validation (validateSchemaIntegrity over the ENTIRE
- * candidate table set) was doing before, and is the root cause described
- * in the V15.6 bug report: a save could be silently blocked by an
- * unrelated pre-existing warning/error elsewhere in the schema that had
- * nothing to do with the row actually being edited. */
 export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: unknown, columnName: unknown, originalTableName: unknown, originalColumnName: unknown): SchemaIntegrityIssue[] {
   const issues: SchemaIntegrityIssue[] = [];
   const tName = safeTrim(tableName); const cName = safeTrim(columnName);
@@ -84,13 +68,6 @@ export function validateSingleRowAgainstSchema(schema: SchemaModel, tableName: u
   return issues;
 }
 
-/** V15.6 (new) — validates ONLY the single candidate row's own field
- * values (mirroring the per-column checks inside validateSchemaIntegrity,
- * but scoped to exactly one row) plus its Foreign Key target, if any,
- * against the rest of the schema. Used by schemaService.upsertRow() in
- * place of running the full validateSchemaIntegrity() over every table —
- * so a pre-existing, unrelated issue elsewhere in the schema can never
- * block saving an otherwise-valid edited row. */
 export function validateCandidateRowFields(candidateColumn: { name: string; type: string; length?: number | null; precision?: number | null; isForeignKey?: boolean; references?: { table: string; column: string }; decode?: { rawValue: string; label: string }[] }, tableName: string, allTables: TableDef[]): string[] {
   const errors: string[] = [];
   const tName = safeTrim(tableName); const cName = safeTrim(candidateColumn.name);

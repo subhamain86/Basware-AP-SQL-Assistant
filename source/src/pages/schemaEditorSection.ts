@@ -1,12 +1,12 @@
 import { icon } from '../components/icons';
 import { store } from '../state/store';
 import { schemaService } from '../services/schemaService';
+import { syncService } from '../services/syncService';
+import { secretVaultService } from '../services/secretVaultService';
 import { renderDataTable } from '../components/dataTable';
 import { openModal } from '../components/modal';
 import { validateDecodeEntries, buildSchemaDecodeExpression } from '../engines/decodeEngine';
 import { verifyPassword } from '../services/passwordService';
-import { syncService } from '../services/syncService';
-import { secretVaultService } from '../services/secretVaultService';
 import type { SchemaEditorRow, ColumnDataType, ColumnDef, DecodeEntry } from '../types';
 import { VALID_DATA_TYPES } from '../types';
 
@@ -46,6 +46,49 @@ function renderDecodeHelpBlock(): string {
     </details>
   </div>`;
 }
+
+/** ==========================================================================
+ * V15.7 ROOT-CAUSE FIX — Manual Schema Update → GitHub central sync issue
+ * ==========================================================================
+ * ROOT CAUSE IDENTIFIED: the Save button's own submit handler only ever
+ * called `schemaService.upsertRow()` (a purely LOCAL, in-memory + localStorage
+ * write) and then reported success and closed the modal. The only mechanism
+ * that ever pushed the updated schema registry to the central GitHub
+ * repository was `autoSyncService`'s `scheduleBackgroundPush()` — a fully
+ * DECOUPLED, 1.2-second-debounced timer that fires independently of the Save
+ * action, with its own separate success/failure toast that appears well
+ * after the Save modal has already closed. This is exactly the defect
+ * described in the bug report: "Manual Save → Local State Updated → GitHub
+ * Sync Not Triggered [as part of the same operation]" — the save operation
+ * itself never confirmed, or even attempted, a central save; it just relied
+ * on a best-effort background timer that the user has no direct visibility
+ * into from the Save action itself. If the debounced push were skipped for
+ * any reason (e.g. the tab is closed within 1.2s, or the vault is locked at
+ * that exact moment), the local save would still report as fully
+ * successful even though nothing had reached GitHub.
+ *
+ * THE FIX: the Save handler below now EXPLICITLY calls and AWAITS
+ * `syncService.pushRegistryToGitHub()` as an integral, sequential step of
+ * the save workflow itself — immediately after the local row-level update
+ * succeeds — and reports ONE OF THREE distinct, honest outcomes tied
+ * directly to this specific save:
+ *   1. Local update + central GitHub push both succeeded → clear
+ *      confirmation that the change is centrally synchronized.
+ *   2. Local update succeeded but the Secret Vault is locked → clear
+ *      message that the row is saved locally but NOT yet centrally
+ *      synchronized, with instructions to unlock Settings.
+ *   3. Local update succeeded but the GitHub push itself failed (network,
+ *      auth, conflict, etc.) → clear message that the row is saved locally
+ *      but central synchronization failed, showing the underlying error,
+ *      and explicitly NOT claiming a successful central save.
+ * In all three cases the LOCAL row-level update (V15.6's targeted,
+ * single-row upsert) is completely unchanged — only ONE row is ever
+ * touched, exactly as before — and the existing debounced
+ * `autoSyncService` background mechanism is left fully intact as a
+ * secondary safety net/retry path (per requirement #6, "allow the existing
+ * synchronization mechanism to retry/recover"), it is simply no longer the
+ * ONLY thing responsible for actually reaching GitHub after a save.
+ * ========================================================================== */
 export function renderSchemaEditorSection(container: HTMLElement): void {
   let editingSchemaId = schemaService.getActiveSchema().id;
   let selectedModule: string | null = null;
@@ -61,7 +104,7 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     if (selectedTable && !tablesInModule.some((t) => t.name === selectedTable)) selectedTable = null;
     container.innerHTML = `<div class="mt">
       <label class="block-label">Select Schema<select id="editorSchemaSelect">${allSchemas.map((s) => `<option value="${s.id}" ${s.id === editingSchemaId ? 'selected' : ''}>${s.name}${s.status === 'active' ? ' (Active)' : ''}</option>`).join('')}</select></label>
-      <div class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong> ${editingSchema.status === 'active' ? '<span class="chip chip-active">Active — changes apply immediately</span>' : '<span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'} <span class="auto-sync-hint">${icon('folder-sync', 12)} Changes sync automatically once the Secret Vault is unlocked</span><button type="button" class="btn btn-link sync-now-inline-btn" id="syncNowInlineBtn">${icon('github', 13)} Sync Now</button></div>
+      <div class="editing-schema-banner">${icon('edit', 14)} Editing Schema: <strong>${editingSchema.name}</strong> ${editingSchema.status === 'active' ? '<span class="chip chip-active">Active — changes apply immediately</span>' : '<span class="chip chip-inactive">Inactive — activate it from Schema to use these changes</span>'} <span class="auto-sync-hint">${icon('folder-sync', 12)} Saved rows are synchronized to GitHub immediately as part of Save</span><button type="button" class="btn btn-link sync-now-inline-btn" id="syncNowInlineBtn">${icon('github', 13)} Sync Now</button></div>
       <div id="syncNowInlineResult"></div>
       <div class="form-row-2">
         <label class="block-label">Select Module *<select id="editorModuleSelect"><option value="">— choose a module —</option>${modules.map((m) => `<option value="${m}" ${m === selectedModule ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
@@ -108,15 +151,33 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     });
     updateActionsBar(null);
   }
-  /** V15.6 — after a successful targeted row-level save, we must refresh
-   * ONLY the data table's row list (via schemaService.getFlattenedRows,
-   * which itself only reads — it never mutates), while explicitly
-   * preserving editingSchemaId / selectedModule / selectedTable exactly as
-   * they were. This satisfies "keep the user on the current page, do not
-   * reset the selected schema/module/table" — refreshTable() never calls
-   * draw() (which would tear down and rebuild the whole section), it only
-   * re-populates the existing table component in place. */
   function refreshTable(): void { if (tableApi) tableApi.refresh(schemaService.getFlattenedRows(editingSchemaId, selectedModule, selectedTable)); updateActionsBar(null); }
+
+  /** V15.7 — describes the outcome of the explicit, awaited central-sync
+   * attempt that now runs as part of every successful Save, distinguishing
+   * the three honest outcomes described in the fix rationale above. */
+  function describeCentralSyncOutcome(pushResult: { ok: boolean; error?: string; requiresPullFirst?: boolean } | { skipped: true }): { html: string; toastKind: 'success' | 'warning' | 'error'; toastText: string } {
+    if ('skipped' in pushResult) {
+      return {
+        html: `<div class="issue-box warn mini">${icon('alert-triangle', 14)} Saved locally, but NOT yet synchronized to the central GitHub schema — the Secret Vault is locked. Unlock Settings (Admin Password) to publish this change.</div>`,
+        toastKind: 'warning',
+        toastText: 'Row saved locally. Unlock Settings to synchronize this change to the central GitHub schema.'
+      };
+    }
+    if (pushResult.ok) {
+      return {
+        html: `<div class="issue-box ok mini">${icon('check', 14)} Saved locally and synchronized to the central GitHub schema.</div>`,
+        toastKind: 'success',
+        toastText: 'Row saved and synchronized to the central GitHub schema.'
+      };
+    }
+    return {
+      html: `<div class="issue-box mini">${icon('alert-triangle', 14)} Saved locally, but central GitHub synchronization FAILED: ${pushResult.error || 'unknown error'}${pushResult.requiresPullFirst ? ' Pull the latest version first, then try "Sync Now".' : ' The background sync will retry automatically, or use "Sync Now" above.'}</div>`,
+      toastKind: 'error',
+      toastText: `Row saved locally, but central synchronization failed: ${pushResult.error || 'unknown error'}.`
+    };
+  }
+
   function openRowForm(schemaId: string, existing: SchemaEditorRow | null): void {
     const schema = schemaService.getSchemaById(schemaId)!; const isEdit = !!existing;
     const r: SchemaEditorRow = existing || { rowId: '', module: selectedModule || '', tableName: selectedTable || '', tableDescription: schema.tables.find((t) => t.name === selectedTable)?.description || '', columnName: '', columnDescription: '', dataType: 'VARCHAR', length: null, precision: null, nullable: true, alias: '', decodeText: '', isPrimaryKey: false, isForeignKey: false, fkTable: '', fkColumn: '' };
@@ -140,9 +201,10 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       <label class="inline-check"><input type="checkbox" id="f_isForeignKey" ${r.isForeignKey ? 'checked' : ''}/> Foreign Key</label>
       <div id="fkFields" class="form-row-2" ${r.isForeignKey ? '' : 'hidden'}><label class="block-label">References Table<input id="f_fkTable" value="${r.fkTable}"/></label><label class="block-label">References Column<input id="f_fkColumn" value="${r.fkColumn}"/></label></div>
       <div id="rowFormIssues"></div>
-      <div class="modal-actions"><button type="button" class="btn btn-ghost" id="rowFormCancel">Cancel</button><button type="submit" class="btn btn-primary">${icon('save', 14)} Save</button></div>
+      <div id="rowFormSyncStatus"></div>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" id="rowFormCancel">Cancel</button><button type="submit" class="btn btn-primary" id="rowFormSaveBtn">${icon('save', 14)} Save</button></div>
     </form>`;
-    const modal = openModal(`${icon(isEdit ? 'edit' : 'plus', 18)} ${isEdit ? 'Edit Row' : 'Add New Row'}`, bodyHtml, { wide: true });
+    const modal = openModal(`${icon(isEdit ? 'edit' : 'plus', 18)} ${isEdit ? 'Edit Row' : 'Add New Row'}`, bodyHtml, { wide: true, closeOnBackdrop: false });
     const form = modal.element.querySelector<HTMLFormElement>('#rowForm')!;
     form.querySelector('#f_isForeignKey')?.addEventListener('change', (e) => { const fkFields = form.querySelector<HTMLElement>('#fkFields'); if (fkFields) fkFields.hidden = !(e.target as HTMLInputElement).checked; });
     form.querySelector('#rowFormCancel')?.addEventListener('click', () => modal.close());
@@ -168,22 +230,41 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const issuesMount = form.querySelector<HTMLElement>('#rowFormIssues')!;
+      const syncStatusMount = form.querySelector<HTMLElement>('#rowFormSyncStatus')!;
+      const saveBtn = form.querySelector<HTMLButtonElement>('#rowFormSaveBtn')!;
       const candidate: SchemaEditorRow = { rowId: '', module: (form.querySelector<HTMLInputElement>('#f_module')!.value || 'General').trim(), tableName: form.querySelector<HTMLInputElement>('#f_tableName')!.value.trim(), tableDescription: form.querySelector<HTMLInputElement>('#f_tableDescription')!.value.trim(), columnName: form.querySelector<HTMLInputElement>('#f_columnName')!.value.trim(), columnDescription: form.querySelector<HTMLInputElement>('#f_columnDescription')!.value.trim(), dataType: form.querySelector<HTMLSelectElement>('#f_dataType')!.value as ColumnDataType, length: form.querySelector<HTMLInputElement>('#f_length')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_length')!.value, 10) : null, precision: form.querySelector<HTMLInputElement>('#f_precision')!.value ? parseInt(form.querySelector<HTMLInputElement>('#f_precision')!.value, 10) : null, nullable: form.querySelector<HTMLInputElement>('#f_nullable')!.checked, alias: form.querySelector<HTMLInputElement>('#f_alias')!.value.trim(), decodeText: form.querySelector<HTMLTextAreaElement>('#f_decode')!.value, isPrimaryKey: form.querySelector<HTMLInputElement>('#f_isPrimaryKey')!.checked, isForeignKey: form.querySelector<HTMLInputElement>('#f_isForeignKey')!.checked, fkTable: form.querySelector<HTMLInputElement>('#f_fkTable')?.value.trim() || '', fkColumn: form.querySelector<HTMLInputElement>('#f_fkColumn')?.value.trim() || '' };
-      // V15.6 — the ONLY pre-flight check performed here is the identity/
-      // rename-collision check (does the new name clash with a DIFFERENT
-      // existing column?) plus the two plain required-field checks. Every
-      // other structural rule (data type validity, FK target existence,
-      // decode integrity) is now checked exactly once, inside
-      // schemaService.upsertRow() via validateCandidateRowFields() — scoped
-      // to only this row — so there is a single source of truth for "is
-      // this row valid" and it can never be blocked by something unrelated
-      // elsewhere in the schema.
       const requiredIssues: string[] = []; if (!candidate.tableName) requiredIssues.push('Table Name is required.'); if (!candidate.columnName) requiredIssues.push('Column Name is required.');
       if (requiredIssues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${requiredIssues.map((m) => `<li>${m}</li>`).join('')}</ul></div>`; return; }
+
+      // Step 1 — validate + apply the targeted, single-row LOCAL update
+      // (V15.6 logic, unchanged).
       const engineIssues = await schemaService.upsertRow(schemaId, candidate, isEdit ? existing!.rowId : null);
       if (engineIssues.length) { issuesMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)}<ul>${engineIssues.map((m) => `<li>${m}</li>`).join('')}</ul></div>`; return; }
-      store.pushToast('success', `${isEdit ? 'Updated' : 'Added'} ${candidate.tableName}.${candidate.columnName}. Query Builder and AI engines will use this immediately if this is the active schema.`);
-      modal.close(); refreshTable();
+      issuesMount.innerHTML = '';
+
+      // Step 2 — V15.7 fix: explicitly attempt + AWAIT the central GitHub
+      // sync as an integral part of this same Save action, instead of
+      // relying solely on the decoupled background auto-sync timer.
+      saveBtn.disabled = true; saveBtn.innerHTML = `${icon('refresh', 14, 'icon-spin')} Saving &amp; syncing…`;
+      syncStatusMount.innerHTML = `<div class="hint">${icon('folder-sync', 13)} Row saved locally — synchronizing to the central GitHub schema…</div>`;
+      let outcome: ReturnType<typeof describeCentralSyncOutcome>;
+      if (!secretVaultService.isUnlocked()) {
+        outcome = describeCentralSyncOutcome({ skipped: true });
+      } else {
+        const pushResult = await syncService.pushRegistryToGitHub(`Update ${candidate.tableName}.${candidate.columnName} via Manual Schema Update`);
+        outcome = describeCentralSyncOutcome(pushResult);
+      }
+      saveBtn.disabled = false; saveBtn.innerHTML = `${icon('save', 14)} Save`;
+      syncStatusMount.innerHTML = outcome.html;
+      store.pushToast(outcome.toastKind, outcome.toastText);
+
+      // Step 3 — UI update: keep the user on the current page (schema /
+      // module / table selections untouched), refresh only the data table
+      // in place, and close the modal. The modal briefly shows the sync
+      // outcome above before closing so a failed central sync is never
+      // silently missed.
+      refreshTable();
+      setTimeout(() => modal.close(), outcome.toastKind === 'error' ? 1800 : 900);
     });
   }
   function startDeleteFlow(schemaId: string, row: SchemaEditorRow): void {
@@ -203,7 +284,17 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
         const pwInput = modal3.element.querySelector<HTMLInputElement>('#c3Password')!; const errBox = modal3.element.querySelector<HTMLElement>('#c3Error')!;
         const ok = await verifyPassword(pwInput.value); if (!ok) { errBox.removeAttribute('hidden'); return; }
         const result = await schemaService.deleteRow(schemaId, row.rowId); modal3.close();
-        if (result.ok) { store.pushToast('success', `Deleted ${row.tableName}.${row.columnName}.`); refreshTable(); } else store.pushToast('error', result.error || 'Delete failed.');
+        if (result.ok) {
+          store.pushToast('success', `Deleted ${row.tableName}.${row.columnName}.`);
+          refreshTable();
+          if (secretVaultService.isUnlocked()) {
+            const pushResult = await syncService.pushRegistryToGitHub(`Delete ${row.tableName}.${row.columnName} via Manual Schema Update`);
+            if (pushResult.ok) store.pushToast('success', 'Deletion synchronized to the central GitHub schema.');
+            else store.pushToast('error', `Deletion saved locally, but central synchronization failed: ${pushResult.error || 'unknown error'}.`);
+          } else {
+            store.pushToast('warning', 'Deletion saved locally. Unlock Settings to synchronize this change to the central GitHub schema.');
+          }
+        } else store.pushToast('error', result.error || 'Delete failed.');
       });
     }
   }
