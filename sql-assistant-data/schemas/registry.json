@@ -4,9 +4,9 @@
       "id": "schema-core-ap-p2p",
       "name": "AP / P2P Core",
       "version": "1.0",
-      "status": "inactive",
-      "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": "2026-09-28T19:19:10.169Z",
+      "status": "active",
+      "updatedAt": "2026-09-29T08:07:32.490Z",
+      "lastSyncedAt": "2026-09-29T08:39:48.836Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -730,8 +730,8 @@
       "name": "AP / P2P Extended (with Contracts)",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": "2026-09-28T19:19:10.169Z",
+      "updatedAt": "2026-09-29T08:07:32.490Z",
+      "lastSyncedAt": "2026-09-29T08:39:48.836Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -1532,7 +1532,7 @@
       "id": "schema_mulms6ye_5",
       "name": "AP schema 77",
       "version": "1.0",
-      "status": "active",
+      "status": "inactive",
       "updatedAt": "2026-09-28T19:18:56.822Z",
       "lastSyncedAt": "2026-09-28T19:19:10.169Z",
       "tables": [
@@ -22371,6 +22371,6 @@
       "originalFileName": "best-working-schema1.json"
     }
   ],
-  "activeSchemaId": "schema_mulms6ye_5",
-  "activeSchemaUpdatedAt": "2026-09-29T09:40:05.703Z"
+  "activeSchemaId": "schema-core-ap-p2p",
+  "activeSchemaUpdatedAt": "2026-09-29T10:50:21.605Z"
 }
