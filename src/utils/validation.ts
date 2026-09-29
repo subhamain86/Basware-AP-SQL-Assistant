@@ -55,6 +55,12 @@ export function sanitizeIncomingSchema(raw: unknown): any {
         name: safeString(c.name, ''),
         label: safeString(c.label, safeString(c.name, '')),
         description: safeString(c.description, ''),
+        // Preserve whatever data type string the imported/remote schema actually
+        // used (e.g. VARCHAR2, INTEGER, CLOB, BOOLEAN) — only default when truly
+        // missing/absent (including when the JSON key was dropped entirely,
+        // e.g. by JSON.stringify omitting an `undefined` value upstream, or by
+        // a manually hand-edited registry file on GitHub). Never coerce or
+        // discard a provided type.
         type: safeString(c.type, 'VARCHAR'),
         references: rawRefs ? { table: safeString(rawRefs.table, ''), column: safeString(rawRefs.column, '') } : c.references,
         decode: sanitizedDecode

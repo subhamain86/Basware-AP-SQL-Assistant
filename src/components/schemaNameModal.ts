@@ -2,13 +2,11 @@ import { icon } from './icons';
 import { openModal } from './modal';
 import { schemaService } from '../services/schemaService';
 /**
- * V16.2 fix: the error box is only ever INSERTED into the DOM when there is
- * an actual validation error. On success it is set back to an empty string
- * (removed from the DOM), rather than being permanently present and toggled
- * via the `hidden` attribute. This makes the "no error visible when there
- * is no error" behaviour independent of ANY CSS rule, specificity, or
- * cascade order — an element that was never inserted cannot be displayed
- * by any stylesheet, in any browser, in any embedding context.
+ * The error box is only ever INSERTED into the DOM when there is an actual
+ * validation error. On success it is set back to an empty string (removed
+ * from the DOM), rather than being permanently present and toggled via the
+ * `hidden` attribute. This makes "no error visible when there is no error"
+ * independent of any CSS rule, specificity, or cascade order.
  */
 export function openSchemaNameModal(opts: { title: string; suggestedName?: string; originalFileName?: string; onConfirm: (name: string) => void }): void {
   const bodyHtml = `<p>${opts.originalFileName ? `Uploaded file: <code>${opts.originalFileName}</code> — this filename will NOT be used as the schema name.` : "Choose a meaningful name for this schema — it will be shown throughout SQL Assistant and preserved across every synchronized device."}</p><label class="block-label">Schema Name *<input id="schemaNameInput" type="text" value="${opts.suggestedName ? opts.suggestedName.replace(/"/g, '&quot;') : ''}"/></label><div id="schemaNameError"></div><div class="modal-actions"><button id="schemaNameCancel" class="btn btn-ghost" type="button">Cancel</button><button id="schemaNameConfirm" class="btn btn-primary" type="button">${icon('check', 14)} Confirm Name</button></div>`;

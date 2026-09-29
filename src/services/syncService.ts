@@ -16,6 +16,52 @@ const MAX_LOG_ENTRIES = 30;
 function loadConfig(): SyncConfig { try { const raw = localStorage.getItem(CONFIG_KEY); if (raw) return JSON.parse(raw); } catch { } return { source: 'shared-location', time: 'manual', customTime: null }; }
 function loadPendingConflicts(): PendingConflict[] { try { const raw = localStorage.getItem(PENDING_CONFLICTS_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
+
+/**
+ * V16.3 fix — root cause of "Remote schema file failed validation"
+ * recurring even after the V16.1 data-type widening.
+ *
+ * The LOCAL import path (schemaService.importSchema) has always done this
+ * correctly: sanitize the incoming schema (filling in safe defaults for any
+ * genuinely missing field, e.g. an absent `type` key defaults to 'VARCHAR')
+ * FIRST, and only THEN run structural validation against the sanitized
+ * result. That guarantees a column whose `type` key is simply missing from
+ * the JSON — which can happen because `JSON.stringify` silently drops any
+ * key whose value is `undefined`, or because a registry file was hand-
+ * edited directly on GitHub — is treated exactly like the 'VARCHAR' default
+ * it will actually be saved as, not rejected outright.
+ *
+ * The REMOTE pull path (this file) did NOT follow that same order in V16.1/
+ * V16.2: it ran `validateIncomingRegistryFile()` against the RAW, freshly
+ * `JSON.parse`d payload — before any sanitization/defaulting had happened —
+ * and only sanitized the data afterward, once validation had already
+ * (sometimes wrongly) failed it. A column with a missing `type` key would
+ * therefore fail validation on the remote path even though the exact same
+ * data would have been accepted on the local import path. This function
+ * (`sanitizeThenValidateRegistry`) fixes that inconsistency by applying the
+ * identical sanitize-first, validate-second order used by import, on BOTH
+ * `pullRegistryFromGitHub()` and `discoverPublicRegistry()` below.
+ */
+function sanitizeThenValidateRegistry(parsedRaw: unknown): { sanitizedSchemas: SchemaModel[]; integrityValid: boolean; issues: { severity: 'error' | 'warning'; message: string }[] } {
+  const obj = (parsedRaw && typeof parsedRaw === 'object') ? (parsedRaw as Record<string, unknown>) : {};
+  const rawSchemas = Array.isArray(obj.schemas) ? obj.schemas : null;
+  if (!rawSchemas) return { sanitizedSchemas: [], integrityValid: false, issues: [{ severity: 'error', message: 'Missing required "schemas" array.' }] };
+  const sanitizedSchemas = rawSchemas.map((s) => sanitizeIncomingSchema(s)) as SchemaModel[];
+  // Re-wrap the ALREADY-SANITIZED schemas into the same shape
+  // validateIncomingRegistryFile() expects, so validation now runs against
+  // the defaulted data that will actually be used — not the raw pre-default
+  // payload that may be missing optional fields the sanitizer would have
+  // filled in.
+  const integrity = validateIncomingRegistryFile({ ...obj, schemas: sanitizedSchemas });
+  return { sanitizedSchemas, integrityValid: integrity.valid, issues: integrity.issues };
+}
+function summarizeIssues(issues: { severity: 'error' | 'warning'; message: string }[], max = 3): string {
+  const errors = issues.filter((i) => i.severity === 'error').map((i) => i.message);
+  if (errors.length === 0) return '';
+  const shown = errors.slice(0, max);
+  const suffix = errors.length > max ? ` (+${errors.length - max} more)` : '';
+  return shown.join('; ') + suffix;
+}
 export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 class SyncService {
@@ -98,16 +144,20 @@ class SyncService {
       const file = await getFile(repo, branch, path, '');
       if (!file) return { ok: true, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       const parsedRaw = JSON.parse(file.content);
-      const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) {
-        return { ok: false, error: 'Remote schema file failed validation.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      // V16.3: sanitize-then-validate (see sanitizeThenValidateRegistry doc
+      // comment above) — this is the actual fix for the recurring "Remote
+      // schema file failed validation" error.
+      const { sanitizedSchemas, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
+      if (!integrityValid) {
+        // Silent, automatic background check — never sets this.lastError
+        // (reserved for explicit user actions: Sync Now/Push/Pull).
+        const detail = summarizeIssues(issues);
+        return { ok: false, error: `Remote schema file failed validation.${detail ? ' ' + detail : ''}`, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       }
-      const parsed = parsedRaw as Record<string, unknown>;
-      const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
       beginInternalSync();
       const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; let unchanged = 0;
       try {
-        for (const remoteSchema of sanitizedSchemas as SchemaModel[]) {
+        for (const remoteSchema of sanitizedSchemas) {
           const local = schemaService.getSchemaById(remoteSchema.id);
           if (!local) {
             const outcome = schemaService.addSchemaFromRemote(remoteSchema);
@@ -139,13 +189,21 @@ class SyncService {
       if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
       const parsedRaw = JSON.parse(file.content);
-      const integrity = validateIncomingRegistryFile(parsedRaw);
-      if (!integrity.valid) { this.status = 'failed'; const msg = 'Remote schema file failed validation: ' + integrity.issues.filter((i) => i.severity === 'error').map((i) => i.message).join('; '); this.lastError = msg; this.notify(); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
-      const parsed = parsedRaw as Record<string, unknown>;
-      const sanitizedSchemas = Array.isArray(parsed.schemas) ? (parsed.schemas as unknown[]).map((s) => sanitizeIncomingSchema(s)) : [];
-      const remoteRegistry = { ...parsed, schemas: sanitizedSchemas } as SchemaRegistry;
+      // V16.3: sanitize-then-validate — see sanitizeThenValidateRegistry doc
+      // comment above for the full root-cause explanation. This is an
+      // EXPLICIT, user-initiated action, so on failure we DO set
+      // this.lastError (with the specific issue(s) included) so the user
+      // sees actionable detail instead of just the generic phrase.
+      const { sanitizedSchemas, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
+      if (!integrityValid) {
+        this.status = 'failed';
+        const detail = summarizeIssues(issues);
+        const msg = 'Remote schema file failed validation.' + (detail ? ' ' + detail : '');
+        this.lastError = msg; this.notify(); this.logEvent('error', msg);
+        return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
+      }
       const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
-      for (const remoteSchema of remoteRegistry.schemas) {
+      for (const remoteSchema of sanitizedSchemas) {
         const local = schemaService.getSchemaById(remoteSchema.id);
         if (!local) {
           const outcome = schemaService.addSchemaFromRemote(remoteSchema);

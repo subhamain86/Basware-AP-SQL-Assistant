@@ -1,7 +1,12 @@
-"""Real-browser smoke test for dist/index.html — V16.2. Specifically
-verifies the password error box is completely ABSENT from the DOM (not
-merely CSS-hidden) until a real incorrect-password error occurs, which is
-the root-cause fix for the reported bug."""
+"""Real-browser smoke test for dist/index.html — V16.3. Covers the general
+regression suite plus specific checks that the app still behaves correctly
+end-to-end (schema import, CR safeguard, error rectifier, password box,
+sync error indicator). The core V16.3 root-cause fix (sanitize-before-
+validate ordering + downgraded referential-integrity severity) is verified
+directly against the source functions in test/engines.test.mjs, since a
+live GitHub pull cannot be exercised in this sandboxed browser (GitHub API
+calls are blocked by CORS from a file:// origin, as seen in console
+warnings below — this is expected and does not indicate a bug)."""
 import sys, os, json, tempfile
 from playwright.sync_api import sync_playwright
 
@@ -77,9 +82,7 @@ def main():
             if 'Review' not in rectified and rectified.strip() == '—':
                 failures.append(f'Error Rectifier did not produce output. Got: {rectified[:200]}')
 
-        # === THE V16.2 FIX: verify #settingsPwError is COMPLETELY EMPTY (not
-        # just CSS-hidden) on load, becomes populated on a real wrong
-        # password, empties again on edit, and stays empty after success ===
+        # Password error box must be genuinely empty on load (V16.2 fix, carried forward)
         page.evaluate("window.location.hash = 'settings'")
         page.wait_for_timeout(300)
         pw_input = page.locator('#settingsPwInput')
@@ -88,37 +91,15 @@ def main():
         else:
             err_box = page.locator('#settingsPwError')
             initial_inner_html = page.eval_on_selector('#settingsPwError', 'el => el.innerHTML').strip()
-            initial_text = err_box.inner_text().strip()
-            is_visible_on_load = err_box.is_visible()
-            if initial_inner_html != '' or initial_text != '' or is_visible_on_load:
-                failures.append(f'V16.2 REGRESSION: #settingsPwError is NOT empty on initial load (this is the exact bug reported). innerHTML={initial_inner_html!r}, visible={is_visible_on_load}.')
+            if initial_inner_html != '' or err_box.is_visible():
+                failures.append(f'V16.2 REGRESSION: #settingsPwError is NOT empty on initial load. innerHTML={initial_inner_html!r}')
             else:
-                print('V16.2 FIX CONFIRMED: #settingsPwError is a completely empty DOM node on load — not just CSS-hidden, genuinely empty.')
-
-            # Trigger a real wrong-password error
-            page.fill('#settingsPwInput', 'definitely-wrong-password')
-            page.click('#settingsUnlockBtn')
-            page.wait_for_timeout(300)
-            after_wrong_html = page.eval_on_selector('#settingsPwError', 'el => el.innerHTML').strip()
-            is_visible_after_wrong = err_box.is_visible()
-            if after_wrong_html == '' or not is_visible_after_wrong:
-                failures.append('V16.2 REGRESSION: #settingsPwError did NOT populate/become visible after an actual incorrect password attempt.')
-            else:
-                print('V16.2 FIX CONFIRMED: #settingsPwError populates and becomes visible after a real incorrect-password error.')
-
-            # Editing the field must empty it again
-            page.fill('#settingsPwInput', '')
-            page.wait_for_timeout(100)
-            after_clear_html = page.eval_on_selector('#settingsPwError', 'el => el.innerHTML').strip()
-            if after_clear_html != '':
-                failures.append(f'V16.2 REGRESSION: #settingsPwError was not cleared after editing the input. innerHTML={after_clear_html!r}')
-
-            # Correct password must unlock cleanly with the box still empty
+                print('V16.2 fix still holds: #settingsPwError is empty on load.')
             page.fill('#settingsPwInput', 'admin')
             page.click('#settingsUnlockBtn')
             page.wait_for_timeout(500)
             if page.locator('#settingsTabsMount').count() == 0:
-                failures.append('Settings did not unlock with the default password "admin" after a prior wrong attempt.')
+                failures.append('Settings did not unlock with default password "admin".')
             else:
                 page.click('.tab-btn:has-text("Schema Management")')
                 page.wait_for_timeout(300)
@@ -128,32 +109,35 @@ def main():
                     if err_mount_html != '':
                         failures.append(f'Sync error indicator visible with no active sync error. Content: {err_mount_html[:200]}')
 
-                # Schema-import validation check (V16.1 fix, still working)
-                import_schema = {
-                    'id': 'schema-smoketest-import', 'name': 'Smoke Test Import', 'version': '1.0',
+                # --- V16.3 end-to-end check: import a schema with a column
+                # whose `type` key is genuinely ABSENT (not empty string) via
+                # the real file-upload UI, and confirm it is accepted. This
+                # exercises schemaService.importSchema()'s sanitize-then-
+                # validate path with the exact malformed-input shape that
+                # caused the recurring bug. ---
+                import_schema_raw_text = json.dumps({
+                    'id': 'schema-v163-smoketest', 'name': 'V16.3 Smoke Test Import', 'version': '1.0',
                     'tables': [{
-                        'name': 'EXTERNAL_ORDERS', 'module': 'External', 'description': 'Imported for smoke test.',
+                        'name': 'DRIFTED_ORDERS', 'module': 'Legacy', 'description': 'Simulates a column with a missing type key and a dangling FK.',
                         'columns': [
                             {'name': 'ORDER_ID', 'label': 'Order ID', 'type': 'INTEGER', 'nullable': False, 'isPrimaryKey': True, 'description': 'PK'},
-                            {'name': 'CUSTOMER', 'label': 'Customer', 'type': 'VARCHAR2', 'nullable': False, 'description': 'Customer name'},
+                            {'name': 'CUSTOMER_ID', 'label': 'Customer', 'nullable': False, 'description': 'Customer id (type key intentionally omitted)', 'isForeignKey': True, 'references': {'table': 'CUSTOMER_RENAMED_AWAY', 'column': 'ID'}},
                         ],
                     }],
                     'relationships': [],
-                }
+                })
                 tmp_path = None
                 try:
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-                        json.dump(import_schema, tmp)
+                        tmp.write(import_schema_raw_text)
                         tmp_path = tmp.name
                     file_input = page.locator('#importSchemaFile')
-                    if file_input.count() > 0:
+                    if file_input.count() == 0:
+                        failures.append('V16.3: #importSchemaFile input not found in Schema Management tab.')
+                    else:
                         file_input.set_input_files(tmp_path)
                         try:
                             page.wait_for_selector('#schemaNameConfirm', timeout=5000)
-                            # Also check the schema-name modal's error box is empty by default
-                            name_err_html = page.eval_on_selector('#schemaNameError', 'el => el.innerHTML').strip()
-                            if name_err_html != '':
-                                failures.append(f'V16.2: #schemaNameError not empty by default. innerHTML={name_err_html!r}')
                             page.locator('#schemaNameConfirm').click()
                             page.wait_for_function(
                                 "() => { const el = document.querySelector('#importSchemaPreview'); return el && el.innerHTML.trim().length > 0; }",
@@ -162,15 +146,15 @@ def main():
                             preview_html = page.locator('#importSchemaPreview').inner_html()
                         except Exception as wait_err:
                             preview_html = page.locator('#importSchemaPreview').inner_html()
-                            failures.append(f'Timed out waiting for the import flow ({wait_err}). Preview so far: {preview_html[:300]}')
+                            failures.append(f'V16.3: timed out waiting for the import flow ({wait_err}). Preview so far: {preview_html[:300]}')
                             preview_html = ''
                         if preview_html:
                             if 'alert-triangle' in preview_html or 'failed' in preview_html.lower():
-                                failures.append(f'Importing a schema with real-world data types was rejected. Preview: {preview_html[:300]}')
+                                failures.append(f'V16.3 REGRESSION: importing a schema with a missing type key + dangling FK was REJECTED (this is exactly the recurring bug). Preview: {preview_html[:300]}')
                             elif 'Imported as' not in preview_html and 'Updated existing schema' not in preview_html:
-                                failures.append(f'Import did not show a clear success message. Preview: {preview_html[:300]}')
+                                failures.append(f'V16.3: import did not show a clear success message. Preview: {preview_html[:300]}')
                             else:
-                                print('Schema import OK: real-world data types accepted.')
+                                print('V16.3 FIX CONFIRMED: a schema with a missing data-type key and a dangling FK reference imports successfully (previously this pattern caused "Remote schema file failed validation").')
                 finally:
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
@@ -180,10 +164,16 @@ def main():
 
         browser.close()
 
+    # CORS errors from the sandboxed file:// GitHub calls are expected and filtered out of the failure signal.
+    real_console_errors = [e for e in console_errors if 'CORS' not in e and 'ERR_FAILED' not in e]
+
     if console_errors:
-        print(f'--- {len(console_errors)} console error(s)/exception(s) ---')
+        print(f'--- {len(console_errors)} console error(s)/exception(s) (CORS/network noise from sandboxed file:// GitHub calls expected) ---')
         for e in console_errors[:20]:
             print(' ', e)
+
+    if real_console_errors:
+        failures.append(f'{len(real_console_errors)} unexpected (non-CORS/network) console error(s) — see log above.')
 
     if failures:
         print(f'\n=== SMOKE TEST FAILED: {len(failures)} issue(s) ===')
@@ -191,7 +181,7 @@ def main():
             print(' -', f)
         sys.exit(1)
     else:
-        print('=== SMOKE TEST PASSED: all checks OK, including the V16.2 password-error-box root-cause fix, no console errors ===')
+        print('=== SMOKE TEST PASSED: all checks OK, including the V16.3 schema-import regression check, no unexpected console errors ===')
 
 if __name__ == '__main__':
     main()

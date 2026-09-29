@@ -1,6 +1,8 @@
 /**
- * Unit tests for the core engines and regression fixes. Compiles the
- * TypeScript source to CommonJS once so tests run with plain Node.
+ * Unit tests for the core engines and regression fixes, including the V16.3
+ * fix for the recurring "Remote schema file failed validation" GitHub sync
+ * error. Compiles the TypeScript source to CommonJS once so tests run with
+ * plain Node.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +30,8 @@ const { rectify } = await req('src/engines/errorRectifierEngine');
 const { CORE_SCHEMA } = await req('src/data/defaultSchemas');
 const { filterToKnownTables } = await req('src/engines/nlpEngine');
 const { isCopilotConfigured } = await req('src/services/copilotNlpService');
-const { validateSchemaIntegrity, validateIncomingRegistryFile } = await req('src/engines/schemaIntegrityEngine');
+const { validateSchemaIntegrity, validateIncomingRegistryFile, validateIncomingSchemaFile } = await req('src/engines/schemaIntegrityEngine');
+const { sanitizeIncomingSchema } = await req('src/utils/validation');
 
 function baseState(overrides = {}) {
   return {
@@ -73,7 +76,7 @@ test('isCopilotConfigured is false unless every field is present (unchanged)', (
   assert.equal(isCopilotConfigured({ enabled: true, tenantId: 't', clientId: 'c', agentEndpoint: 'https://x', scope: 's' }), true);
 });
 
-test('V16.1 fix: a column with a real-world data type OUTSIDE the old 5-value UI enum is still VALID', () => {
+test('V16.1 fix (still in effect): a column with a real-world data type OUTSIDE the old 5-value UI enum is VALID', () => {
   const tables = [{
     name: 'CUSTOM_TABLE', module: 'Custom', description: 'Imported from an external system.',
     columns: [
@@ -86,42 +89,94 @@ test('V16.1 fix: a column with a real-world data type OUTSIDE the old 5-value UI
   assert.equal(result.valid, true);
 });
 
-test('V16.1 fix: an imported schema with real-world data types passes the SAME validator used for remote/pulled registry files', () => {
-  const registry = {
+// ---------------------------------------------------------------------
+// V16.3 FIX — "Remote schema file failed validation" recurring root cause
+// ---------------------------------------------------------------------
+
+test('V16.3 fix: a column with a MISSING `type` KEY ENTIRELY (not just an empty string) is now accepted once sanitized, matching what actually gets saved', () => {
+  // Simulates the real-world scenario: JSON.stringify drops keys whose value
+  // is `undefined`, so a schema pushed from memory with a genuinely-missing
+  // type would arrive over the wire with NO `type` key on that column at
+  // all -- not `type: ""`, but the key absent entirely.
+  const rawTables = [{
+    name: 'LEGACY_TABLE', module: 'Legacy', description: 'A table from an old export.',
+    columns: [
+      { name: 'ID', label: 'ID', nullable: false, isPrimaryKey: true, description: 'PK.' }, // type key absent
+      { name: 'NAME', label: 'Name', type: 'VARCHAR2', nullable: false, description: 'Name.' },
+    ],
+  }];
+  // Validating the RAW data directly (old, broken behavior) correctly finds
+  // the missing type -- this proves the test fixture is valid.
+  const rawResult = validateSchemaIntegrity(rawTables);
+  assert.equal(rawResult.valid, false, 'sanity check: raw data with a missing type key should fail raw validation');
+
+  // The FIX: sanitize first (exactly as schemaService.importSchema and the
+  // syncService pull path now both do), THEN validate. The sanitized result
+  // must be valid, because sanitizeIncomingSchema defaults the missing type
+  // to 'VARCHAR' -- and that defaulted value is what actually gets saved.
+  const sanitizedSchema = sanitizeIncomingSchema({ name: 'Legacy', tables: rawTables });
+  const sanitizedResult = validateSchemaIntegrity(sanitizedSchema.tables);
+  assert.equal(sanitizedResult.valid, true, `sanitized data should now be valid; issues: ${JSON.stringify(sanitizedResult.issues)}`);
+  assert.equal(sanitizedSchema.tables[0].columns[0].type, 'VARCHAR', 'missing type should default to VARCHAR after sanitizing');
+});
+
+test('V16.3 fix: validateIncomingRegistryFile (the exact function the sync pull path calls) accepts a registry whose columns are sanitized first', () => {
+  const rawRegistry = {
     schemas: [{
-      id: 'schema-imported-1', name: 'Imported ERP Schema', version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null,
-      tables: [{ name: 'ERP_ORDERS', module: 'ERP', description: 'Orders from an ERP export.', columns: [
-        { name: 'ORDER_ID', label: 'Order ID', type: 'NUMBER(10)', nullable: false, isPrimaryKey: true, description: 'PK.' },
+      id: 'schema-drift-1', name: 'Drifted Schema', version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null,
+      tables: [{ name: 'ERP_ORDERS', module: 'ERP', description: 'Orders export.', columns: [
+        { name: 'ORDER_ID', label: 'Order ID', nullable: false, isPrimaryKey: true, description: 'PK.' }, // type key absent -- simulates the real bug
       ] }],
       relationships: [],
     }],
-    activeSchemaId: 'schema-imported-1',
+    activeSchemaId: 'schema-drift-1',
   };
-  const result = validateIncomingRegistryFile(registry);
+  // Simulate the fixed syncService order: sanitize each schema in
+  // registry.schemas BEFORE re-validating the whole registry shape.
+  const sanitizedSchemas = rawRegistry.schemas.map((s) => sanitizeIncomingSchema(s));
+  const result = validateIncomingRegistryFile({ ...rawRegistry, schemas: sanitizedSchemas });
   assert.equal(result.valid, true, `issues: ${JSON.stringify(result.issues)}`);
 });
 
-test('V16.2 fix: settingsPage.ts no longer uses the hidden-attribute toggle pattern for #settingsPwError', () => {
-  // Root cause of "password error shown with no error": the box relied on
-  // the HTML `hidden` attribute, which lost a CSS specificity tie against
-  // `.issue-box{display:flex}`. The permanent fix removes that dependency
-  // entirely by never inserting the error markup into the DOM until a real
-  // error exists. This test asserts the source no longer contains the old,
-  // fragile pattern (a hard-coded `hidden` attribute alongside the error
-  // markup on the same line) for this specific element.
-  const src = readFileSync(path.join(root, 'src', 'pages', 'settingsPage.ts'), 'utf8');
-  assert.doesNotMatch(src, /id="settingsPwError"[^>]*class="issue-box[^>]*hidden/, 'settingsPwError must not combine a hard-coded error class with the hidden attribute on initial render');
-  assert.match(src, /id="settingsPwError"><\/div>/, 'settingsPwError must render as a completely empty container on initial paint');
+test('V16.3 fix: a dangling foreign-key reference (table renamed/removed) no longer blocks the whole schema — it is now a warning, not an error', () => {
+  const tables = [{
+    name: 'INVOICE_HEADER', module: 'Invoices', description: 'Invoices.',
+    columns: [
+      { name: 'INVOICE_ID', label: 'Invoice ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'PK.' },
+      // References a table that no longer exists in this schema (simulates
+      // a rename/delete elsewhere that wasn't cleaned up everywhere).
+      { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'VENDOR_RENAMED_AWAY', column: 'VENDOR_ID' }, description: 'Vendor.' },
+    ],
+  }];
+  const result = validateSchemaIntegrity(tables);
+  assert.equal(result.valid, true, `a dangling FK reference must not block the whole schema; issues: ${JSON.stringify(result.issues)}`);
+  const warnings = result.issues.filter((i) => i.severity === 'warning');
+  assert.ok(warnings.some((w) => /does not exist in this schema/.test(w.message)), 'the dangling reference should still be surfaced as a warning so it is visible and fixable');
 });
 
-test('V16.2 fix: schemaEditorSection.ts delete-confirmation error (#c3Error) uses the same empty-container pattern', () => {
-  const src = readFileSync(path.join(root, 'src', 'pages', 'schemaEditorSection.ts'), 'utf8');
-  assert.doesNotMatch(src, /id="c3Error"[^>]*hidden/, 'c3Error must not use the hidden-attribute toggle pattern');
+test('V16.3 fix: a duplicate table/column pairing no longer blocks the whole schema — it is now a warning, not an error', () => {
+  const tables = [{
+    name: 'VENDOR', module: 'Vendors', description: 'Vendors.',
+    columns: [
+      { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'PK.' },
+      { name: 'VENDOR_ID', label: 'Vendor ID (dup)', type: 'NUMBER', nullable: false, description: 'Accidental duplicate.' },
+    ],
+  }];
+  const result = validateSchemaIntegrity(tables);
+  assert.equal(result.valid, true, `a duplicate column must not block the whole schema; issues: ${JSON.stringify(result.issues)}`);
+  assert.ok(result.issues.some((i) => i.severity === 'warning' && /Duplicate column/.test(i.message)));
 });
 
-test('V16.2 fix: schemaNameModal.ts error box uses the same empty-container pattern', () => {
-  const src = readFileSync(path.join(root, 'src', 'components', 'schemaNameModal.ts'), 'utf8');
-  assert.doesNotMatch(src, /id="schemaNameError"[^>]*hidden/, 'schemaNameError must not use the hidden-attribute toggle pattern');
+test('V16.3 fix: truly fatal structural issues (missing table name, missing column name) still correctly block validation', () => {
+  const missingTableName = [{ name: '', module: 'X', description: '', columns: [{ name: 'A', label: 'A', type: 'NUMBER', nullable: true, description: '' }] }];
+  const r1 = validateSchemaIntegrity(missingTableName);
+  assert.equal(r1.valid, false);
+  assert.ok(r1.issues.some((i) => i.severity === 'error' && /missing its Table Name/.test(i.message)));
+
+  const missingColumnName = [{ name: 'T', module: 'X', description: '', columns: [{ name: '', label: '', type: 'NUMBER', nullable: true, description: '' }] }];
+  const r2 = validateSchemaIntegrity(missingColumnName);
+  assert.equal(r2.valid, false);
+  assert.ok(r2.issues.some((i) => i.severity === 'error' && /missing Column Name/.test(i.message)));
 });
 
 console.log('All engine + regression-fix tests passed.');

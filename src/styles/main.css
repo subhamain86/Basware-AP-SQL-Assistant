@@ -16,19 +16,6 @@ code { background: var(--hover); padding: .1rem .4rem; border-radius: 4px; }
 .mt { margin-top: 1.1rem; }
 .hint { color: var(--text-muted); font-size: 12px; }
 .tiny-label { font-size: 11.5px; margin-bottom: .4rem; }
-/*
- * Defense-in-depth only (NOT the primary fix as of V16.2). Kept because it
- * is still correct and harmless: any element that legitimately uses the
- * `hidden` attribute will always be hidden, regardless of what other
- * classes it also carries. The actual, primary fix for "password error box
- * visible with no active error" is in the TypeScript layer: transient error
- * boxes (Settings password, schema-name modal, delete confirmation, GitHub
- * sync indicator) are no longer permanently present with `hidden` toggled
- * on/off — they are only ever inserted into the DOM (via innerHTML) at the
- * moment a real error exists, and emptied again immediately after. That
- * approach has zero dependency on CSS cascade, specificity, or this rule
- * being in effect — see docs/CHANGELOG_V16.2.md.
- */
 [hidden] { display: none !important; }
 .app-shell { min-height: calc(100vh - 48px); display: flex; flex-direction: column; }
 .app-main { flex: 1; max-width: 1280px; width: 100%; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }

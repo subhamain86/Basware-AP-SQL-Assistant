@@ -79,10 +79,6 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       modal2.element.querySelector('#c2Continue')?.addEventListener('click', () => { modal2.close(); showConfirm3(); });
     }
     function showConfirm3(): void {
-      // V16.2 fix: #c3Error starts as an empty mount, not a permanently-present
-      // box toggled via the `hidden` attribute. It is only ever populated with
-      // markup after an actual incorrect-password attempt, and is emptied
-      // again if the user edits the field. See docs/CHANGELOG_V16.2.md.
       const modal3 = openModal(`${icon('lock', 18)} Final Confirmation`, `<p>Enter the Admin Password to permanently delete this schema record.</p><label class="block-label">Admin Password<input id="c3Password" type="password"/></label><div id="c3Error"></div><div class="modal-actions"><button id="c3Cancel" class="btn btn-ghost">Cancel</button><button id="c3Delete" class="btn btn-danger">Delete Permanently</button></div>`, { closeOnBackdrop: false });
       const pwInput = modal3.element.querySelector<HTMLInputElement>('#c3Password')!;
       const errBox = modal3.element.querySelector<HTMLElement>('#c3Error')!;

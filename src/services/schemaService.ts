@@ -76,6 +76,12 @@ export class SchemaService {
     const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
+  /**
+   * Sanitize BEFORE validating — this is the same ordering the V16.3 fix
+   * applies to the GitHub sync/pull path (see syncService.ts). Both paths
+   * must agree, or a schema accepted here could still fail later on a pull,
+   * which is exactly the bug this release fixes.
+   */
   importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string; replacedExisting?: boolean } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
     const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;
