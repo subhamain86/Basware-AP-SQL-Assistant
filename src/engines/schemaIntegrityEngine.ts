@@ -2,36 +2,16 @@ import type { SchemaModel, TableDef, SchemaIntegrityResult, SchemaIntegrityIssue
 import { safeTrim, safeUpperTrim } from '../utils/validation';
 
 /**
- * V16.3 fix — "Remote schema file failed validation" recurring after V16.1.
- *
- * V16.1 widened the data-type check (any non-empty type string is accepted),
- * which fixed one cause of this error. But the error kept recurring because
- * of a SECOND, separate problem: this validator treated referential-
- * integrity issues — a foreign key pointing at a table/column that no
- * longer exists, or a duplicate table/column pairing — as hard BLOCKING
- * errors. Real schemas drift over time (a table gets renamed, a column
- * gets removed, someone hand-edits the registry file on GitHub) and these
- * are exactly the kind of minor metadata inconsistencies that should not
- * prevent an otherwise-usable schema from syncing at all. A single stale FK
- * reference anywhere in a large schema was enough to make the ENTIRE
- * registry fail validation and block sync for every device.
- *
- * Fix: only structural issues that make a row fundamentally unusable/
- * unidentifiable (missing table name, missing column name) remain
- * `error` (blocking). Referential-integrity and data-quality issues that
- * don't prevent SQL generation from working (dangling FK reference,
- * duplicate column, duplicate decode raw value, negative length/precision)
- * are now `warning` (non-blocking) — they are still surfaced to the user so
- * the drift is visible and fixable, but they no longer abort synchronization
- * of the whole file.
- *
- * See also syncService.ts for the second half of this fix: the remote/pull
- * path now sanitizes incoming schema data BEFORE validating it (matching
- * what the local import path already did), so a column whose `type` key was
- * literally absent from the JSON (e.g. dropped by JSON.stringify omitting an
- * undefined value, or from a hand-edited file) is defaulted to 'VARCHAR'
- * before the type-presence check runs, instead of being validated in its
- * raw, pre-default state.
+ * V16.1/V16.3 fixes — root causes of "Remote schema file failed validation".
+ * Only structural issues that make a row fundamentally unusable/
+ * unidentifiable (missing table name, missing column name) are blocking
+ * `error`s. Referential-integrity and data-quality issues that don't
+ * prevent SQL generation from working (dangling FK reference, duplicate
+ * column, duplicate decode raw value, negative length/precision) are
+ * `warning`s (non-blocking) — still surfaced so drift is visible and
+ * fixable, but they no longer abort synchronization of the whole file.
+ * A data type is required to be present, but is NOT restricted to a
+ * 5-value UI enum (VARCHAR2, INTEGER, BOOLEAN, etc. are all accepted).
  */
 export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResult {
   const issues: SchemaIntegrityIssue[] = [];
@@ -46,7 +26,6 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
       const cName = safeTrim(c?.name);
       if (!cName) { issues.push({ severity: 'error', message: `Table "${tName}" has a column with a missing Column Name.` }); return; }
       const key = `${safeUpperTrim(tName)}::${safeUpperTrim(cName)}`;
-      // V16.3: duplicate column is a data-quality issue, not fatal — downgraded to warning.
       if (seenTableColumn.has(key)) issues.push({ severity: 'warning', message: `Duplicate column "${tName}.${cName}" — each table/column combination is expected to be unique.` });
       seenTableColumn.add(key);
       if (!safeTrim(c?.type)) issues.push({ severity: 'error', message: `Column "${tName}.${cName}" is missing a Data Type.` });
@@ -54,11 +33,6 @@ export function validateSchemaIntegrity(tables: TableDef[]): SchemaIntegrityResu
       if (c.isForeignKey) {
         const refTable = safeTrim(c.references?.table);
         const refColumn = safeTrim(c.references?.column);
-        // V16.3: an incomplete or dangling FK reference is referential drift,
-        // not a fatal structural problem — downgraded to warning in all three
-        // cases below. The column itself remains fully usable in SQL
-        // generation; only the "this is a documented relationship" metadata
-        // is unreliable.
         if (!refTable || !refColumn) issues.push({ severity: 'warning', message: `Column "${tName}.${cName}" is marked as a Foreign Key but has no reference table/column.` });
         else {
           const refTableUpper = safeUpperTrim(refTable);

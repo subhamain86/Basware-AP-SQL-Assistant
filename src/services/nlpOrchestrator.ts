@@ -3,7 +3,8 @@
  * Copilot Enterprise (if enabled+configured) -> generic Online AI/NLP
  * Endpoint (if configured) -> offline engine only. Both online tiers'
  * suggested tables/columns are passed through filterToKnownTables /
- * filterToKnownColumns before ever reaching SQL generation.
+ * filterToKnownColumns before ever reaching SQL generation — the Active
+ * Schema is always the authoritative source for what tables/columns exist.
  */
 import type { SchemaModel, QueryRequirement, CrRequirement, NlpOrchestrationResult } from '../types';
 import { parseRequirement, filterToKnownTables, filterToKnownColumns } from '../engines/nlpEngine';
@@ -45,6 +46,8 @@ async function tryEnterpriseNlp(rawText: string, schema: SchemaModel): Promise<{
   const vaultConfig = secretVaultService.isUnlocked() ? secretVaultService.getConfig() : null;
   const copilotConfig = vaultConfig?.m365Copilot ?? null;
   if (isCopilotConfigured(copilotConfig)) {
+    // Per requirement #13: only a minimal, relevant SUBSET of the schema is
+    // sent to the external enterprise AI — never the whole schema.
     const minimalContext = buildMinimalSchemaContext(rawText, schema);
     const copilotResponse = await tryM365Copilot(copilotConfig!, rawText, minimalContext);
     if (copilotResponse) return { response: copilotResponse, source: 'copilot' };
@@ -62,8 +65,15 @@ export async function orchestrateReadOnlyNlp(rawText: string, schema: SchemaMode
   if (!rawText.trim()) return { result: offlineResult, engineUsed: 'offline', onlineAttempted: false };
   if (!isBrowserOnline()) return { result: offlineResult, engineUsed: 'offline', onlineAttempted: false, onlineError: 'Browser reports offline.' };
   const enterprise = await tryEnterpriseNlp(rawText, schema);
+  // Requirement #10: if enterprise AI is unavailable for ANY reason, the
+  // user must still be able to generate SQL via the offline engine — this
+  // fallback is unconditional and requires no configuration to work.
   if (!enterprise) return { result: offlineResult, engineUsed: 'offline', onlineAttempted: true, onlineError: 'No online AI/NLP endpoint configured or reachable.' };
   const { response: online, source } = enterprise;
+  // Requirement #11: the Active Schema is the authoritative source of
+  // truth — anything the AI suggests that isn't an actual table/column in
+  // the Active Schema is discarded here, before it can ever reach SQL
+  // generation.
   const { known: knownTables, unknown: unknownTables } = filterToKnownTables(online.tables || [], schema);
   const onlineColumnPairs = (online.columns || []).map((c) => ({ table: c.table, column: c.column }));
   const { unknown: unknownColumns } = filterToKnownColumns(onlineColumnPairs, schema);

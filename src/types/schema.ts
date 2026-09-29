@@ -12,7 +12,18 @@ export interface RelationshipDef { id: string; fromTable: string; fromColumn: st
 export type SchemaStatus = 'active' | 'default' | 'inactive';
 export interface SchemaVersionMeta { version: string; schemaId: string; lastUpdated: string; updatedByDevice: string; source: 'local' | 'location' | 'github' | 'vault' | 'import'; checksum: string; }
 export interface SchemaModel { id: string; name: string; version: string; status: SchemaStatus; updatedAt: string; lastSyncedAt: string | null; tables: TableDef[]; relationships: RelationshipDef[]; versionMeta?: SchemaVersionMeta; originalFileName?: string; }
-export interface SchemaRegistry { schemas: SchemaModel[]; activeSchemaId: string; }
+/**
+ * V16.4: `activeSchemaUpdatedAt` (and `activeSchemaUpdatedByDevice`, for
+ * debugging) are new, OPTIONAL fields that turn "which schema is active"
+ * into a small versioned pointer, exactly like each individual SchemaModel
+ * already has via `versionMeta`. This is what lets cross-device sync decide
+ * whether an incoming Active Schema selection from the repository is
+ * actually newer than the local selection, instead of either ignoring it
+ * (old bug: Active Schema never synced) or blindly overwriting it (which
+ * would violate "must not unexpectedly revert"). See schemaService.ts and
+ * syncService.ts for how this pointer is stamped, compared, and applied.
+ */
+export interface SchemaRegistry { schemas: SchemaModel[]; activeSchemaId: string; activeSchemaUpdatedAt?: string | null; activeSchemaUpdatedByDevice?: string; }
 export interface SchemaEditorRow { rowId: string; module: string; tableName: string; tableDescription: string; columnName: string; columnDescription: string; dataType: ColumnDataType; length: number | null; precision: number | null; nullable: boolean; alias: string; decodeText: string; isPrimaryKey: boolean; isForeignKey: boolean; fkTable: string; fkColumn: string; }
 export interface SchemaIntegrityIssue { severity: 'error' | 'warning'; message: string; }
 export interface SchemaIntegrityResult { valid: boolean; issues: SchemaIntegrityIssue[]; }

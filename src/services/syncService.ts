@@ -1,8 +1,9 @@
-import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, SchemaRegistry, PendingConflict, SyncLogEntry } from '../types';
+import type { SyncConfig, SyncSource, SyncTimeOption, SyncStatus, SchemaModel, PendingConflict, SyncLogEntry } from '../types';
 import { secretVaultService, DEFAULT_BOOTSTRAP_CONFIG } from './secretVaultService';
 import { schemaService } from './schemaService';
 import { validateIncomingRegistryFile } from '../engines/schemaIntegrityEngine';
 import { detectConflict } from '../engines/schemaVersionEngine';
+import { planSchemaMerge, shouldApplyRemoteActiveSchema, type ActiveSchemaPointer } from '../engines/schemaSyncMerge';
 import { getFile, putFile, isGitHubApiError } from './githubApiService';
 import { assertSyncConfigOrError, safeTrim, sanitizeIncomingSchema, safeLocalStorageSet } from '../utils/validation';
 import { makeId } from '../utils/id';
@@ -18,42 +19,20 @@ function loadPendingConflicts(): PendingConflict[] { try { const raw = localStor
 function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 
 /**
- * V16.3 fix — root cause of "Remote schema file failed validation"
- * recurring even after the V16.1 data-type widening.
- *
- * The LOCAL import path (schemaService.importSchema) has always done this
- * correctly: sanitize the incoming schema (filling in safe defaults for any
- * genuinely missing field, e.g. an absent `type` key defaults to 'VARCHAR')
- * FIRST, and only THEN run structural validation against the sanitized
- * result. That guarantees a column whose `type` key is simply missing from
- * the JSON — which can happen because `JSON.stringify` silently drops any
- * key whose value is `undefined`, or because a registry file was hand-
- * edited directly on GitHub — is treated exactly like the 'VARCHAR' default
- * it will actually be saved as, not rejected outright.
- *
- * The REMOTE pull path (this file) did NOT follow that same order in V16.1/
- * V16.2: it ran `validateIncomingRegistryFile()` against the RAW, freshly
- * `JSON.parse`d payload — before any sanitization/defaulting had happened —
- * and only sanitized the data afterward, once validation had already
- * (sometimes wrongly) failed it. A column with a missing `type` key would
- * therefore fail validation on the remote path even though the exact same
- * data would have been accepted on the local import path. This function
- * (`sanitizeThenValidateRegistry`) fixes that inconsistency by applying the
- * identical sanitize-first, validate-second order used by import, on BOTH
- * `pullRegistryFromGitHub()` and `discoverPublicRegistry()` below.
+ * V16.4 — sanitize-then-validate a raw registry payload (schemas array +
+ * active-schema pointer), exactly matching the local-import ordering fixed
+ * in V16.3. Kept as one shared helper so the pull path, the pre-push merge
+ * step, and background discovery can never again drift out of sync with
+ * each other on this point.
  */
-function sanitizeThenValidateRegistry(parsedRaw: unknown): { sanitizedSchemas: SchemaModel[]; integrityValid: boolean; issues: { severity: 'error' | 'warning'; message: string }[] } {
+function sanitizeThenValidateRegistry(parsedRaw: unknown): { sanitizedSchemas: SchemaModel[]; remotePointer: ActiveSchemaPointer; integrityValid: boolean; issues: { severity: 'error' | 'warning'; message: string }[] } {
   const obj = (parsedRaw && typeof parsedRaw === 'object') ? (parsedRaw as Record<string, unknown>) : {};
   const rawSchemas = Array.isArray(obj.schemas) ? obj.schemas : null;
-  if (!rawSchemas) return { sanitizedSchemas: [], integrityValid: false, issues: [{ severity: 'error', message: 'Missing required "schemas" array.' }] };
+  const remotePointer: ActiveSchemaPointer = { activeSchemaId: typeof obj.activeSchemaId === 'string' ? obj.activeSchemaId : '', activeSchemaUpdatedAt: typeof obj.activeSchemaUpdatedAt === 'string' ? obj.activeSchemaUpdatedAt : null };
+  if (!rawSchemas) return { sanitizedSchemas: [], remotePointer, integrityValid: false, issues: [{ severity: 'error', message: 'Missing required "schemas" array.' }] };
   const sanitizedSchemas = rawSchemas.map((s) => sanitizeIncomingSchema(s)) as SchemaModel[];
-  // Re-wrap the ALREADY-SANITIZED schemas into the same shape
-  // validateIncomingRegistryFile() expects, so validation now runs against
-  // the defaulted data that will actually be used — not the raw pre-default
-  // payload that may be missing optional fields the sanitizer would have
-  // filled in.
   const integrity = validateIncomingRegistryFile({ ...obj, schemas: sanitizedSchemas });
-  return { sanitizedSchemas, integrityValid: integrity.valid, issues: integrity.issues };
+  return { sanitizedSchemas, remotePointer, integrityValid: integrity.valid, issues: integrity.issues };
 }
 function summarizeIssues(issues: { severity: 'error' | 'warning'; message: string }[], max = 3): string {
   const errors = issues.filter((i) => i.severity === 'error').map((i) => i.message);
@@ -62,7 +41,7 @@ function summarizeIssues(issues: { severity: 'error' | 'warning'; message: strin
   const suffix = errors.length > max ? ` (+${errors.length - max} more)` : '';
   return shown.join('; ') + suffix;
 }
-export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; }
+export interface PullOutcome { ok: boolean; error?: string; newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number; activeSchemaSynced?: boolean; }
 export interface PushOutcome { ok: boolean; error?: string; requiresPullFirst?: boolean; }
 class SyncService {
   private config: SyncConfig = loadConfig();
@@ -136,6 +115,48 @@ class SyncService {
     this.pendingConflicts = this.pendingConflicts.filter((c) => c.id !== conflictId);
     this.persistPendingConflicts();
   }
+  /**
+   * V16.4 — shared merge-application step used by BOTH the authenticated
+   * pull and the pre-push merge. Given already-sanitized remote schemas,
+   * runs `planSchemaMerge()` against the CURRENT local schema list and:
+   *   - adds any schema that only exists remotely (never loses data),
+   *   - records a pending conflict (existing UI, unchanged) for any schema
+   *     that exists on both sides with genuinely different content,
+   *   - leaves everything else untouched.
+   * Returns the outcome so callers can report it and decide whether it's
+   * safe to proceed (e.g. push should not proceed while new conflicts
+   * exist, to avoid overwriting a change the user hasn't reviewed yet).
+   */
+  private applyMerge(remoteSchemas: SchemaModel[]): { newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number } {
+    const plan = planSchemaMerge(schemaService.getAllSchemas(), remoteSchemas);
+    const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
+    for (const action of plan) {
+      if (action.kind === 'add') {
+        const outcome = schemaService.addSchemaFromRemote(action.schema);
+        if (outcome === 'added') newSchemasAdded.push(action.schema.name);
+        else if (outcome === 'updated') updatedSchemas.push(action.schema.name);
+        else unchanged += 1;
+      } else if (action.kind === 'unchanged') {
+        unchanged += 1;
+      } else if (action.kind === 'conflict' && action.conflict) {
+        conflicts.push(this.addPendingConflict(action.schema.id, action.schema.name, action.conflict.localVersion, action.conflict.remoteVersion, action.conflict.changedPaths, action.schema));
+      }
+    }
+    return { newSchemasAdded, updatedSchemas, conflicts, unchanged };
+  }
+  /**
+   * V16.4 — applies the Active Schema pointer from a remote registry, IF
+   * (and only if) it wins the last-write-wins comparison against the
+   * current local pointer. This is what makes cross-device Active Schema
+   * sync actually happen — see schemaSyncMerge.ts for the full rationale.
+   */
+  private syncActiveSchemaPointer(remotePointer: ActiveSchemaPointer): boolean {
+    const localPointer = schemaService.getActiveSchemaPointer();
+    if (!shouldApplyRemoteActiveSchema(localPointer, remotePointer)) return false;
+    const applied = schemaService.applyRemoteActiveSchemaPointer(remotePointer);
+    if (applied) this.logEvent('pull', `Active Schema synchronized from the repository: "${schemaService.getSchemaById(remotePointer.activeSchemaId)?.name ?? remotePointer.activeSchemaId}".`);
+    return applied;
+  }
   async discoverPublicRegistry(reason: string): Promise<PullOutcome> {
     try {
       const repo = DEFAULT_BOOTSTRAP_CONFIG.githubRepo;
@@ -144,34 +165,22 @@ class SyncService {
       const file = await getFile(repo, branch, path, '');
       if (!file) return { ok: true, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       const parsedRaw = JSON.parse(file.content);
-      // V16.3: sanitize-then-validate (see sanitizeThenValidateRegistry doc
-      // comment above) — this is the actual fix for the recurring "Remote
-      // schema file failed validation" error.
       const { sanitizedSchemas, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
       if (!integrityValid) {
-        // Silent, automatic background check — never sets this.lastError
-        // (reserved for explicit user actions: Sync Now/Push/Pull).
+        // Silent, automatic, PRE-AUTHENTICATION background check — never
+        // sets this.lastError (reserved for explicit user actions: Sync
+        // Now/Push/Pull) and, per the intended Authentication -> Discover
+        // -> ... -> Set Active Schema ordering, never touches the Active
+        // Schema pointer either (that only happens on the authenticated
+        // pull below, once Settings/Secret Vault has been unlocked).
         const detail = summarizeIssues(issues);
         return { ok: false, error: `Remote schema file failed validation.${detail ? ' ' + detail : ''}`, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       }
       beginInternalSync();
-      const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; let unchanged = 0;
-      try {
-        for (const remoteSchema of sanitizedSchemas) {
-          const local = schemaService.getSchemaById(remoteSchema.id);
-          if (!local) {
-            const outcome = schemaService.addSchemaFromRemote(remoteSchema);
-            if (outcome === 'added') newSchemasAdded.push(remoteSchema.name);
-            else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name);
-            else unchanged += 1;
-            continue;
-          }
-          const conflict = detectConflict(local, remoteSchema);
-          if (!conflict.hasConflict) { unchanged += 1; continue; }
-        }
-      } finally { endInternalSync(); }
-      if (newSchemasAdded.length || updatedSchemas.length) this.logEvent('discovery', `Public discovery (${reason}): ${newSchemasAdded.length} new schema(s), ${updatedSchemas.length} updated: ${[...newSchemasAdded, ...updatedSchemas].join(', ')}.`);
-      return { ok: true, newSchemasAdded, updatedSchemas, conflicts: [], unchanged };
+      let merge: ReturnType<typeof this.applyMerge>;
+      try { merge = this.applyMerge(sanitizedSchemas); } finally { endInternalSync(); }
+      if (merge.newSchemasAdded.length || merge.updatedSchemas.length) this.logEvent('discovery', `Public discovery (${reason}): ${merge.newSchemasAdded.length} new schema(s), ${merge.updatedSchemas.length} updated: ${[...merge.newSchemasAdded, ...merge.updatedSchemas].join(', ')}.`);
+      return { ok: true, ...merge };
     } catch (e) {
       return { ok: false, error: (e as Error)?.message || 'Unknown error during public discovery.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
     }
@@ -189,39 +198,23 @@ class SyncService {
       if (!file) { this.status = 'never'; this.notify(); const msg = 'No schema file found yet at the configured path — create or import a schema to establish the repository as the source of truth.'; this.logEvent('pull', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
       this.setLastKnownSha(file.sha);
       const parsedRaw = JSON.parse(file.content);
-      // V16.3: sanitize-then-validate — see sanitizeThenValidateRegistry doc
-      // comment above for the full root-cause explanation. This is an
-      // EXPLICIT, user-initiated action, so on failure we DO set
-      // this.lastError (with the specific issue(s) included) so the user
-      // sees actionable detail instead of just the generic phrase.
-      const { sanitizedSchemas, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
-      if (!integrityValid) {
-        this.status = 'failed';
-        const detail = summarizeIssues(issues);
-        const msg = 'Remote schema file failed validation.' + (detail ? ' ' + detail : '');
-        this.lastError = msg; this.notify(); this.logEvent('error', msg);
-        return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
-      }
-      const newSchemasAdded: string[] = []; const updatedSchemas: string[] = []; const conflicts: PendingConflict[] = []; let unchanged = 0;
-      for (const remoteSchema of sanitizedSchemas) {
-        const local = schemaService.getSchemaById(remoteSchema.id);
-        if (!local) {
-          const outcome = schemaService.addSchemaFromRemote(remoteSchema);
-          if (outcome === 'added') newSchemasAdded.push(remoteSchema.name);
-          else if (outcome === 'updated') updatedSchemas.push(remoteSchema.name);
-          else unchanged += 1;
-          continue;
-        }
-        const conflict = detectConflict(local, remoteSchema);
-        if (!conflict.hasConflict) { unchanged += 1; continue; }
-        conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
-      }
+      const { sanitizedSchemas, remotePointer, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
+      if (!integrityValid) { this.status = 'failed'; const detail = summarizeIssues(issues); const msg = 'Remote schema file failed validation.' + (detail ? ' ' + detail : ''); this.lastError = msg; this.notify(); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
+      // This is the fully AUTHENTICATED path (Secret Vault already unlocked
+      // — see missingConfigMessage() above), matching the requested
+      // "Authentication -> ... -> Synchronize Local Store -> Retrieve
+      // Active Schema -> Set Active Schema" workflow exactly: merge schema
+      // content first, THEN apply the Active Schema pointer (so the
+      // referenced schema is guaranteed to already exist locally by the
+      // time we try to activate it).
+      const merge = this.applyMerge(sanitizedSchemas);
+      const activeSchemaSynced = this.syncActiveSchemaPointer(remotePointer);
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
       this.lastError = null;
       safeLocalStorageSet(STATUS_KEY, this.status);
-      this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${updatedSchemas.length} updated, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
+      this.logEvent('pull', `Discovery complete: ${merge.newSchemasAdded.length} new, ${merge.updatedSchemas.length} updated, ${merge.unchanged} up to date, ${merge.conflicts.length} conflict(s)${activeSchemaSynced ? ', Active Schema synchronized' : ''}.`);
       this.notify();
-      return { ok: true, newSchemasAdded, updatedSchemas, conflicts, unchanged };
+      return { ok: true, ...merge, activeSchemaSynced };
     } catch (e) {
       this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
       const message = isGitHubApiError(e) ? e.message : (e as Error)?.message || 'Unknown error during synchronization.';
@@ -232,6 +225,32 @@ class SyncService {
       endInternalSync();
     }
   }
+  /**
+   * V16.4 — THE fix for cross-device schema loss on push. Previously this
+   * method serialized ONLY the local registry and overwrote the remote
+   * file unconditionally — so if another device had pushed a schema this
+   * device never pulled, that schema would vanish from the central store
+   * the next time THIS device pushed. Now, before building the outgoing
+   * payload, it fetches the current remote file (using the same repo/
+   * branch/path/token already required for the push itself — no new
+   * configuration, no new permissions) and merges it in first:
+   *   - Schemas that exist remotely but not locally are pulled in locally
+   *     (schemaService.addSchemaFromRemote), so the very next serialization
+   *     of the local registry already contains them — nothing is lost.
+   *   - If a schema differs on both sides (genuine conflict, not just
+   *     "remote has something new"), the push is aborted for THIS schema's
+   *     sake: the existing conflict-resolution UI (Schema Management's
+   *     conflict banner) is populated instead of either side blindly
+   *     overwriting the other's changes, and the whole push is deferred
+   *     until the user resolves it (same "Use Local / Use Remote" flow
+   *     already used on pull, now also reachable from an attempted push).
+   *   - The Active Schema pointer is synchronized the same way pull does,
+   *     before the payload is built, so an Active Schema choice made on
+   *     another device is not overwritten by an older local choice either.
+   * Only once all of that is safely reconciled does the (now-merged) local
+   * registry get serialized and PUT to GitHub, using the sha just fetched
+   * (minimizing the chance of a stale-sha 409 on the actual write).
+   */
   async pushRegistryToGitHub(commitMessage?: string): Promise<PushOutcome> {
     const missing = this.missingConfigMessage();
     if (missing) {
@@ -242,17 +261,50 @@ class SyncService {
     this.status = 'syncing'; this.notify();
     beginInternalSync();
     try {
-      const registry = schemaService.getRegistry();
-      const content = JSON.stringify(registry, null, 2);
       const path = safeTrim(cfg.githubSchemaPath);
       const branch = safeTrim(cfg.githubBranch) || 'main';
-      const result = await putFile(cfg.githubRepo, branch, path, cfg.githubToken, content, safeTrim(commitMessage) || `Update SQL Assistant schema registry (${new Date().toISOString()})`, this.lastKnownSha());
+      let shaForPut: string | null = this.lastKnownSha();
+      try {
+        const remoteFile = await getFile(cfg.githubRepo, branch, path, cfg.githubToken);
+        if (remoteFile) {
+          shaForPut = remoteFile.sha;
+          this.setLastKnownSha(remoteFile.sha);
+          const parsedRaw = JSON.parse(remoteFile.content);
+          const { sanitizedSchemas, remotePointer, integrityValid } = sanitizeThenValidateRegistry(parsedRaw);
+          if (integrityValid) {
+            const merge = this.applyMerge(sanitizedSchemas);
+            if (merge.conflicts.length) {
+              this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
+              const msg = `Cannot push: ${merge.conflicts.length} schema(s) have unresolved conflicts with the repository. Resolve them in Schema Management (Use Local / Use Remote), then sync again.`;
+              this.lastError = msg; this.notify(); this.logEvent('error', msg);
+              return { ok: false, error: msg, requiresPullFirst: true };
+            }
+            this.syncActiveSchemaPointer(remotePointer);
+            if (merge.newSchemasAdded.length) this.logEvent('push', `Merged ${merge.newSchemasAdded.length} schema(s) found only in the repository before pushing, so they are preserved: ${merge.newSchemasAdded.join(', ')}.`);
+          }
+          // If integrityValid is false here, we deliberately don't abort the
+          // push over it — an already-broken remote file (e.g. a manual
+          // hand-edit gone wrong) should still be repairable by pushing a
+          // known-good local registry over it, same as before this fix.
+        }
+      } catch (mergeErr) {
+        // A network/auth failure while trying to pre-merge is surfaced as
+        // the push's own failure, rather than silently pushing blind and
+        // risking exactly the data-loss bug this fix exists to prevent.
+        this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
+        const msg = isGitHubApiError(mergeErr) ? mergeErr.message : (mergeErr as Error)?.message || 'Could not verify the current repository state before pushing.';
+        this.lastError = msg; this.notify(); this.logEvent('error', msg);
+        return { ok: false, error: msg };
+      }
+      const registry = schemaService.getRegistry();
+      const content = JSON.stringify(registry, null, 2);
+      const result = await putFile(cfg.githubRepo, branch, path, cfg.githubToken, content, safeTrim(commitMessage) || `Update SQL Assistant schema registry (${new Date().toISOString()})`, shaForPut);
       this.setLastKnownSha(result.sha);
       schemaService.markAllSynced();
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
       this.lastError = null;
       safeLocalStorageSet(STATUS_KEY, this.status);
-      this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s)).`);
+      this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s), Active Schema: "${schemaService.getActiveSchema().name}").`);
       this.notify();
       return { ok: true };
     } catch (e) {

@@ -2,7 +2,8 @@ import type { SchemaModel, SchemaRegistry, DecodeEntry, TableDef, ColumnDef, Sch
 import { DEFAULT_SCHEMAS, DEFAULT_ACTIVE_SCHEMA_ID } from '../data/defaultSchemas';
 import { validateDecodeEntries } from '../engines/decodeEngine';
 import { validateSchemaIntegrity } from '../engines/schemaIntegrityEngine';
-import { stampNewVersion, sameLogicalSchema } from '../engines/schemaVersionEngine';
+import { stampNewVersion, sameLogicalSchema, getDeviceTag } from '../engines/schemaVersionEngine';
+import type { ActiveSchemaPointer } from '../engines/schemaSyncMerge';
 import { makeId } from '../utils/id';
 import { validateSchemaName, sanitizeIncomingSchema, safeLocalStorageSet, estimateStringBytes } from '../utils/validation';
 const STORAGE_KEY = 'sqla.registry.v15';
@@ -14,8 +15,24 @@ export class SchemaService {
   private storageHealth: StorageHealth = { bytesUsed: 0, lastPersistOk: true, lastError: null, lastRecovered: false };
   constructor() { this.registry = this.load(); }
   private load(): SchemaRegistry {
-    try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { const parsed = JSON.parse(raw) as SchemaRegistry; if (parsed.schemas?.length) return parsed; } } catch { }
-    return { schemas: clone(DEFAULT_SCHEMAS), activeSchemaId: DEFAULT_ACTIVE_SCHEMA_ID };
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as SchemaRegistry;
+        if (parsed.schemas?.length) {
+          // V16.4: local data saved before this release never had an Active
+          // Schema pointer timestamp. Stamp one now so this device's current
+          // selection is treated as "explicitly set" from this point on,
+          // rather than perpetually looking "never set" (which would make it
+          // lose every future comparison against ANY remote pointer, even a
+          // stale one — see shouldApplyRemoteActiveSchema in
+          // schemaSyncMerge.ts).
+          if (!parsed.activeSchemaUpdatedAt) parsed.activeSchemaUpdatedAt = new Date().toISOString();
+          return parsed;
+        }
+      }
+    } catch { }
+    return { schemas: clone(DEFAULT_SCHEMAS), activeSchemaId: DEFAULT_ACTIVE_SCHEMA_ID, activeSchemaUpdatedAt: new Date().toISOString() };
   }
   private static readonly PRUNE_ESCALATION_CAPS = [12, 6, 3, 1];
   private persist(): void {
@@ -65,23 +82,45 @@ export class SchemaService {
   getModulesForSchema(schemaId: string): string[] { const s = this.getSchemaById(schemaId); if (!s) return []; return Array.from(new Set(s.tables.map((t) => t.module))).sort(); }
   getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
   getAllSchemaNames(excludeId?: string): string[] { return this.registry.schemas.filter((s) => s.id !== excludeId).map((s) => s.name); }
+  /**
+   * V16.4 — used by user-initiated (local) Active Schema changes. Always
+   * stamps a FRESH timestamp, marking this as the device's most recent
+   * deliberate choice, so it correctly wins any future cross-device
+   * comparison until something newer supersedes it.
+   */
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
     this.registry.schemas.forEach((s) => { s.status = s.id === schemaId ? 'active' : (s.status === 'active' ? 'inactive' : s.status); });
     this.registry.activeSchemaId = schemaId;
+    this.registry.activeSchemaUpdatedAt = new Date().toISOString();
+    this.registry.activeSchemaUpdatedByDevice = getDeviceTag();
     this.persist();
   }
   resetToDefaultSchema(): void { this.switchActiveSchema(DEFAULT_ACTIVE_SCHEMA_ID); }
+  /** V16.4 — read-only snapshot of the current Active Schema pointer, for sync comparison. */
+  getActiveSchemaPointer(): ActiveSchemaPointer { return { activeSchemaId: this.registry.activeSchemaId, activeSchemaUpdatedAt: this.registry.activeSchemaUpdatedAt ?? null }; }
+  /**
+   * V16.4 — applies an Active Schema selection that arrived FROM the
+   * central repository (i.e. it already won the
+   * `shouldApplyRemoteActiveSchema()` comparison in syncService.ts). Unlike
+   * `switchActiveSchema()`, this preserves the REMOTE timestamp exactly
+   * (rather than re-stamping "now") so later comparisons on other devices
+   * remain accurate to when the choice actually happened. Returns false
+   * (and makes no change) if the referenced schema isn't known locally yet
+   * — callers should always merge schemas in before attempting this.
+   */
+  applyRemoteActiveSchemaPointer(pointer: ActiveSchemaPointer): boolean {
+    if (!pointer.activeSchemaId || !this.registry.schemas.some((s) => s.id === pointer.activeSchemaId)) return false;
+    this.registry.schemas.forEach((s) => { s.status = s.id === pointer.activeSchemaId ? 'active' : (s.status === 'active' ? 'inactive' : s.status); });
+    this.registry.activeSchemaId = pointer.activeSchemaId;
+    this.registry.activeSchemaUpdatedAt = pointer.activeSchemaUpdatedAt;
+    this.persist();
+    return true;
+  }
   validateNewSchemaName(name: unknown, excludeId?: string): string | null {
     const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
-  /**
-   * Sanitize BEFORE validating — this is the same ordering the V16.3 fix
-   * applies to the GitHub sync/pull path (see syncService.ts). Both paths
-   * must agree, or a schema accepted here could still fail later on a pull,
-   * which is exactly the bug this release fixes.
-   */
   importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string; replacedExisting?: boolean } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
     const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;
@@ -128,7 +167,7 @@ export class SchemaService {
     if (this.registry.schemas.length <= 1) return { ok: false, error: 'Cannot delete the only remaining schema.' };
     const wasActive = this.registry.activeSchemaId === schemaId;
     this.registry.schemas = this.registry.schemas.filter((s) => s.id !== schemaId);
-    if (wasActive) { this.registry.activeSchemaId = this.registry.schemas[0].id; this.registry.schemas[0].status = 'active'; }
+    if (wasActive) { this.registry.activeSchemaId = this.registry.schemas[0].id; this.registry.schemas[0].status = 'active'; this.registry.activeSchemaUpdatedAt = new Date().toISOString(); }
     this.persist();
     return { ok: true };
   }
@@ -167,11 +206,19 @@ export class SchemaService {
       if (moduleFilter && t.module !== moduleFilter) return;
       if (tableFilter && t.name !== tableFilter) return;
       t.columns.forEach((c) => {
-        rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableName: t.name, tableDescription: t.description, columnName: c.name, columnDescription: c.description, dataType: c.type as any, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' });
+        rows.push({ rowId: `${t.name}::${c.name}`, module: t.module, tableDescription: t.description, tableName: t.name, columnName: c.name, columnDescription: c.description, dataType: c.type as any, length: c.length ?? null, precision: c.precision ?? null, nullable: c.nullable, alias: c.alias ?? '', decodeText: c.decode ? c.decode.map((d) => `${d.rawValue}=${d.label}`).join('\n') : '', isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey, fkTable: c.references?.table ?? '', fkColumn: c.references?.column ?? '' });
       });
     });
     return rows;
   }
+  /**
+   * V15.6/V15.7 requirement (explicitly re-confirmed intact for V16.4):
+   * Manual Schema Update writes back ONLY the single edited/added row's
+   * column — the rest of the table's columns and every other table are
+   * left completely untouched in the in-memory model before persist()
+   * serializes the whole (otherwise-unmodified) registry. Nothing about
+   * this per-row update behaviour was changed by the V16.4 sync fix.
+   */
   async upsertRow(schemaId: string, row: SchemaEditorRow, originalRowId: string | null): Promise<string[]> {
     const schema = this.getSchemaById(schemaId);
     if (!schema) return ['Schema not found.'];

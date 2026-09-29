@@ -23,7 +23,7 @@ function scheduleBackgroundPush(): void {
   pushTimer = setTimeout(async () => {
     const result = await syncService.pushRegistryToGitHub('Automatic sync: schema catalogue updated');
     if (result.ok) toastFn('success', 'Schema changes synchronized automatically to the repository.');
-    else if (result.requiresPullFirst) toastFn('warning', 'Automatic sync paused — a newer version exists remotely. Use "Sync Now" to resolve.');
+    else if (result.requiresPullFirst) toastFn('warning', `Automatic sync paused: ${result.error || 'a newer version exists remotely'}. Resolve in Schema Management, or use "Sync Now" to resolve.`);
     else toastFn('error', `Automatic sync failed: ${result.error || 'unknown error'}.`);
   }, PUSH_DEBOUNCE_MS);
 }
@@ -34,6 +34,7 @@ export async function performDiscovery(reason: string): Promise<void> {
     if (result.newSchemasAdded.length) toastFn('success', `${result.newSchemasAdded.length} schema(s) synchronized from the repository: ${result.newSchemasAdded.join(', ')}.`);
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) updated from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
     if (result.conflicts.length) toastFn('warning', `${result.conflicts.length} schema(s) have unresolved sync conflicts — review them in Schema or Settings.`);
+    if (result.activeSchemaSynced) toastFn('info', 'Active Schema synchronized from another device.');
   }
 }
 export const performBackgroundPull = performDiscovery;

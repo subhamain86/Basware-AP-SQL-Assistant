@@ -19,7 +19,7 @@ export function mountAppShell(root: HTMLElement): void {
   const navSlot = document.createElement('div'); const mainSlot = document.createElement('main'); mainSlot.className = 'app-main';
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>AP-SQL Assistant · Version 16.3</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>AP-SQL Assistant · Version 16.4</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
   mountToastContainer(root);
   setAutoSyncToastHandler((kind, text) => store.pushToast(kind, text));

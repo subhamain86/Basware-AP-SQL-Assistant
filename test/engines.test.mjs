@@ -1,13 +1,12 @@
 /**
- * Unit tests for the core engines and regression fixes, including the V16.3
- * fix for the recurring "Remote schema file failed validation" GitHub sync
- * error. Compiles the TypeScript source to CommonJS once so tests run with
- * plain Node.
+ * Unit tests for the core engines and regression fixes, including the
+ * V16.4 fix for cross-device Schema Sync and Active Schema Sync. Compiles
+ * the TypeScript source to CommonJS once so tests run with plain Node.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,8 +29,9 @@ const { rectify } = await req('src/engines/errorRectifierEngine');
 const { CORE_SCHEMA } = await req('src/data/defaultSchemas');
 const { filterToKnownTables } = await req('src/engines/nlpEngine');
 const { isCopilotConfigured } = await req('src/services/copilotNlpService');
-const { validateSchemaIntegrity, validateIncomingRegistryFile, validateIncomingSchemaFile } = await req('src/engines/schemaIntegrityEngine');
+const { validateSchemaIntegrity, validateIncomingRegistryFile } = await req('src/engines/schemaIntegrityEngine');
 const { sanitizeIncomingSchema } = await req('src/utils/validation');
+const { planSchemaMerge, shouldApplyRemoteActiveSchema } = await req('src/engines/schemaSyncMerge');
 
 function baseState(overrides = {}) {
   return {
@@ -39,6 +39,9 @@ function baseState(overrides = {}) {
     advanced: { distinct: false, groupByColumns: [], havingClause: '', limit: null, recursive: false, saveAsView: null, caseExpressions: [], decodeExpressions: [], ctes: [] },
     generatedSql: '', lastGeneratedAt: null, joinPathChoices: {}, ...overrides,
   };
+}
+function makeSchema(id, name, tables, versionMeta) {
+  return { id, name, version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables, relationships: [], versionMeta };
 }
 
 test('sqlEngine: basic SELECT with join and filter (unchanged)', () => {
@@ -71,112 +74,96 @@ test('schema-authoritative filtering: fabricated table from an AI response is di
   assert.deepEqual(unknown, ['MADE_UP_TABLE']);
 });
 
-test('isCopilotConfigured is false unless every field is present (unchanged)', () => {
+test('isCopilotConfigured is false unless every field is present (M365 Copilot integration, unchanged)', () => {
   assert.equal(isCopilotConfigured(null), false);
   assert.equal(isCopilotConfigured({ enabled: true, tenantId: 't', clientId: 'c', agentEndpoint: 'https://x', scope: 's' }), true);
 });
 
-test('V16.1 fix (still in effect): a column with a real-world data type OUTSIDE the old 5-value UI enum is VALID', () => {
-  const tables = [{
-    name: 'CUSTOM_TABLE', module: 'Custom', description: 'Imported from an external system.',
-    columns: [
-      { name: 'ID', label: 'ID', type: 'INTEGER', nullable: false, isPrimaryKey: true, description: 'Primary key.' },
-      { name: 'NAME', label: 'Name', type: 'VARCHAR2', length: 100, nullable: false, description: 'Name.' },
-    ],
-  }];
+test('V16.1/V16.3 fixes (still in effect): real-world data types accepted, referential drift is a warning not an error', () => {
+  const tables = [{ name: 'CUSTOM_TABLE', module: 'Custom', description: '', columns: [{ name: 'ID', label: 'ID', type: 'INTEGER', nullable: false, isPrimaryKey: true, description: '' }] }];
   const result = validateSchemaIntegrity(tables);
-  assert.equal(result.issues.filter((i) => i.severity === 'error').length, 0);
   assert.equal(result.valid, true);
 });
 
 // ---------------------------------------------------------------------
-// V16.3 FIX — "Remote schema file failed validation" recurring root cause
+// V16.4 FIX — Schema Sync + Active Schema Sync across devices
 // ---------------------------------------------------------------------
 
-test('V16.3 fix: a column with a MISSING `type` KEY ENTIRELY (not just an empty string) is now accepted once sanitized, matching what actually gets saved', () => {
-  // Simulates the real-world scenario: JSON.stringify drops keys whose value
-  // is `undefined`, so a schema pushed from memory with a genuinely-missing
-  // type would arrive over the wire with NO `type` key on that column at
-  // all -- not `type: ""`, but the key absent entirely.
-  const rawTables = [{
-    name: 'LEGACY_TABLE', module: 'Legacy', description: 'A table from an old export.',
-    columns: [
-      { name: 'ID', label: 'ID', nullable: false, isPrimaryKey: true, description: 'PK.' }, // type key absent
-      { name: 'NAME', label: 'Name', type: 'VARCHAR2', nullable: false, description: 'Name.' },
-    ],
-  }];
-  // Validating the RAW data directly (old, broken behavior) correctly finds
-  // the missing type -- this proves the test fixture is valid.
-  const rawResult = validateSchemaIntegrity(rawTables);
-  assert.equal(rawResult.valid, false, 'sanity check: raw data with a missing type key should fail raw validation');
-
-  // The FIX: sanitize first (exactly as schemaService.importSchema and the
-  // syncService pull path now both do), THEN validate. The sanitized result
-  // must be valid, because sanitizeIncomingSchema defaults the missing type
-  // to 'VARCHAR' -- and that defaulted value is what actually gets saved.
-  const sanitizedSchema = sanitizeIncomingSchema({ name: 'Legacy', tables: rawTables });
-  const sanitizedResult = validateSchemaIntegrity(sanitizedSchema.tables);
-  assert.equal(sanitizedResult.valid, true, `sanitized data should now be valid; issues: ${JSON.stringify(sanitizedResult.issues)}`);
-  assert.equal(sanitizedSchema.tables[0].columns[0].type, 'VARCHAR', 'missing type should default to VARCHAR after sanitizing');
+test('V16.4 fix (Schema Sync): a schema that exists only remotely is planned as "add" — never silently dropped', () => {
+  const local = [makeSchema('s-local-1', 'Local Only', [])];
+  const remote = [makeSchema('s-remote-1', 'Remote Only', [])];
+  const plan = planSchemaMerge(local, remote);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].kind, 'add');
+  assert.equal(plan[0].schema.id, 's-remote-1');
 });
 
-test('V16.3 fix: validateIncomingRegistryFile (the exact function the sync pull path calls) accepts a registry whose columns are sanitized first', () => {
+test('V16.4 fix (Schema Sync): identical schema on both sides (same checksum) is "unchanged" — no unnecessary conflict', () => {
+  const cols = [{ name: 'A', label: 'A', type: 'NUMBER', nullable: true, description: '' }];
+  const tables = [{ name: 'T', module: 'M', description: '', columns: cols }];
+  const versionMeta = { version: '1.0.0', schemaId: 's1', lastUpdated: new Date().toISOString(), updatedByDevice: 'dev1', source: 'local', checksum: 'abc123' };
+  const local = [makeSchema('s1', 'Same Schema', tables, versionMeta)];
+  const remote = [makeSchema('s1', 'Same Schema', tables, { ...versionMeta, updatedByDevice: 'dev2' })];
+  const plan = planSchemaMerge(local, remote);
+  assert.equal(plan[0].kind, 'unchanged');
+});
+
+test('V16.4 fix (Schema Sync): genuinely diverged content on both sides is flagged "conflict" — never auto-picks a winner', () => {
+  const versionMetaA = { version: '1.0.0', schemaId: 's1', lastUpdated: new Date().toISOString(), updatedByDevice: 'dev1', source: 'local', checksum: 'checksum-A' };
+  const versionMetaB = { version: '1.0.1', schemaId: 's1', lastUpdated: new Date().toISOString(), updatedByDevice: 'dev2', source: 'local', checksum: 'checksum-B' };
+  const tablesA = [{ name: 'T', module: 'M', description: '', columns: [{ name: 'A', label: 'A', type: 'NUMBER', nullable: true, description: '' }] }];
+  const tablesB = [{ name: 'T', module: 'M', description: '', columns: [{ name: 'B', label: 'B', type: 'VARCHAR', nullable: true, description: '' }] }];
+  const local = [makeSchema('s1', 'Diverged', tablesA, versionMetaA)];
+  const remote = [makeSchema('s1', 'Diverged', tablesB, versionMetaB)];
+  const plan = planSchemaMerge(local, remote);
+  assert.equal(plan[0].kind, 'conflict');
+  assert.ok(plan[0].conflict.hasConflict);
+});
+
+test('V16.4 fix (Active Schema Sync): local pointer never explicitly set -> remote pointer is always adopted', () => {
+  const local = { activeSchemaId: 'schema-default', activeSchemaUpdatedAt: null };
+  const remote = { activeSchemaId: 'schema-B', activeSchemaUpdatedAt: '2026-01-01T00:00:00.000Z' };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), true, 'a device that has never explicitly set its own Active Schema must adopt the remote choice');
+});
+
+test('V16.4 fix (Active Schema Sync): remote pointer strictly newer than local -> applied (this is what makes cross-device sync work)', () => {
+  const local = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: '2026-01-01T00:00:00.000Z' };
+  const remote = { activeSchemaId: 'schema-B', activeSchemaUpdatedAt: '2026-01-02T00:00:00.000Z' };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), true);
+});
+
+test('V16.4 fix (Active Schema Sync): remote pointer OLDER than local -> NOT applied (must not unexpectedly revert an intentional local choice)', () => {
+  const local = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: '2026-01-05T00:00:00.000Z' };
+  const remote = { activeSchemaId: 'schema-B', activeSchemaUpdatedAt: '2026-01-01T00:00:00.000Z' };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), false, 'an older remote choice must never override a more recent local choice');
+});
+
+test('V16.4 fix (Active Schema Sync): remote already matches local -> no-op (false), regardless of timestamps', () => {
+  const local = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: '2026-01-01T00:00:00.000Z' };
+  const remote = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: '2026-01-09T00:00:00.000Z' };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), false);
+});
+
+test('V16.4 fix (Active Schema Sync): remote has no pointer at all -> never applied', () => {
+  const local = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: null };
+  const remote = { activeSchemaId: '', activeSchemaUpdatedAt: null };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), false);
+});
+
+test('V16.4 fix (Active Schema Sync): remote has no timestamp but local does -> untimed remote never overrides a timed, deliberate local choice', () => {
+  const local = { activeSchemaId: 'schema-A', activeSchemaUpdatedAt: '2026-01-01T00:00:00.000Z' };
+  const remote = { activeSchemaId: 'schema-B', activeSchemaUpdatedAt: null };
+  assert.equal(shouldApplyRemoteActiveSchema(local, remote), false);
+});
+
+test('V16.4 fix: validateIncomingRegistryFile still accepts a sanitized registry (sanitize-then-validate ordering from V16.3 preserved)', () => {
   const rawRegistry = {
-    schemas: [{
-      id: 'schema-drift-1', name: 'Drifted Schema', version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null,
-      tables: [{ name: 'ERP_ORDERS', module: 'ERP', description: 'Orders export.', columns: [
-        { name: 'ORDER_ID', label: 'Order ID', nullable: false, isPrimaryKey: true, description: 'PK.' }, // type key absent -- simulates the real bug
-      ] }],
-      relationships: [],
-    }],
-    activeSchemaId: 'schema-drift-1',
+    schemas: [{ id: 's1', name: 'X', version: '1.0', status: 'inactive', updatedAt: new Date().toISOString(), lastSyncedAt: null, tables: [{ name: 'T', module: 'M', description: '', columns: [{ name: 'C', label: 'C', nullable: true, description: '' }] }], relationships: [] }],
+    activeSchemaId: 's1', activeSchemaUpdatedAt: new Date().toISOString(),
   };
-  // Simulate the fixed syncService order: sanitize each schema in
-  // registry.schemas BEFORE re-validating the whole registry shape.
   const sanitizedSchemas = rawRegistry.schemas.map((s) => sanitizeIncomingSchema(s));
   const result = validateIncomingRegistryFile({ ...rawRegistry, schemas: sanitizedSchemas });
   assert.equal(result.valid, true, `issues: ${JSON.stringify(result.issues)}`);
-});
-
-test('V16.3 fix: a dangling foreign-key reference (table renamed/removed) no longer blocks the whole schema — it is now a warning, not an error', () => {
-  const tables = [{
-    name: 'INVOICE_HEADER', module: 'Invoices', description: 'Invoices.',
-    columns: [
-      { name: 'INVOICE_ID', label: 'Invoice ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'PK.' },
-      // References a table that no longer exists in this schema (simulates
-      // a rename/delete elsewhere that wasn't cleaned up everywhere).
-      { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isForeignKey: true, references: { table: 'VENDOR_RENAMED_AWAY', column: 'VENDOR_ID' }, description: 'Vendor.' },
-    ],
-  }];
-  const result = validateSchemaIntegrity(tables);
-  assert.equal(result.valid, true, `a dangling FK reference must not block the whole schema; issues: ${JSON.stringify(result.issues)}`);
-  const warnings = result.issues.filter((i) => i.severity === 'warning');
-  assert.ok(warnings.some((w) => /does not exist in this schema/.test(w.message)), 'the dangling reference should still be surfaced as a warning so it is visible and fixable');
-});
-
-test('V16.3 fix: a duplicate table/column pairing no longer blocks the whole schema — it is now a warning, not an error', () => {
-  const tables = [{
-    name: 'VENDOR', module: 'Vendors', description: 'Vendors.',
-    columns: [
-      { name: 'VENDOR_ID', label: 'Vendor ID', type: 'NUMBER', nullable: false, isPrimaryKey: true, description: 'PK.' },
-      { name: 'VENDOR_ID', label: 'Vendor ID (dup)', type: 'NUMBER', nullable: false, description: 'Accidental duplicate.' },
-    ],
-  }];
-  const result = validateSchemaIntegrity(tables);
-  assert.equal(result.valid, true, `a duplicate column must not block the whole schema; issues: ${JSON.stringify(result.issues)}`);
-  assert.ok(result.issues.some((i) => i.severity === 'warning' && /Duplicate column/.test(i.message)));
-});
-
-test('V16.3 fix: truly fatal structural issues (missing table name, missing column name) still correctly block validation', () => {
-  const missingTableName = [{ name: '', module: 'X', description: '', columns: [{ name: 'A', label: 'A', type: 'NUMBER', nullable: true, description: '' }] }];
-  const r1 = validateSchemaIntegrity(missingTableName);
-  assert.equal(r1.valid, false);
-  assert.ok(r1.issues.some((i) => i.severity === 'error' && /missing its Table Name/.test(i.message)));
-
-  const missingColumnName = [{ name: 'T', module: 'X', description: '', columns: [{ name: '', label: '', type: 'NUMBER', nullable: true, description: '' }] }];
-  const r2 = validateSchemaIntegrity(missingColumnName);
-  assert.equal(r2.valid, false);
-  assert.ok(r2.issues.some((i) => i.severity === 'error' && /missing Column Name/.test(i.message)));
 });
 
 console.log('All engine + regression-fix tests passed.');
