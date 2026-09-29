@@ -38,11 +38,18 @@ export async function performDiscovery(reason: string): Promise<void> {
   }
 }
 export const performBackgroundPull = performDiscovery;
+/**
+ * V16.5: this now runs unauthenticated on EVERY app load (see appShell.ts)
+ * and, as of this release, can also bring the Active Schema pointer in
+ * line across devices without requiring anyone to unlock Settings first —
+ * see syncService.discoverPublicRegistry() for the fix.
+ */
 export async function performPublicDiscovery(reason: string): Promise<void> {
   const result = await syncService.discoverPublicRegistry(reason);
   if (result.ok) {
     if (result.newSchemasAdded.length) toastFn('success', `${result.newSchemasAdded.length} new schema(s) discovered and synchronized from the repository: ${result.newSchemasAdded.join(', ')}.`);
     if (result.updatedSchemas.length) toastFn('info', `${result.updatedSchemas.length} schema(s) refreshed from a newer copy on the repository: ${result.updatedSchemas.join(', ')}.`);
+    if (result.activeSchemaSynced) toastFn('info', 'Active Schema synchronized from another device.');
   }
 }
 export async function handleVaultUnlocked(): Promise<void> { await performDiscovery('vault-unlocked'); }

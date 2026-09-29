@@ -20,13 +20,12 @@ export class SchemaService {
       if (raw) {
         const parsed = JSON.parse(raw) as SchemaRegistry;
         if (parsed.schemas?.length) {
-          // V16.4: local data saved before this release never had an Active
-          // Schema pointer timestamp. Stamp one now so this device's current
-          // selection is treated as "explicitly set" from this point on,
-          // rather than perpetually looking "never set" (which would make it
-          // lose every future comparison against ANY remote pointer, even a
-          // stale one — see shouldApplyRemoteActiveSchema in
-          // schemaSyncMerge.ts).
+          // Local data saved before V16.4 never had an Active Schema pointer
+          // timestamp. Stamp one now so this device's current selection is
+          // treated as "explicitly set" from this point on, rather than
+          // perpetually looking "never set" (which would make it lose every
+          // future comparison against ANY remote pointer, even a stale one
+          // — see shouldApplyRemoteActiveSchema in schemaSyncMerge.ts).
           if (!parsed.activeSchemaUpdatedAt) parsed.activeSchemaUpdatedAt = new Date().toISOString();
           return parsed;
         }
@@ -83,10 +82,10 @@ export class SchemaService {
   getTablesForModule(schemaId: string, module: string | null): TableDef[] { const s = this.getSchemaById(schemaId); if (!s) return []; return module ? s.tables.filter((t) => t.module === module) : s.tables; }
   getAllSchemaNames(excludeId?: string): string[] { return this.registry.schemas.filter((s) => s.id !== excludeId).map((s) => s.name); }
   /**
-   * V16.4 — used by user-initiated (local) Active Schema changes. Always
-   * stamps a FRESH timestamp, marking this as the device's most recent
-   * deliberate choice, so it correctly wins any future cross-device
-   * comparison until something newer supersedes it.
+   * Used by user-initiated (local) Active Schema changes. Always stamps a
+   * FRESH timestamp, marking this as the device's most recent deliberate
+   * choice, so it correctly wins any future cross-device comparison until
+   * something newer supersedes it.
    */
   switchActiveSchema(schemaId: string): void {
     if (!this.registry.schemas.some((s) => s.id === schemaId)) return;
@@ -97,17 +96,17 @@ export class SchemaService {
     this.persist();
   }
   resetToDefaultSchema(): void { this.switchActiveSchema(DEFAULT_ACTIVE_SCHEMA_ID); }
-  /** V16.4 — read-only snapshot of the current Active Schema pointer, for sync comparison. */
+  /** Read-only snapshot of the current Active Schema pointer, for sync comparison. */
   getActiveSchemaPointer(): ActiveSchemaPointer { return { activeSchemaId: this.registry.activeSchemaId, activeSchemaUpdatedAt: this.registry.activeSchemaUpdatedAt ?? null }; }
   /**
-   * V16.4 — applies an Active Schema selection that arrived FROM the
-   * central repository (i.e. it already won the
-   * `shouldApplyRemoteActiveSchema()` comparison in syncService.ts). Unlike
-   * `switchActiveSchema()`, this preserves the REMOTE timestamp exactly
-   * (rather than re-stamping "now") so later comparisons on other devices
-   * remain accurate to when the choice actually happened. Returns false
-   * (and makes no change) if the referenced schema isn't known locally yet
-   * — callers should always merge schemas in before attempting this.
+   * Applies an Active Schema selection that arrived FROM the central
+   * repository (i.e. it already won the `shouldApplyRemoteActiveSchema()`
+   * comparison in syncService.ts). Unlike `switchActiveSchema()`, this
+   * preserves the REMOTE timestamp exactly (rather than re-stamping "now")
+   * so later comparisons on other devices remain accurate to when the
+   * choice actually happened. Returns false (and makes no change) if the
+   * referenced schema isn't known locally yet — callers should always
+   * merge schemas in before attempting this.
    */
   applyRemoteActiveSchemaPointer(pointer: ActiveSchemaPointer): boolean {
     if (!pointer.activeSchemaId || !this.registry.schemas.some((s) => s.id === pointer.activeSchemaId)) return false;
@@ -212,12 +211,11 @@ export class SchemaService {
     return rows;
   }
   /**
-   * V15.6/V15.7 requirement (explicitly re-confirmed intact for V16.4):
+   * V15.6/V15.7 requirement (explicitly re-confirmed intact for V16.5):
    * Manual Schema Update writes back ONLY the single edited/added row's
    * column — the rest of the table's columns and every other table are
    * left completely untouched in the in-memory model before persist()
-   * serializes the whole (otherwise-unmodified) registry. Nothing about
-   * this per-row update behaviour was changed by the V16.4 sync fix.
+   * serializes the whole (otherwise-unmodified) registry.
    */
   async upsertRow(schemaId: string, row: SchemaEditorRow, originalRowId: string | null): Promise<string[]> {
     const schema = this.getSchemaById(schemaId);

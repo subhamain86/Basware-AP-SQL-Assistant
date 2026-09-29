@@ -19,11 +19,15 @@ export function mountAppShell(root: HTMLElement): void {
   const navSlot = document.createElement('div'); const mainSlot = document.createElement('main'); mainSlot.className = 'app-main';
   shell.appendChild(navSlot); shell.appendChild(mainSlot); root.appendChild(shell);
   const footer = document.createElement('footer'); footer.className = 'app-footer';
-  footer.innerHTML = `<span>AP-SQL Assistant · Version 16.4</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
+  footer.innerHTML = `<span>AP-SQL Assistant · Version 16.5</span><span>Crafted by ${SIGNATURE_NAME}</span>`;
   root.appendChild(footer);
   mountToastContainer(root);
   setAutoSyncToastHandler((kind, text) => store.pushToast(kind, text));
   initAutoSync();
+  // V16.5: this call is what carries the fix — performPublicDiscovery now
+  // also synchronizes the Active Schema pointer (in addition to schema
+  // content, which it already did), and it runs here unconditionally on
+  // every app load, regardless of whether Settings has ever been unlocked.
   performPublicDiscovery('app-load').catch(() => {});
   function routeFromHash(): Route { const h = window.location.hash.replace('#', '') as Route; return VALID_ROUTES.includes(h) ? h : 'quickstart'; }
   function navigate(route: Route): void { window.location.hash = route; }

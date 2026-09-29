@@ -19,11 +19,11 @@ function loadPendingConflicts(): PendingConflict[] { try { const raw = localStor
 function loadSyncLog(): SyncLogEntry[] { try { const raw = localStorage.getItem(SYNC_LOG_KEY); if (raw) return JSON.parse(raw); } catch { } return []; }
 
 /**
- * V16.4 — sanitize-then-validate a raw registry payload (schemas array +
- * active-schema pointer), exactly matching the local-import ordering fixed
- * in V16.3. Kept as one shared helper so the pull path, the pre-push merge
- * step, and background discovery can never again drift out of sync with
- * each other on this point.
+ * Sanitize-then-validate a raw registry payload (schemas array + active-
+ * schema pointer), exactly matching the local-import ordering fixed in
+ * V16.3. Kept as one shared helper so the pull path, the pre-push merge
+ * step, and the (V16.5-fixed) background discovery path can never again
+ * drift out of sync with each other on this point.
  */
 function sanitizeThenValidateRegistry(parsedRaw: unknown): { sanitizedSchemas: SchemaModel[]; remotePointer: ActiveSchemaPointer; integrityValid: boolean; issues: { severity: 'error' | 'warning'; message: string }[] } {
   const obj = (parsedRaw && typeof parsedRaw === 'object') ? (parsedRaw as Record<string, unknown>) : {};
@@ -116,16 +116,13 @@ class SyncService {
     this.persistPendingConflicts();
   }
   /**
-   * V16.4 — shared merge-application step used by BOTH the authenticated
-   * pull and the pre-push merge. Given already-sanitized remote schemas,
+   * Shared merge-application step used by pull, pre-push merge, AND (as of
+   * V16.5) background discovery. Given already-sanitized remote schemas,
    * runs `planSchemaMerge()` against the CURRENT local schema list and:
    *   - adds any schema that only exists remotely (never loses data),
    *   - records a pending conflict (existing UI, unchanged) for any schema
    *     that exists on both sides with genuinely different content,
    *   - leaves everything else untouched.
-   * Returns the outcome so callers can report it and decide whether it's
-   * safe to proceed (e.g. push should not proceed while new conflicts
-   * exist, to avoid overwriting a change the user hasn't reviewed yet).
    */
   private applyMerge(remoteSchemas: SchemaModel[]): { newSchemasAdded: string[]; updatedSchemas: string[]; conflicts: PendingConflict[]; unchanged: number } {
     const plan = planSchemaMerge(schemaService.getAllSchemas(), remoteSchemas);
@@ -145,10 +142,22 @@ class SyncService {
     return { newSchemasAdded, updatedSchemas, conflicts, unchanged };
   }
   /**
-   * V16.4 — applies the Active Schema pointer from a remote registry, IF
-   * (and only if) it wins the last-write-wins comparison against the
-   * current local pointer. This is what makes cross-device Active Schema
-   * sync actually happen — see schemaSyncMerge.ts for the full rationale.
+   * Applies the Active Schema pointer from a remote registry, IF (and only
+   * if) it wins the last-write-wins comparison against the current local
+   * pointer. See schemaSyncMerge.ts for the full rationale.
+   *
+   * V16.5: this is now called from BOTH the authenticated pull path AND
+   * the unauthenticated background discovery path (see
+   * `discoverPublicRegistry()` below) — previously it only ran on the
+   * authenticated path, which only executes once the user has manually
+   * unlocked Settings with the Admin Password THIS SESSION (that unlock
+   * state is not persisted across page reloads). Since most users never
+   * open Settings just to browse/query, this meant Active Schema sync
+   * effectively never fired for the common flow. It now runs on the same
+   * silent, public, unauthenticated GitHub read that already syncs schema
+   * CONTENT on every app load — no new credential or trust requirement is
+   * introduced; this simply brings the Active Schema pointer in line with
+   * how schema content has always synced.
    */
   private syncActiveSchemaPointer(remotePointer: ActiveSchemaPointer): boolean {
     const localPointer = schemaService.getActiveSchemaPointer();
@@ -157,6 +166,18 @@ class SyncService {
     if (applied) this.logEvent('pull', `Active Schema synchronized from the repository: "${schemaService.getSchemaById(remotePointer.activeSchemaId)?.name ?? remotePointer.activeSchemaId}".`);
     return applied;
   }
+  /**
+   * V16.5: this unauthenticated, read-only, no-login-required discovery
+   * check runs automatically on EVERY app load (see appShell.ts), and is
+   * therefore the path that actually needs to carry Active Schema sync for
+   * it to work reliably in practice — not just the authenticated pull path,
+   * which most users never trigger. It now applies the merge AND the
+   * Active Schema pointer, exactly like the authenticated pull does,
+   * using the same public GitHub read that already syncs schema content
+   * silently. It still never sets `this.lastError` on failure (this
+   * remains a silent, best-effort background check — explicit failures
+   * are reserved for user-initiated Sync Now/Push/Pull).
+   */
   async discoverPublicRegistry(reason: string): Promise<PullOutcome> {
     try {
       const repo = DEFAULT_BOOTSTRAP_CONFIG.githubRepo;
@@ -165,22 +186,24 @@ class SyncService {
       const file = await getFile(repo, branch, path, '');
       if (!file) return { ok: true, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       const parsedRaw = JSON.parse(file.content);
-      const { sanitizedSchemas, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
+      const { sanitizedSchemas, remotePointer, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
       if (!integrityValid) {
-        // Silent, automatic, PRE-AUTHENTICATION background check — never
-        // sets this.lastError (reserved for explicit user actions: Sync
-        // Now/Push/Pull) and, per the intended Authentication -> Discover
-        // -> ... -> Set Active Schema ordering, never touches the Active
-        // Schema pointer either (that only happens on the authenticated
-        // pull below, once Settings/Secret Vault has been unlocked).
         const detail = summarizeIssues(issues);
         return { ok: false, error: `Remote schema file failed validation.${detail ? ' ' + detail : ''}`, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       }
       beginInternalSync();
       let merge: ReturnType<typeof this.applyMerge>;
-      try { merge = this.applyMerge(sanitizedSchemas); } finally { endInternalSync(); }
-      if (merge.newSchemasAdded.length || merge.updatedSchemas.length) this.logEvent('discovery', `Public discovery (${reason}): ${merge.newSchemasAdded.length} new schema(s), ${merge.updatedSchemas.length} updated: ${[...merge.newSchemasAdded, ...merge.updatedSchemas].join(', ')}.`);
-      return { ok: true, ...merge };
+      let activeSchemaSynced = false;
+      try {
+        merge = this.applyMerge(sanitizedSchemas);
+        // V16.5 fix: apply the Active Schema pointer here too — after the
+        // schema-content merge (so the referenced schema is guaranteed to
+        // already exist locally by the time we try to activate it), same
+        // ordering as the authenticated pull path below.
+        activeSchemaSynced = this.syncActiveSchemaPointer(remotePointer);
+      } finally { endInternalSync(); }
+      if (merge.newSchemasAdded.length || merge.updatedSchemas.length || activeSchemaSynced) this.logEvent('discovery', `Public discovery (${reason}): ${merge.newSchemasAdded.length} new schema(s), ${merge.updatedSchemas.length} updated: ${[...merge.newSchemasAdded, ...merge.updatedSchemas].join(', ')}.${activeSchemaSynced ? ' Active Schema synchronized.' : ''}`);
+      return { ok: true, ...merge, activeSchemaSynced };
     } catch (e) {
       return { ok: false, error: (e as Error)?.message || 'Unknown error during public discovery.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
     }
@@ -200,13 +223,6 @@ class SyncService {
       const parsedRaw = JSON.parse(file.content);
       const { sanitizedSchemas, remotePointer, integrityValid, issues } = sanitizeThenValidateRegistry(parsedRaw);
       if (!integrityValid) { this.status = 'failed'; const detail = summarizeIssues(issues); const msg = 'Remote schema file failed validation.' + (detail ? ' ' + detail : ''); this.lastError = msg; this.notify(); this.logEvent('error', msg); return { ok: false, error: msg, newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 }; }
-      // This is the fully AUTHENTICATED path (Secret Vault already unlocked
-      // — see missingConfigMessage() above), matching the requested
-      // "Authentication -> ... -> Synchronize Local Store -> Retrieve
-      // Active Schema -> Set Active Schema" workflow exactly: merge schema
-      // content first, THEN apply the Active Schema pointer (so the
-      // referenced schema is guaranteed to already exist locally by the
-      // time we try to activate it).
       const merge = this.applyMerge(sanitizedSchemas);
       const activeSchemaSynced = this.syncActiveSchemaPointer(remotePointer);
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
@@ -226,30 +242,8 @@ class SyncService {
     }
   }
   /**
-   * V16.4 — THE fix for cross-device schema loss on push. Previously this
-   * method serialized ONLY the local registry and overwrote the remote
-   * file unconditionally — so if another device had pushed a schema this
-   * device never pulled, that schema would vanish from the central store
-   * the next time THIS device pushed. Now, before building the outgoing
-   * payload, it fetches the current remote file (using the same repo/
-   * branch/path/token already required for the push itself — no new
-   * configuration, no new permissions) and merges it in first:
-   *   - Schemas that exist remotely but not locally are pulled in locally
-   *     (schemaService.addSchemaFromRemote), so the very next serialization
-   *     of the local registry already contains them — nothing is lost.
-   *   - If a schema differs on both sides (genuine conflict, not just
-   *     "remote has something new"), the push is aborted for THIS schema's
-   *     sake: the existing conflict-resolution UI (Schema Management's
-   *     conflict banner) is populated instead of either side blindly
-   *     overwriting the other's changes, and the whole push is deferred
-   *     until the user resolves it (same "Use Local / Use Remote" flow
-   *     already used on pull, now also reachable from an attempted push).
-   *   - The Active Schema pointer is synchronized the same way pull does,
-   *     before the payload is built, so an Active Schema choice made on
-   *     another device is not overwritten by an older local choice either.
-   * Only once all of that is safely reconciled does the (now-merged) local
-   * registry get serialized and PUT to GitHub, using the sha just fetched
-   * (minimizing the chance of a stale-sha 409 on the actual write).
+   * Merge-before-push — prevents a schema that only exists on another
+   * device from being silently dropped when this device pushes.
    */
   async pushRegistryToGitHub(commitMessage?: string): Promise<PushOutcome> {
     const missing = this.missingConfigMessage();
@@ -282,15 +276,8 @@ class SyncService {
             this.syncActiveSchemaPointer(remotePointer);
             if (merge.newSchemasAdded.length) this.logEvent('push', `Merged ${merge.newSchemasAdded.length} schema(s) found only in the repository before pushing, so they are preserved: ${merge.newSchemasAdded.join(', ')}.`);
           }
-          // If integrityValid is false here, we deliberately don't abort the
-          // push over it — an already-broken remote file (e.g. a manual
-          // hand-edit gone wrong) should still be repairable by pushing a
-          // known-good local registry over it, same as before this fix.
         }
       } catch (mergeErr) {
-        // A network/auth failure while trying to pre-merge is surfaced as
-        // the push's own failure, rather than silently pushing blind and
-        // risking exactly the data-loss bug this fix exists to prevent.
         this.status = 'failed'; safeLocalStorageSet(STATUS_KEY, this.status);
         const msg = isGitHubApiError(mergeErr) ? mergeErr.message : (mergeErr as Error)?.message || 'Could not verify the current repository state before pushing.';
         this.lastError = msg; this.notify(); this.logEvent('error', msg);
