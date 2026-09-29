@@ -79,11 +79,18 @@ export function renderSchemaEditorSection(container: HTMLElement): void {
       modal2.element.querySelector('#c2Continue')?.addEventListener('click', () => { modal2.close(); showConfirm3(); });
     }
     function showConfirm3(): void {
-      const modal3 = openModal(`${icon('lock', 18)} Final Confirmation`, `<p>Enter the Admin Password to permanently delete this schema record.</p><label class="block-label">Admin Password<input id="c3Password" type="password"/></label><div id="c3Error" class="issue-box mini" hidden>Incorrect password.</div><div class="modal-actions"><button id="c3Cancel" class="btn btn-ghost">Cancel</button><button id="c3Delete" class="btn btn-danger">Delete Permanently</button></div>`, { closeOnBackdrop: false });
+      // V16.2 fix: #c3Error starts as an empty mount, not a permanently-present
+      // box toggled via the `hidden` attribute. It is only ever populated with
+      // markup after an actual incorrect-password attempt, and is emptied
+      // again if the user edits the field. See docs/CHANGELOG_V16.2.md.
+      const modal3 = openModal(`${icon('lock', 18)} Final Confirmation`, `<p>Enter the Admin Password to permanently delete this schema record.</p><label class="block-label">Admin Password<input id="c3Password" type="password"/></label><div id="c3Error"></div><div class="modal-actions"><button id="c3Cancel" class="btn btn-ghost">Cancel</button><button id="c3Delete" class="btn btn-danger">Delete Permanently</button></div>`, { closeOnBackdrop: false });
+      const pwInput = modal3.element.querySelector<HTMLInputElement>('#c3Password')!;
+      const errBox = modal3.element.querySelector<HTMLElement>('#c3Error')!;
+      pwInput.addEventListener('input', () => { errBox.innerHTML = ''; });
       modal3.element.querySelector('#c3Cancel')?.addEventListener('click', () => modal3.close());
       modal3.element.querySelector('#c3Delete')?.addEventListener('click', async () => {
-        const pwInput = modal3.element.querySelector<HTMLInputElement>('#c3Password')!; const errBox = modal3.element.querySelector<HTMLElement>('#c3Error')!;
-        const ok = await verifyPassword(pwInput.value); if (!ok) { errBox.removeAttribute('hidden'); return; }
+        const ok = await verifyPassword(pwInput.value);
+        if (!ok) { errBox.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} Incorrect password.</div>`; return; }
         const result = await schemaService.deleteRow(schemaId, row.rowId); modal3.close();
         if (result.ok) { store.pushToast('success', `Deleted ${row.tableName}.${row.columnName}.`); refreshTable(); } else store.pushToast('error', result.error || 'Delete failed.');
       });

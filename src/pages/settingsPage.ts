@@ -22,12 +22,40 @@ export function renderSettingsPage(container: HTMLElement): void {
     renderUnlockedSettings();
   }
   function renderLockScreen(): void {
-    container.innerHTML = `<div class="page-settings-lock"><div class="settings-lock-card" data-tour="settings-lock-screen"><div class="settings-lock-icon">${icon('lock', 32)}</div><h2>Settings</h2><p class="hint">Settings — including Schema Management, the Secret Vault, and cross-device synchronization — are protected.</p><label class="block-label">Enter Admin Password<input id="settingsPwInput" type="password"/></label><div id="settingsPwError" class="issue-box mini" hidden>Incorrect password.</div><div class="row-actions"><button id="settingsCancelBtn" class="btn btn-ghost" type="button">Cancel</button><button id="settingsUnlockBtn" class="btn btn-primary" type="button">${icon('unlock', 15)} Unlock</button></div></div></div>`;
+    /**
+     * V16.2 — THE FIX for "password error is still shown even when no
+     * password entered".
+     *
+     * Root cause history:
+     *   - V16.0/V16.1: #settingsPwError used the HTML `hidden` attribute,
+     *     but `.issue-box{display:flex}` had equal CSS specificity and won
+     *     the cascade tie, so the box rendered visible on first paint.
+     *   - V16.1.1 "fix": added `[hidden]{display:none!important}` to
+     *     main.css. This works in a standard, unmodified browser — but it
+     *     is still fundamentally a CSS-dependent fix, and depends on that
+     *     stylesheet rule actually being the one in effect wherever the
+     *     file is opened (e.g. it could be neutralized by any wrapping
+     *     viewer/frame that reinjects its own conflicting CSS, or by a
+     *     stale cached copy of the file that predates the fix).
+     *
+     * V16.2 removes the dependency on CSS entirely. #settingsPwError now
+     * starts as a completely EMPTY container — no markup, no `hidden`
+     * attribute, nothing for any stylesheet to ever have an opinion about.
+     * The error markup is only ever written into it (via innerHTML) at the
+     * exact moment `verifyPassword()` returns false for a real, submitted
+     * password attempt, and is erased again (innerHTML = '') the instant
+     * the user edits the field. An element that contains nothing cannot be
+     * visible, in any browser, under any stylesheet, in any embedding
+     * context — this is the same defensive pattern already used for the
+     * GitHub sync error indicator, the schema-name modal, and the delete
+     * confirmation dialog.
+     */
+    container.innerHTML = `<div class="page-settings-lock"><div class="settings-lock-card" data-tour="settings-lock-screen"><div class="settings-lock-icon">${icon('lock', 32)}</div><h2>Settings</h2><p class="hint">Settings — including Schema Management, the Secret Vault, and cross-device synchronization — are protected.</p><label class="block-label">Enter Admin Password<input id="settingsPwInput" type="password"/></label><div id="settingsPwError"></div><div class="row-actions"><button id="settingsCancelBtn" class="btn btn-ghost" type="button">Cancel</button><button id="settingsUnlockBtn" class="btn btn-primary" type="button">${icon('unlock', 15)} Unlock</button></div></div></div>`;
     const input = container.querySelector<HTMLInputElement>('#settingsPwInput')!;
     const errBox = container.querySelector<HTMLElement>('#settingsPwError')!;
     async function tryUnlock(): Promise<void> {
       const candidate = input.value; const ok = await verifyPassword(candidate);
-      if (!ok) { errBox.removeAttribute('hidden'); return; }
+      if (!ok) { errBox.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} Incorrect password.</div>`; return; }
       // Bootstrap the Secret Vault BEFORE calling store.unlockSettings() —
       // unlockSettings() triggers a synchronous re-mount of this page, which
       // reads secretVaultService.isUnlocked() to decide what to render.
@@ -41,7 +69,7 @@ export function renderSettingsPage(container: HTMLElement): void {
     }
     container.querySelector('#settingsUnlockBtn')?.addEventListener('click', tryUnlock);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
-    input.addEventListener('input', () => errBox.setAttribute('hidden', ''));
+    input.addEventListener('input', () => { errBox.innerHTML = ''; });
     container.querySelector('#settingsCancelBtn')?.addEventListener('click', () => { window.location.hash = 'quickstart'; });
   }
   function renderUnlockedSettings(): void {

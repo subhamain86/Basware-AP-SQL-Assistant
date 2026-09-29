@@ -22,14 +22,6 @@ class SyncService {
   private config: SyncConfig = loadConfig();
   private status: SyncStatus = (localStorage.getItem(STATUS_KEY) as SyncStatus) || 'never';
   private lastSyncedAt: string | null = null;
-  /**
-   * V16.1: tracks the message of the most recent EXPLICIT, user-initiated
-   * sync failure (Sync Now / Push / Pull / discovery-on-load), and is
-   * cleared the instant any subsequent sync attempt of the same kind
-   * succeeds. This backs the "no error box when there is no error" /
-   * "clear stale errors after a successful operation" fix — see
-   * getLastError()/clearLastError() and every call site below.
-   */
   private lastError: string | null = null;
   private directoryHandle: FileSystemDirectoryHandle | null = null;
   private listeners = new Set<() => void>();
@@ -108,13 +100,6 @@ class SyncService {
       const parsedRaw = JSON.parse(file.content);
       const integrity = validateIncomingRegistryFile(parsedRaw);
       if (!integrity.valid) {
-        // V16.1: this is a SILENT, automatic background check (runs on every
-        // page mount) — per the "no false error state" fix, a background
-        // check must never surface a blocking error box the user didn't ask
-        // for. We still return ok:false so callers can choose not to treat
-        // the shared registry as usable, but we deliberately do NOT set
-        // this.lastError here (that is reserved for explicit user actions:
-        // Sync Now / Push / Pull / Import — see those methods below).
         return { ok: false, error: 'Remote schema file failed validation.', newSchemasAdded: [], updatedSchemas: [], conflicts: [], unchanged: 0 };
       }
       const parsed = parsedRaw as Record<string, unknown>;
@@ -174,7 +159,7 @@ class SyncService {
         conflicts.push(this.addPendingConflict(remoteSchema.id, remoteSchema.name, conflict.localVersion, conflict.remoteVersion, conflict.changedPaths, remoteSchema));
       }
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
-      this.lastError = null; // V16.1: explicitly clear any previous failure the moment this action succeeds.
+      this.lastError = null;
       safeLocalStorageSet(STATUS_KEY, this.status);
       this.logEvent('pull', `Discovery complete: ${newSchemasAdded.length} new, ${updatedSchemas.length} updated, ${unchanged} up to date, ${conflicts.length} conflict(s).`);
       this.notify();
@@ -207,7 +192,7 @@ class SyncService {
       this.setLastKnownSha(result.sha);
       schemaService.markAllSynced();
       this.status = 'synchronized'; this.lastSyncedAt = new Date().toISOString();
-      this.lastError = null; // V16.1: clear any previous failure on success.
+      this.lastError = null;
       safeLocalStorageSet(STATUS_KEY, this.status);
       this.logEvent('push', `Schema registry saved to the repository (${registry.schemas.length} schema(s)).`);
       this.notify();

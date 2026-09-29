@@ -12,20 +12,9 @@ import { safeTrim } from '../utils/validation';
 import type { SchemaModel } from '../types';
 
 /**
- * V16.1 fix — "error box visible when there is no error" / "clear stale
- * errors after a successful operation".
- *
- * This renders the ONE persistent GitHub-sync error indicator in the app,
- * driven entirely by `syncService.getLastError()`:
- *   - Returns null right now?  -> render nothing at all (no empty red card,
- *     no placeholder box, no leftover markup from a previous failure).
- *   - Returns a message?       -> render exactly that message, once.
- * `syncService` clears this state itself the instant any explicit sync
- * action (Sync Now / Push / Pull) succeeds (see syncService.ts), and never
- * sets it for silent background/auto-discovery checks the user didn't
- * initiate — so a stale "Remote schema file failed validation" from a past
- * failed attempt can never linger after a later successful one, and a
- * background check can never surface a box the user didn't ask for.
+ * Conditionally rendered GitHub-sync error indicator, driven by
+ * syncService.getLastError(). Renders nothing at all when null — no empty
+ * box, no placeholder — and clears itself the moment a later sync succeeds.
  */
 function renderSyncErrorIndicator(container: HTMLElement): void {
   function draw(): void {
@@ -56,32 +45,12 @@ export function renderSchemaManagementSection(container: HTMLElement, opts: { al
     container.querySelector<HTMLInputElement>('#importSchemaFile')?.addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]; const preview = container.querySelector<HTMLElement>('#importSchemaPreview'); if (!file || !preview) return;
       const originalFileName = safeTrim(file.name);
-      // V16.1: clear any stale preview content from a previous import
-      // attempt BEFORE processing this one, so a leftover success/error
-      // message from a prior file can never be confused with this file's
-      // outcome (see also the "clear stale errors" fix in this file's header).
       preview.innerHTML = '';
       try {
         const text = await file.text(); const parsed = JSON.parse(text) as SchemaModel;
         const suggested = safeTrim(parsed?.name) || originalFileName.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9 _\-.]/g, '_');
         openSchemaNameModal({ title: 'Name the Imported Schema', suggestedName: suggested, originalFileName, onConfirm: (name) => {
-          // V16.1: importSchema() now validates the schema (via the same
-          // validateSchemaIntegrity() used for remote/pulled files) BEFORE
-          // saving or triggering auto-sync — see schemaService.ts. A schema
-          // that is accepted here is guaranteed to also pass GitHub's
-          // remote validation later, eliminating the "Remote schema file
-          // failed validation" surprise reported in V16.0.
           const result = schemaService.importSchema(parsed, name, originalFileName);
-          // V16.1 fix: a successful import calls schemaService.persist(),
-          // which synchronously notifies every subscriber — including this
-          // very section's own `draw()` (via schemaService.subscribe(draw)
-          // at the bottom of this file), which rebuilds the WHOLE section's
-          // innerHTML and therefore detaches the `preview` element captured
-          // above from the document. Writing to that stale reference was a
-          // no-op the user could never see. Re-querying the (now freshly
-          // rendered) preview element from `container` after the import
-          // guarantees the message lands on the node that is actually in
-          // the document.
           const freshPreview = container.querySelector<HTMLElement>('#importSchemaPreview') || preview;
           if (result.ok) { freshPreview.innerHTML = `<div class="issue-box ok mini">${icon('check', 14)} ${result.replacedExisting ? `Updated existing schema "${name}" in place` : `Imported as "${name}"`} — it will sync automatically once the Secret Vault is unlocked.</div>`; store.pushToast('success', 'Schema imported.'); }
           else freshPreview.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`;
@@ -95,9 +64,6 @@ export function renderSchemaManagementSection(container: HTMLElement, opts: { al
       const resultMount = container.querySelector<HTMLElement>('#simpleSyncResult'); if (!resultMount) return;
       if (!result.ok) { resultMount.innerHTML = `<div class="issue-box mini">${icon('alert-triangle', 14)} ${result.error}</div>`; return; }
       const parts: string[] = []; if (result.newSchemasAdded.length) parts.push(`Added ${result.newSchemasAdded.length} new schema(s): ${result.newSchemasAdded.join(', ')}.`); if (result.updatedSchemas.length) parts.push(`Updated ${result.updatedSchemas.length} schema(s): ${result.updatedSchemas.join(', ')}.`); if (result.unchanged) parts.push(`${result.unchanged} schema(s) already up to date.`); if (result.conflicts.length) parts.push(`${result.conflicts.length} schema(s) have conflicting changes — resolve them above.`);
-      // V16.1: on success, this box always shows the CURRENT result only —
-      // any earlier error text is fully overwritten here, never merged
-      // with or left alongside the new success message.
       resultMount.innerHTML = `<div class="issue-box ok mini">${icon('check', 14)} ${parts.length ? parts.join(' ') : 'Everything is already in sync.'}</div>`;
       store.pushToast('success', 'Synchronized with GitHub.'); onAfterAction?.();
     });

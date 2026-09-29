@@ -23,11 +23,6 @@ export function renderReadOnlyBuilderPage(container: HTMLElement): void {
   function draw(): void {
     const state = store.readOnly; const schema = schemaService.getActiveSchema(); const validation = validateFullReadOnly(state);
     const errorIssues = validation.issues.filter((i) => i.severity === 'error'); const warnIssues = validation.issues.filter((i) => i.severity === 'warning');
-    // V16.1: both cards below share the identical .builder-panel class with NO
-    // width-restricting modifier (the previous "narrow" modifier that capped
-    // this card at 480px inside an equal 1fr/1fr grid — causing it to look
-    // visibly smaller/uneven next to the Generated SQL card — has been
-    // removed; see docs/CHANGELOG_V16.1.md and main.css for details).
     container.innerHTML = `<div class="page"><h1 class="page-title">${icon('table')} Read Only Query Builder</h1><p class="page-subtitle">Generates validated SELECT / WITH statements only. Natural Language and Manual Selectors merge together — use either one, or both.</p>
       <div class="builder-grid-top">
         <div class="builder-panel" data-tour="describe-card"><h2>${icon('sparkles', 16)} Describe What You Need (optional)</h2><textarea id="nlDesc" rows="4" placeholder="e.g. Show invoices with their organization">${state.naturalLanguageText}</textarea><label class="inline-label">SQL dialect<select id="dialectSelect">${dialectOptions(state.dialect)}</select></label><div class="row-actions"><button id="nlBuildBtn" class="btn btn-primary" type="button">${icon('zap', 15)} ${isBuilding ? 'Processing…' : 'Build from Description'}</button></div><div id="nlNotes"></div></div>

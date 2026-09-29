@@ -1,8 +1,8 @@
 /**
- * nlpOrchestrator.ts — Describe What You Need orchestration.
- * Priority: M365 Copilot Enterprise (if enabled+configured) -> generic
- * Online AI/NLP Endpoint (if configured) -> offline engine only. Both online
- * tiers' suggested tables/columns are passed through filterToKnownTables /
+ * nlpOrchestrator.ts — Describe What You Need orchestration. Priority: M365
+ * Copilot Enterprise (if enabled+configured) -> generic Online AI/NLP
+ * Endpoint (if configured) -> offline engine only. Both online tiers'
+ * suggested tables/columns are passed through filterToKnownTables /
  * filterToKnownColumns before ever reaching SQL generation.
  */
 import type { SchemaModel, QueryRequirement, CrRequirement, NlpOrchestrationResult } from '../types';

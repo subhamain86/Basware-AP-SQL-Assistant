@@ -76,27 +76,6 @@ export class SchemaService {
     const result = validateSchemaName(name, this.getAllSchemaNames(excludeId));
     return result.valid ? null : (result.message || 'Invalid schema name.');
   }
-  /**
-   * V16.1 fix — implements the required workflow exactly:
-   *   Import Schema -> Validate Schema -> Save Schema -> Synchronize with GitHub
-   * V16.0 skipped the "Validate Schema" step entirely: it only checked that
-   * `tables` was an array, then saved and (via the schemaService subscription
-   * in autoSyncService) auto-pushed to GitHub. Any structurally invalid data
-   * would sail through import and push, only to be rejected LATER — on the
-   * very next pull/discovery (this device's reload, or another device) — by
-   * the stricter remote-file validator, producing the reported error
-   * "Remote schema file failed validation" long after the user thought the
-   * import had already succeeded.
-   *
-   * The fix calls `validateSchemaIntegrity()` — the SAME function used to
-   * validate a pulled/remote registry file — right here, before persisting or
-   * syncing anything. This guarantees a schema that passes import validation
-   * will also pass remote validation later, because it is literally the same
-   * check. No imported data (table names, column names, descriptions, data
-   * types, relationships, aliases, CASE/DECODE metadata) is stripped,
-   * normalized, or altered by this — sanitizeIncomingSchema() only fills in
-   * genuinely missing optional fields, unchanged from V16.0.
-   */
   importSchema(schema: SchemaModel, customName: string, originalFileName?: string): { ok: boolean; error?: string; schemaId?: string; replacedExisting?: boolean } {
     if (!schema || !Array.isArray(schema.tables)) return { ok: false, error: 'Invalid schema file: missing "tables" array.' };
     const sanitized = sanitizeIncomingSchema(schema) as SchemaModel;

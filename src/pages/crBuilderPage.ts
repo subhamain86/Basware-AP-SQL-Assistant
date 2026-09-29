@@ -13,9 +13,6 @@ export function renderCrBuilderPage(container: HTMLElement): void {
   let activeTabId = 'details'; let isBuilding = false;
   function draw(): void {
     const state = store.cr; const schema = schemaService.getActiveSchema(); const issues = validateCrState(state);
-    // V16.1: same card-sizing fix as the Read Only Query Builder — both
-    // cards below share the plain .builder-panel class (no width-capping
-    // modifier), so they render at equal, symmetric widths again.
     container.innerHTML = `<div class="page"><h1 class="page-title">${icon('code')} Query Builder for CR (Change Request)</h1><p class="page-subtitle">Generated SQL only — this application does not execute database changes. Use Natural Language and Manual Selectors independently, or combine both.</p>
       <div class="builder-grid-top">
         <div class="builder-panel"><h2>${icon('sparkles', 16)} Describe the Change (optional)</h2><textarea id="crNlDesc" rows="3">${state.naturalLanguageText}</textarea><label class="inline-label">SQL dialect<select id="crDialectSelect">${dialectOptions(state.dialect)}</select></label><div class="row-actions"><button id="crNlBuildBtn" class="btn btn-primary" type="button">${icon('zap', 15)} ${isBuilding ? 'Processing…' : 'Interpret Description'}</button></div><div id="crNlNotes"></div></div>
