@@ -6,7 +6,7 @@
       "version": "1.0",
       "status": "active",
       "updatedAt": "2026-09-29T08:07:32.490Z",
-      "lastSyncedAt": "2026-09-29T08:07:58.836Z",
+      "lastSyncedAt": "2026-09-29T08:38:55.266Z",
       "tables": [
         {
           "name": "PO_HEADER",
@@ -731,7 +731,7 @@
       "version": "1.0",
       "status": "inactive",
       "updatedAt": "2026-09-29T08:07:32.490Z",
-      "lastSyncedAt": "2026-09-29T08:07:58.836Z",
+      "lastSyncedAt": "2026-09-29T08:38:55.266Z",
       "tables": [
         {
           "name": "PO_HEADER",
