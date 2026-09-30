@@ -5,8 +5,8 @@
       "name": "AP / P2P Core",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": "2026-09-29T09:40:33.709Z",
+      "updatedAt": "2026-09-30T13:27:52.287Z",
+      "lastSyncedAt": null,
       "tables": [
         {
           "name": "PO_HEADER",
@@ -730,8 +730,8 @@
       "name": "AP / P2P Extended (with Contracts)",
       "version": "1.0",
       "status": "inactive",
-      "updatedAt": "2026-09-28T19:16:08.324Z",
-      "lastSyncedAt": "2026-09-29T09:40:33.709Z",
+      "updatedAt": "2026-09-30T13:27:52.287Z",
+      "lastSyncedAt": null,
       "tables": [
         {
           "name": "PO_HEADER",
@@ -22372,6 +22372,6 @@
     }
   ],
   "activeSchemaId": "schema_mulms6ye_5",
-  "activeSchemaUpdatedAt": "2026-09-29T10:57:27.798Z",
-  "activeSchemaUpdatedByDevice": "device-vhynma"
+  "activeSchemaUpdatedAt": "2026-09-30T13:28:02.507Z",
+  "activeSchemaUpdatedByDevice": "device-kqq2oo"
 }
